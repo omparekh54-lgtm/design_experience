@@ -10,3 +10,5 @@ pandas==2.3.3
 numpy==2.3.4
 polars==1.34.0
 pytest==8.4.2
+smartapi-python==1.5.5
+pyotp==2.9.0
