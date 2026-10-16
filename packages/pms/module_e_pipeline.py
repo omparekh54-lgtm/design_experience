@@ -66,7 +66,7 @@ class ModuleEPipeline:
 
     def _strategy_feedback(self) -> tuple[float | None, int]:
         with self.engine.connect() as conn:
-            rows = conn.execute(text("select realized_pnl from trades where status='CLOSED' order by closed_at desc nulls last limit 15")).scalars().all()
+            rows = conn.execute(text("select realized_pnl from trades where state='CLOSED' order by updated_at desc limit 15")).scalars().all()
         if len(rows) < 10:
             return None, len(rows)
         return sum(float(x or 0) for x in rows) / max(len(rows), 1) / 1000.0, len(rows)
