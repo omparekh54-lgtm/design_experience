@@ -125,6 +125,11 @@ class PostgresStorage:
                             instrument_id, period_end, filing_timestamp, source,
                             consolidated, revision_number
                         ) values (:instrument_id, :period_end, :filing_timestamp, :source, :consolidated, :revision_number)
+                        on conflict (
+                            instrument_id, period_end, filing_timestamp, source, revision_number
+                        ) do update set
+                            consolidated=excluded.consolidated,
+                            ingested_at=now()
                         returning id
                         """
                     ),
@@ -153,7 +158,14 @@ class PostgresStorage:
                 for fact_name, value in facts.items():
                     if value is not None:
                         conn.execute(
-                            text("insert into financial_facts (filing_id, fact_name, value) values (:filing_id, :fact_name, :value)"),
+                            text(
+                                """
+                                insert into financial_facts (filing_id, fact_name, value)
+                                values (:filing_id, :fact_name, :value)
+                                on conflict (filing_id, fact_name)
+                                do update set value=excluded.value
+                                """
+                            ),
                             {"filing_id": filing_id, "fact_name": fact_name, "value": value},
                         )
         return len(rows)
