@@ -2,18 +2,23 @@ from __future__ import annotations
 
 from datetime import date
 
+from sqlalchemy import text
+
 from packages.data_layer.features import compute_features
 from packages.pms.backtest import EventDrivenBacktester, MarketBar, Signal
 from packages.pms.module_b_pipeline import ModuleBPipeline
+from packages.pms.research import ResearchVariant
 
 
 class DatabaseBacktestStrategy:
-    """Adapter that reuses the production Module A/B data pipelines in backtests."""
+    """Adapter that reuses production Module A/B/C/E and trade logic in backtests."""
 
-    def __init__(self, engine, symbols: list[str]):
+    def __init__(self, engine, symbols: list[str], variant: ResearchVariant | None = None, cfg: dict | None = None):
         self.engine = engine
         self.symbols = symbols
         self.module_b = ModuleBPipeline(engine)
+        self.variant = variant or ResearchVariant("DEFAULT")
+        self.cfg = cfg
         self._bars: list[MarketBar] = []
 
     def build_bars(self, start: date, end: date) -> list[MarketBar]:
@@ -27,35 +32,59 @@ class DatabaseBacktestStrategy:
                 d = frame.index[i].date()
                 if d < start or d > end:
                     continue
-                row = frame.iloc[i]
-                prev = frame.iloc[i - 1]
-                bars.append(MarketBar(
-                    instrument_id=instrument_id,
-                    trade_date=d,
-                    open=float(row["open"]), high=float(row["high"]), low=float(row["low"]), close=float(row["close"]),
-                    ema9=float(row["ema9"]), previous_ema9=float(prev["ema9"]), previous_ema21=float(prev["ema21"]),
-                ))
+                row = frame.iloc[i]; prev = frame.iloc[i - 1]
+                bars.append(MarketBar(instrument_id, d, float(row["open"]), float(row["high"]), float(row["low"]), float(row["close"]), float(row["ema9"]), float(prev["ema9"]), float(prev["ema21"])))
         self._bars = sorted(bars, key=lambda x: (x.trade_date, x.instrument_id))
         return self._bars
+
+    def _module_c_selected(self, instrument_id: str, d: date) -> bool:
+        if not self.variant.use_module_c:
+            return True
+        exchange, symbol = instrument_id.split(":", 1)
+        trading_symbol = f"{symbol}-EQ" if exchange == "NSE" else symbol
+        with self.engine.connect() as conn:
+            value = conn.execute(text("""
+                select r.selected from module_c_rankings r
+                join instruments i on i.id=r.instrument_id
+                where r.trade_date=:d and i.exchange=:e and i.trading_symbol=:s
+                order by r.id desc limit 1
+            """), {"d": d, "e": exchange, "s": trading_symbol}).scalar_one_or_none()
+        return bool(value)
 
     def signals_for_close(self, d: date) -> list[Signal]:
         signals: list[Signal] = []
         for instrument_id in self.symbols:
-            result = self.module_b.evaluate(instrument_id, d)
-            if not result.eligible_universe or not result.signal:
+            result = self.module_b.evaluate(instrument_id, d, require_module_a=self.variant.use_module_a)
+            if not result.eligible_universe or not result.signal or not self._module_c_selected(instrument_id, d):
                 continue
             signal_date = date.fromisoformat(str(result.signal["signal_date"]))
-            if signal_date != d:
-                continue
-            signals.append(Signal(
-                instrument_id=instrument_id,
-                signal_date=d,
-                signal_high=float(result.signal["signal_high"]),
-                signal_low=float(result.signal["signal_low"]),
-            ))
+            if signal_date == d:
+                signals.append(Signal(instrument_id, d, float(result.signal["signal_high"]), float(result.signal["signal_low"])))
         return signals
+
+    def capacity_for_date(self, d: date) -> int:
+        if not self.variant.use_module_e:
+            return 7
+        with self.engine.connect() as conn:
+            value = conn.execute(text("select max_open_trades from market_regime_history where trade_date=:d"), {"d": d}).scalar_one_or_none()
+        return int(value) if value is not None else 0
+
+    def eligibility_for_reentry(self, instrument_id: str, d: date) -> bool:
+        if not self.variant.use_module_a:
+            return True
+        try:
+            _, decision = self.module_b.module_a.evaluate(instrument_id, __import__('datetime').datetime.combine(d, __import__('datetime').datetime.max.time()).replace(microsecond=0))
+            return bool(decision.eligible)
+        except Exception:
+            return False
 
     def run(self, start: date, end: date, initial_capital: float | None = None):
         bars = self.build_bars(start, end)
-        engine = EventDrivenBacktester(initial_capital=initial_capital)
-        return engine.run(bars, self.signals_for_close)
+        engine = EventDrivenBacktester(initial_capital=initial_capital, cfg=self.cfg)
+        return engine.run(
+            bars,
+            self.signals_for_close,
+            eligibility_provider=self.eligibility_for_reentry,
+            capacity_provider=self.capacity_for_date,
+            allow_reentry=self.variant.reentry,
+        )
