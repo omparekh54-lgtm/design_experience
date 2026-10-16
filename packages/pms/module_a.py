@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Iterable
 
 
 @dataclass(frozen=True)
@@ -12,15 +11,23 @@ class FundamentalSnapshot:
     promoter_pledge_pct: float
     quarterly_sales_cr: float
     pat_cr: float
-    sales_yoy_pct: float
-    operating_profit_yoy_pct: float
-    pat_yoy_pct: float
-    eps_yoy_pct: float
+    sales_yoy_pct: float | None
+    operating_profit_yoy_pct: float | None
+    pat_yoy_pct: float | None
+    eps_yoy_pct: float | None
     positive_growth_quarters_last_4: int
     ttm_sales_rising: bool
     ttm_profit_rising: bool
-    ocf_to_pat: float
+    ocf_to_pat: float | None
     quality_pass: bool = True
+    growth_acceleration_pp: float | None = None
+    margin_expansion_bps: float | None = None
+    debt_to_equity: float | None = None
+    interest_coverage: float | None = None
+    record_sales_8q: bool = False
+    record_pat_8q: bool = False
+    turnaround: bool = False
+    triggers: tuple[str, ...] = field(default_factory=tuple)
     flags: tuple[str, ...] = field(default_factory=tuple)
 
 
@@ -30,13 +37,40 @@ class FundamentalDecision:
     score: float
     failed_rules: tuple[str, ...]
     flags: tuple[str, ...]
+    triggers: tuple[str, ...] = field(default_factory=tuple)
+    components: dict[str, float] = field(default_factory=dict)
 
 
 def _clamp(value: float, lo: float = 0.0, hi: float = 100.0) -> float:
     return max(lo, min(hi, value))
 
 
+def _passes_min(value: float | None, threshold: float) -> bool:
+    return value is not None and value >= threshold
+
+
+def _growth_component(snapshot: FundamentalSnapshot, f: dict) -> float:
+    pairs = (
+        (snapshot.sales_yoy_pct, f["min_sales_yoy_pct"]),
+        (snapshot.operating_profit_yoy_pct, f["min_operating_profit_yoy_pct"]),
+        (snapshot.pat_yoy_pct, f["min_pat_yoy_pct"]),
+        (snapshot.eps_yoy_pct, f["min_eps_yoy_pct"]),
+    )
+    scores: list[float] = []
+    for value, threshold in pairs:
+        if value is None:
+            scores.append(0.0)
+        else:
+            scores.append(min(max(value, 0.0) / max(float(threshold), 1.0), 1.5) / 1.5)
+    return (sum(scores) / len(scores)) * 25.0
+
+
 def evaluate_fundamentals(snapshot: FundamentalSnapshot, cfg: dict) -> FundamentalDecision:
+    """Evaluate Module A.
+
+    Eligibility follows Stages 1, 2 and 4. Stage 3 earnings-breakout triggers
+    contribute to score/confidence but do not independently make a stock eligible.
+    """
     f = cfg["fundamental"]
     failed: list[str] = []
 
@@ -53,11 +87,17 @@ def evaluate_fundamentals(snapshot: FundamentalSnapshot, cfg: dict) -> Fundament
             failed.append(name)
 
     growth_checks = (
-        (snapshot.sales_yoy_pct >= f["min_sales_yoy_pct"], "sales_yoy"),
-        (snapshot.operating_profit_yoy_pct >= f["min_operating_profit_yoy_pct"], "operating_profit_yoy"),
-        (snapshot.pat_yoy_pct >= f["min_pat_yoy_pct"], "pat_yoy"),
-        (snapshot.eps_yoy_pct >= f["min_eps_yoy_pct"], "eps_yoy"),
-        (snapshot.positive_growth_quarters_last_4 >= f["min_positive_quarters_last_4"], "growth_consistency"),
+        (_passes_min(snapshot.sales_yoy_pct, f["min_sales_yoy_pct"]), "sales_yoy"),
+        (
+            _passes_min(snapshot.operating_profit_yoy_pct, f["min_operating_profit_yoy_pct"]),
+            "operating_profit_yoy",
+        ),
+        (_passes_min(snapshot.pat_yoy_pct, f["min_pat_yoy_pct"]), "pat_yoy"),
+        (_passes_min(snapshot.eps_yoy_pct, f["min_eps_yoy_pct"]), "eps_yoy"),
+        (
+            snapshot.positive_growth_quarters_last_4 >= f["min_positive_quarters_last_4"],
+            "growth_consistency",
+        ),
         (snapshot.ttm_sales_rising, "ttm_sales"),
         (snapshot.ttm_profit_rising, "ttm_profit"),
     )
@@ -65,25 +105,59 @@ def evaluate_fundamentals(snapshot: FundamentalSnapshot, cfg: dict) -> Fundament
         if not passed:
             failed.append(name)
 
-    if snapshot.ocf_to_pat < f["min_ocf_to_pat"]:
+    if snapshot.ocf_to_pat is None:
+        failed.append("ocf_to_pat_missing")
+    elif snapshot.ocf_to_pat < f["min_ocf_to_pat"]:
         failed.append("ocf_to_pat")
     if not snapshot.quality_pass:
         failed.append("quality_guards")
 
-    growth_level = (
-        min(snapshot.sales_yoy_pct / max(f["min_sales_yoy_pct"], 1), 2)
-        + min(snapshot.operating_profit_yoy_pct / max(f["min_operating_profit_yoy_pct"], 1), 2)
-        + min(snapshot.pat_yoy_pct / max(f["min_pat_yoy_pct"], 1), 2)
-        + min(snapshot.eps_yoy_pct / max(f["min_eps_yoy_pct"], 1), 2)
-    ) / 8 * 40
-    consistency = min(snapshot.positive_growth_quarters_last_4 / 4, 1) * 20
-    cash_quality = min(snapshot.ocf_to_pat / max(f["min_ocf_to_pat"], 0.01), 1.5) / 1.5 * 20
-    base_quality = 20 if snapshot.quality_pass else 0
-    score = round(_clamp(growth_level + consistency + cash_quality + base_quality), 2)
+    # Scoring follows the rule document's 30/25/15/15/15 structure.
+    acceleration = 0.0
+    if snapshot.growth_acceleration_pp is not None:
+        acceleration = min(max(snapshot.growth_acceleration_pp, 0.0) / 10.0, 1.0) * 30.0
+    if snapshot.record_sales_8q or snapshot.record_pat_8q:
+        acceleration = max(acceleration, 22.5)
+    if snapshot.turnaround:
+        acceleration = max(acceleration, 15.0)  # explicitly lower-confidence trigger
+
+    growth = _growth_component(snapshot, f)
+
+    margin = 0.0
+    if snapshot.margin_expansion_bps is not None:
+        margin = min(max(snapshot.margin_expansion_bps, 0.0) / 200.0, 1.0) * 15.0
+
+    quality = 0.0
+    if snapshot.quality_pass and snapshot.ocf_to_pat is not None:
+        quality = min(max(snapshot.ocf_to_pat, 0.0) / max(float(f["min_ocf_to_pat"]), 0.01), 1.0) * 15.0
+
+    consistency = min(max(snapshot.positive_growth_quarters_last_4, 0) / 4.0, 1.0) * 15.0
+    components = {
+        "acceleration": round(acceleration, 2),
+        "growth": round(growth, 2),
+        "margin": round(margin, 2),
+        "quality": round(quality, 2),
+        "consistency": round(consistency, 2),
+    }
+    score = round(_clamp(sum(components.values())), 2)
+
+    triggers = list(snapshot.triggers)
+    if snapshot.growth_acceleration_pp is not None and snapshot.growth_acceleration_pp >= 10:
+        triggers.append("growth_acceleration_10pp")
+    if snapshot.margin_expansion_bps is not None and snapshot.margin_expansion_bps >= 200:
+        triggers.append("margin_expansion_200bps")
+    if snapshot.record_sales_8q:
+        triggers.append("record_sales_8q")
+    if snapshot.record_pat_8q:
+        triggers.append("record_pat_8q")
+    if snapshot.turnaround:
+        triggers.append("turnaround")
 
     return FundamentalDecision(
         eligible=not failed,
         score=score,
-        failed_rules=tuple(failed),
-        flags=tuple(snapshot.flags),
+        failed_rules=tuple(dict.fromkeys(failed)),
+        flags=tuple(dict.fromkeys(snapshot.flags)),
+        triggers=tuple(dict.fromkeys(triggers)),
+        components=components,
     )
