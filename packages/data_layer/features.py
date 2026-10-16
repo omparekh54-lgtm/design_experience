@@ -62,6 +62,7 @@ def compute_features(candles: list[Candle]) -> FeatureFrame:
     df["turnover"] = df["close"] * df["volume"]
     df["avg_turnover20"] = df["turnover"].rolling(20, min_periods=20).mean()
     df["high_52w"] = df["high"].rolling(252, min_periods=1).max()
+    df["low_52w"] = df["low"].rolling(252, min_periods=1).min()
     df["distance_from_52w_high_pct"] = 100.0 * (df["close"] / df["high_52w"] - 1.0)
 
     df["ema21_slope_5d"] = df["ema21"].pct_change(5) * 100.0
