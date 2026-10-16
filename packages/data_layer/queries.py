@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from datetime import date, datetime
-from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import Engine, text
@@ -43,10 +42,11 @@ class PointInTimeQueries:
         as_of: datetime,
         prefer_consolidated: bool = True,
     ) -> dict[str, Any] | None:
-        """Return only a filing that was disseminated by `as_of`.
+        """Return the newest report period that was knowable by `as_of`.
 
-        If both consolidated and standalone are available at the same latest
-        point, consolidated is preferred for the PMS v1 rule set.
+        For the same report period the PMS prefers consolidated over standalone,
+        then the latest disseminated revision. NSE is preferred over BSE only when
+        otherwise equivalent; both exchange observations remain stored for audit.
         """
         with self.engine.connect() as conn:
             db_id = self._db_instrument_id(conn, instrument_id)
@@ -54,13 +54,18 @@ class PointInTimeQueries:
                 text(
                     """
                     select id, period_end, filing_timestamp, source,
-                           consolidated, revision_number
+                           consolidated, revision_number, submission_type,
+                           audit_status, revised_at, revision_remarks,
+                           exchange_received_at, exchange_disseminated_at,
+                           filing_kind, external_id, details_uri, xbrl_uri
                     from financial_filings
                     where instrument_id=:instrument_id
                       and filing_timestamp <= :as_of
-                    order by filing_timestamp desc,
+                    order by period_end desc,
                              case when consolidated=:prefer_consolidated then 0 else 1 end,
-                             revision_number desc
+                             filing_timestamp desc,
+                             revision_number desc,
+                             case when source='NSE' then 0 when source='BSE' then 1 else 2 end
                     limit 1
                     """
                 ),
@@ -84,6 +89,16 @@ class PointInTimeQueries:
                 "source": filing["source"],
                 "consolidated": filing["consolidated"],
                 "revision_number": filing["revision_number"],
+                "submission_type": filing["submission_type"],
+                "audit_status": filing["audit_status"],
+                "revised_at": filing["revised_at"],
+                "revision_remarks": filing["revision_remarks"],
+                "exchange_received_at": filing["exchange_received_at"],
+                "exchange_disseminated_at": filing["exchange_disseminated_at"],
+                "filing_kind": filing["filing_kind"],
+                "external_id": filing["external_id"],
+                "details_uri": filing["details_uri"],
+                "xbrl_uri": filing["xbrl_uri"],
                 "facts": {row["fact_name"]: row["value"] for row in facts},
                 "units": {row["fact_name"]: row["unit"] for row in facts if row["unit"]},
             }
