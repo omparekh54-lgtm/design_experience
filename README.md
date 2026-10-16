@@ -4,18 +4,18 @@ Production-oriented Indian equities PMS research, backtesting, paper-trading and
 
 ## Current scope
 
-This repository implements the v1 rules defined in `PMS_Rules_v1`: Module A (fundamental eligibility), Module B (rally-pullback technical setup), Module C (readiness ranking), Module E (market regime), and the shared risk/trade engine. Module D (IPO) remains intentionally parked until its rules are defined.
+This repository implements the v1 rules defined in `PMS_Rules_v1`: Module A (fundamental eligibility), Module B (rally-pullback technical setup), Module C (readiness ranking), Module E (market regime), the shared risk/trade engine, research validation, and a production FastAPI read/research surface. Module D (IPO) remains intentionally parked until its rules are defined.
 
 ## Architecture
 
 - `apps/api` — FastAPI service
-- `packages/pms` — deterministic strategy, risk, trade-state, transaction-cost, regime, ranking, research and backtest logic
+- `packages/pms` — deterministic strategy, risk, trade-state, transaction-cost, regime, ranking, research, validation and backtest logic
 - `packages/data_layer` — normalized instruments, OHLCV, official filings, XBRL, reference data, corporate actions and point-in-time queries
 - `packages/finstack_gateway` — strategy-facing boundary for point-in-time data access
 - `migrations` — PostgreSQL / Supabase point-in-time schema
-- `scripts` — ingestion, backfill, dataset export and research/backtest commands
+- `scripts` — ingestion, backfill, dataset export, research, stress and walk-forward commands
 - `config` — versioned strategy and backtest parameters
-- `tests` — strategy, data, backtest and research regression tests
+- `tests` — strategy, data, backtest, research and API regression tests
 - `apps/web` — Next.js dashboard shell (after backend contracts stabilize)
 
 ## Safety / execution status
@@ -45,6 +45,7 @@ migrations/003_exchange_financials.sql
 migrations/004_phases_1_5.sql
 migrations/005_backtest_engine.sql
 migrations/006_research_stack.sql
+migrations/007_validation_api.sql
 ```
 
 Migration 004 adds historical shareholding/pledge data, shares outstanding, sector history, index constituents, corporate actions, earnings calendar, Module A history, Module B signals and trade-state events.
@@ -52,6 +53,8 @@ Migration 004 adds historical shareholding/pledge data, shares outstanding, sect
 Migration 005 adds persisted trades plus versioned backtest runs, events and fills.
 
 Migration 006 adds daily Module E regime history, Module C rankings/selections, immutable research dataset manifests, research runs and robustness points.
+
+Migration 007 adds persisted stress-test and walk-forward/out-of-sample validation runs.
 
 ## Phases 1–5 implemented
 
@@ -109,13 +112,11 @@ python scripts/run_backtest.py \
 
 ### Phase 10 — Module C ranking and allocation
 
-`module_c.py` now applies Stage-1 eligibility and the full 100-point ranking: rally 25, pullback 20, fundamentals 20, relative strength 15, 52-week-high proximity 10 and sector strength 10. It enforces score >=60, 2% ADTV position size, signal age, ADR, existing-position checks, sector limits, cash, portfolio heat, regime capacity and the seven-position cap. Tie-break order is score, lower stop risk, then higher ADTV. Persisted daily selections are consumed by the full research variant.
+`module_c.py` applies Stage-1 eligibility and the full 100-point ranking: rally 25, pullback 20, fundamentals 20, relative strength 15, 52-week-high proximity 10 and sector strength 10. It enforces score >=60, 2% ADTV position size, signal age, ADR, existing-position checks, sector limits, cash, portfolio heat, regime capacity and the seven-position cap. Tie-break order is score, lower stop risk, then higher ADTV. Persisted daily selections are consumed by the full research variant.
 
 ### Phase 11 — Historical research dataset/backfill
 
 `backfill_research_history.py` coordinates price and official financial backfills, optionally builds Module E snapshots and freezes the result as a Parquet research dataset. `research_dataset.py` exports point-in-time tables to immutable Parquet files plus a manifest containing row counts and SHA-256 checksums.
-
-Run:
 
 ```bash
 python scripts/backfill_research_history.py \
@@ -127,52 +128,81 @@ python scripts/backfill_research_history.py \
 
 Historical shareholding/pledge, ASM/GSM, index constituents and corporate-action archives must be loaded through `ingest_reference_csv.py`; the system does not invent missing historical reference data.
 
-You can also freeze an already-populated database directly:
-
-```bash
-python scripts/export_research_dataset.py --start 2017-01-01 --end 2026-10-16 --out research_data
-```
-
 ### Phase 12 — Research Lab
 
 `ResearchLab` runs database-backed strategy experiments and computes marked-to-market total return, CAGR, max drawdown, Sharpe, Sortino, Calmar, win rate, profit factor, expectancy, average winner/loser, trade count and holding period.
 
-Run all standard variants:
-
-```bash
-python scripts/run_research_lab.py \
-  --symbols NSE:RELIANCE,NSE:TCS,NSE:INFY \
-  --start 2017-01-01 \
-  --end 2026-10-16 \
-  --mode variants
-```
-
 ### Phase 13 — Strategy variants
 
-The Research Lab includes behaviorally distinct variants:
-
-- B only
-- B + A
-- B + A + C
-- full A + B + C + E
-- full model without re-entry
-- earnings-anchored Setup 2 backtest
-
-`EarningsAnchoredSetup2` implements Stage-3 catalyst gating, pre-result-close base so the gap counts, >=2x reaction volume, >=15% rally within 30 trading sessions, >=1%/day velocity, EMA21 failure signal and 60-session expiry. Setup 2 remains research/backtest-only.
+The Research Lab includes behaviorally distinct B-only, B+A, B+A+C, full A+B+C+E, full-without-reentry and earnings-anchored Setup-2 variants. Setup 2 remains research/backtest-only.
 
 ### Phase 14 — Robustness analysis
 
-The robustness engine runs the Cartesian parameter grid requested in the PMS specification. Defaults include ADR 2.5/3/4, rally 12/15/18%, risk 0.25/0.5/0.75% and rally volume 1.25x/1.5x/2x. Every point returns full performance metrics and a comparison score; the engine is designed to find stable parameter regions rather than simply maximize one backtest CAGR.
+The robustness engine evaluates the parameter grid around ADR, rally %, risk %, and rally-volume ratio. Every grid point returns full performance metrics and a comparison score; the goal is stable parameter regions rather than maximizing one historical CAGR.
+
+## Phases 15–17 implemented
+
+### Phase 15 — Stress-period validation
+
+`packages/pms/stress_testing.py` runs the full production research stack across predefined difficult periods rather than creating a simplified stress model. Defaults include 2018–2019, the February–May 2020 COVID crash/rebound, and calendar 2022. Each period gets full Research Lab metrics, and the aggregate summary reports positive-period count, worst return and worst drawdown.
 
 Run:
 
 ```bash
-python scripts/run_research_lab.py \
+python scripts/run_stress_tests.py \
   --symbols NSE:RELIANCE,NSE:TCS,NSE:INFY \
-  --start 2017-01-01 \
-  --end 2026-10-16 \
-  --mode robustness
+  --variant FULL_A_B_C_E
 ```
+
+Results persist to `stress_test_runs` and `stress_test_results` unless `--no-persist` is supplied.
+
+### Phase 16 — Walk-forward / out-of-sample validation
+
+`packages/pms/walk_forward.py` implements real train -> parameter selection -> freeze -> test evaluation. The OOS test window never participates in parameter selection. Default windows are:
+
+- train 2014–2018, test 2019–2020
+- train 2015–2020, test 2021–2022
+- train 2017–2022, test 2023–2024
+- final holdout: train through 2024, test 2025–2026-10-16
+
+Training searches the ADR/rally/risk/volume grid using return + bounded profit-factor reward - drawdown. The selected configuration is then frozen for the OOS window.
+
+Run full grid:
+
+```bash
+python scripts/run_walk_forward.py \
+  --symbols NSE:RELIANCE,NSE:TCS,NSE:INFY \
+  --variant FULL_A_B_C_E
+```
+
+Use `--quick` for a reduced smoke/research grid. Results persist to `walk_forward_runs` and `walk_forward_results`.
+
+### Phase 17 — Production FastAPI surface
+
+`apps/api/main.py` now exposes database-backed, point-in-time endpoints while keeping live execution disabled. Core routes include:
+
+```text
+GET  /health
+GET  /v1/universe
+GET  /v1/module-a/{instrument_id}
+GET  /v1/module-b/{instrument_id}
+GET  /v1/module-c
+GET  /v1/module-e/{trade_date}
+GET  /v1/portfolio
+GET  /v1/positions
+GET  /v1/orders
+GET  /v1/trades
+GET  /v1/backtests
+GET  /v1/backtests/{run_id}
+GET  /v1/research/runs
+GET  /v1/research/stress
+GET  /v1/research/walk-forward
+GET  /v1/data-health
+```
+
+The existing deterministic POST calculation endpoints for Module A, Module E and position sizing remain available for diagnostics. `/v1/orders` reports pending strategy order candidates only; it does not imply broker submission. `execution_enabled` remains false until the later paper/live broker phases.
+
+The API starts without a database connection for health/OpenAPI checks. Database-backed routes return an explicit 503 if `DATABASE_URL` is not configured rather than crashing application import.
 
 ## Market data
 
@@ -206,6 +236,8 @@ Corporate-action exports can be loaded with `--corporate-actions SYMBOL:FILE` an
 8. Backtest and live/paper execution share the same trade-state logic.
 9. Costs and strategy configuration are versioned with the run.
 10. Research datasets are immutable and checksummed.
+11. Walk-forward parameters are selected only on training data and frozen before OOS testing.
+12. API order surfaces do not imply broker execution.
 
 ## Important
 
