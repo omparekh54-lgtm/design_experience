@@ -10,7 +10,7 @@ This repository implements the v1 rules defined in `PMS_Rules_v1`: Module A (fun
 
 - `apps/api` — FastAPI service
 - `packages/pms` — deterministic strategy, risk and domain logic
-- `packages/data_layer` — normalized instruments, OHLCV, quotes, official exchange filings, XBRL parsing, validation, provider adapters and ingestion services
+- `packages/data_layer` — normalized instruments, OHLCV, official filings, XBRL, reference data, corporate actions and point-in-time queries
 - `packages/finstack_gateway` — strategy-facing boundary for point-in-time data access
 - `migrations` — PostgreSQL / Supabase point-in-time schema
 - `scripts` — operational ingestion commands
@@ -32,88 +32,54 @@ pip install -r requirements.txt
 uvicorn apps.api.main:app --reload
 ```
 
-Open `http://127.0.0.1:8000/docs`.
-
-Run tests:
-
-```bash
-pytest -q
-```
-
-## Data layer
-
-The data layer uses our own canonical models so strategy code never depends directly on Angel One, NSE, BSE, Finstack or a vendor-specific response shape.
-
-### Primary market data
-
-Angel One SmartAPI is the primary authenticated source for historical daily OHLCV and quotes. The adapter:
-
-- uses the current Angel token/trading-symbol mapping;
-- chunks long daily-history requests to the provider limit;
-- normalizes all candles into the internal `Candle` model;
-- de-duplicates timestamps;
-- never exposes credentials to PMS strategy modules.
-
-Authentication uses `ANGEL_API_KEY`, `ANGEL_CLIENT_ID`, `ANGEL_PASSWORD` (MPIN/PIN) and `ANGEL_TOTP_SECRET` from the environment.
-
-### Instrument master
-
-`AngelInstrumentMasterLoader` downloads Angel's daily scrip master, retries failures, falls back between the Angel One / Angel Broking hosts, filters the v1 universe to cash equities and maps provider tokens to stable IDs such as `NSE:RELIANCE`.
-
-### Finstack fallback
-
-`FinstackNSEMarketProvider` uses the existing Finstack project's `nse_history()` and `nse_quote()` helpers as a secondary market-data source and as a cross-check source. Finstack's current Moneycontrol/Screener helpers are useful for research/live enrichment, but they are not used as historical truth for Module A because the PMS requires original exchange filing timestamps and revisions.
-
-### Official NSE/BSE fundamentals
-
-`NSEIntegratedFinancialsProvider` reads NSE's official Integrated Filing - Financials feed. `BSEFinancialResultsProvider` reads BSE's official company financial-results pages and XBRL links. Both are normalized into the same `FinancialFiling` model.
-
-Each filing preserves:
-
-- period end;
-- original broadcast/filing timestamp;
-- original vs revised submission type;
-- audited/unaudited status where supplied;
-- consolidated/standalone scope;
-- revision timestamp and remarks;
-- exchange received/disseminated timestamps where supplied;
-- details and XBRL URIs;
-- raw exchange payload;
-- normalized financial facts.
-
-The XBRL parser currently normalizes monetary facts to **INR crore** and diluted EPS to **INR/share**. It recognizes the core Module A fields including revenue, operating profit, PAT, diluted EPS, PBT, other income, exceptional items, operating cash flow, borrowings/debt, equity and finance/interest cost. Raw XBRL provenance is retained so taxonomy mappings can be expanded without changing the strategy contract.
-
-Revisions are appended/idempotently upserted and never allowed to rewrite what was knowable at an earlier `as_of` date. Point-in-time queries choose the newest report period available by the requested timestamp, prefer consolidated over standalone for the same period, then choose the latest revision.
-
-### Data quality
-
-The ingestion layer checks invalid OHLC ranges, non-positive prices, negative volume, duplicate timestamps and cross-provider close/volume disagreements before data is trusted by the strategy.
+Run tests with `pytest -q`.
 
 ## Database setup
 
-Apply SQL migrations in order to PostgreSQL/Supabase:
+Apply migrations in order:
 
 ```text
 migrations/001_initial_schema.sql
 migrations/002_data_layer.sql
 migrations/003_exchange_financials.sql
+migrations/004_phases_1_5.sql
 ```
 
-Migration 003 adds official-exchange filing provenance, XBRL links, revision metadata and an identity key that distinguishes standalone and consolidated submissions.
+Migration 004 adds historical shareholding/pledge data, shares outstanding, sector history, index constituents, corporate actions, earnings calendar, Module A history, Module B signals and trade-state events.
 
-## Angel One data ingestion
+## Phases 1–5 implemented
 
-Set your environment variables first. Example keys are listed in `.env.example`.
+### Phase 1 — Fully automatic Module A inputs
 
-Then backfill selected NSE stocks:
+`ModuleAPipeline` now combines point-in-time financial filings with stored shareholding/pledge history, historical shares outstanding, price history, average traded value and ASM/GSM state. Historical market cap is reconstructed as historical close × shares outstanding. Missing hard-filter data fails closed and is surfaced as a flag rather than silently passing.
 
-```bash
-python scripts/ingest_angel.py --symbols RELIANCE,TCS,INFY --start 2020-01-01 --end 2026-10-16
-```
+Official NSE shareholding/pledge CSV exports can be ingested through `scripts/ingest_reference_csv.py`. This file-import path is intentionally supported because NSE may block some cloud hosts; the scheduler can run the same ingestion from an India/local worker.
 
-## Official fundamental ingestion
+### Phase 2 — Historical tradable universe
 
-NSE example:
+The data layer now tracks listing/delisting windows, sector history and index membership intervals. `ReferenceDataQueries.universe_as_of()` reconstructs the exchange universe for a historical date, and `is_index_member()` supports point-in-time exclusions such as NIFTY50.
+
+### Phase 3 — Corporate-action adjustments
+
+`packages/data_layer/corporate_actions.py` preserves raw OHLCV and back-adjusts prices/volume for splits and bonuses. Module B consumes adjusted candles before computing EMA, ADR, 52-week highs and rally statistics so corporate actions cannot create false technical signals.
+
+### Phase 4 — Real-data Module B pipeline
+
+`ModuleBPipeline` now pulls stored daily prices and Module A eligibility, applies the documented price/volume/turnover/ADR/52-week-high/NIFTY50/result-blackout filters, runs the rally state machine, and returns a normalized Setup-1 signal from real point-in-time data.
+
+### Phase 5 — Shared trade engine
+
+`packages/pms/trade_engine.py` models signal -> pending entry -> fill -> Leg 1 -> Leg 2 -> close/cancel states. It implements the three-trading-day buy-stop window, gap-up fills with stop/size recalculation, intraday stop handling, 9EMA arming, partial/full Leg-1 decisions, breakeven protection, 21EMA Leg-2 exit and re-entry eligibility. EMA exits are generated after close and executed at the next market open.
+
+## Market data
+
+Angel One SmartAPI is the primary authenticated source for historical daily OHLCV and quotes. Finstack remains a secondary/fallback source and cross-check layer. Strategy modules depend only on canonical models, not provider-specific response shapes.
+
+## Official NSE/BSE fundamentals
+
+`NSEIntegratedFinancialsProvider` reads NSE Integrated Filing - Financials. `BSEFinancialResultsProvider` reads BSE financial-result/XBRL surfaces. Both normalize into the same point-in-time `FinancialFiling` model with original/revised status, filing timestamps, consolidated/standalone scope and raw provenance.
+
+Example:
 
 ```bash
 python scripts/ingest_exchange_financials.py \
@@ -122,25 +88,29 @@ python scripts/ingest_exchange_financials.py \
   --to-date 2026-10-16
 ```
 
-NSE plus BSE verification for selected companies:
+## Reference-data imports
+
+Examples:
 
 ```bash
-python scripts/ingest_exchange_financials.py \
-  --nse-symbols RELIANCE,TCS \
-  --bse 500325:RELIANCE \
-  --bse 532540:TCS
+python scripts/ingest_reference_csv.py \
+  --shareholding RELIANCE:/data/reliance_shareholding.csv \
+  --pledge RELIANCE:/data/reliance_pledge.csv \
+  --index NIFTY50:2026-10-01:/data/nifty50.csv \
+  --asm 2026-10-16:/data/asm.csv
 ```
 
-Use `--strict-xbrl` when a production ingestion run should fail rather than retain filing metadata with missing parsed facts when an exchange XBRL download is unavailable.
+Corporate-action exports can be loaded with `--corporate-actions SYMBOL:FILE` and GSM files with `--gsm DATE:FILE`.
 
 ## Data design principles
 
-1. Raw/provider data is outside strategy logic.
+1. Raw/provider data remains outside strategy logic.
 2. Normalized canonical records are the strategy contract.
 3. Every time-sensitive record carries the timestamp from which it became knowable.
 4. Historical revisions do not overwrite prior knowledge.
-5. Backtests read through `as_of` semantics to prevent look-ahead bias.
+5. Backtests use `as_of` semantics to prevent look-ahead bias.
 6. Primary and secondary official sources can be reconciled independently.
+7. Missing hard-filter data fails closed.
 
 ## Important
 
