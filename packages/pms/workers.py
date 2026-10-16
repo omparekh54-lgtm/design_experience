@@ -15,13 +15,15 @@ from packages.pms.reconciliation import ReconciliationService
 from packages.pms.safety import SafetyController
 
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
-celery_app = Celery("pms_workers", broker=REDIS_URL, backend=REDIS_URL)
+celery_app = Celery("pms_workers", broker=REDIS_URL, backend=REDIS_URL, include=["packages.pms.worker_tasks_extended"])
 celery_app.conf.timezone = "Asia/Kolkata"
 celery_app.conf.task_track_started = True
 celery_app.conf.beat_schedule = {
     "market-close-pipeline": {"task": "pms.market_close", "schedule": crontab(hour=18, minute=15, day_of_week="1-5")},
     "paper-reconciliation": {"task": "pms.reconcile", "schedule": crontab(hour=18, minute=30, day_of_week="1-5"), "args": ("PAPER",)},
     "data-health-check": {"task": "pms.data_health", "schedule": crontab(hour=18, minute=40, day_of_week="1-5")},
+    "surveillance-guard": {"task": "pms.surveillance_guard", "schedule": crontab(hour=18, minute=45, day_of_week="1-5")},
+    "research-snapshot": {"task": "pms.research_snapshot", "schedule": crontab(hour=18, minute=50, day_of_week="1-5")},
 }
 
 
