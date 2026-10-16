@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 
 from sqlalchemy import text
 
 from packages.data_layer.features import compute_features
 from packages.pms.backtest import EventDrivenBacktester, MarketBar, Signal
 from packages.pms.module_b_pipeline import ModuleBPipeline
+from packages.pms.module_b_setup2 import EarningsAnchoredSetup2
 from packages.pms.research import ResearchVariant
 
 
@@ -17,6 +18,7 @@ class DatabaseBacktestStrategy:
         self.engine = engine
         self.symbols = symbols
         self.module_b = ModuleBPipeline(engine)
+        self.setup2 = EarningsAnchoredSetup2(self.module_b)
         self.variant = variant or ResearchVariant("DEFAULT")
         self.cfg = cfg
         self._bars: list[MarketBar] = []
@@ -54,7 +56,10 @@ class DatabaseBacktestStrategy:
     def signals_for_close(self, d: date) -> list[Signal]:
         signals: list[Signal] = []
         for instrument_id in self.symbols:
-            result = self.module_b.evaluate(instrument_id, d, require_module_a=self.variant.use_module_a)
+            if self.variant.setup_2:
+                result = self.setup2.evaluate(instrument_id, d, require_module_a=self.variant.use_module_a)
+            else:
+                result = self.module_b.evaluate(instrument_id, d, require_module_a=self.variant.use_module_a)
             if not result.eligible_universe or not result.signal or not self._module_c_selected(instrument_id, d):
                 continue
             signal_date = date.fromisoformat(str(result.signal["signal_date"]))
@@ -73,7 +78,7 @@ class DatabaseBacktestStrategy:
         if not self.variant.use_module_a:
             return True
         try:
-            _, decision = self.module_b.module_a.evaluate(instrument_id, __import__('datetime').datetime.combine(d, __import__('datetime').datetime.max.time()).replace(microsecond=0))
+            _, decision = self.module_b.module_a.evaluate(instrument_id, datetime.combine(d, datetime.max.time()).replace(microsecond=0))
             return bool(decision.eligible)
         except Exception:
             return False
