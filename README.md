@@ -10,7 +10,7 @@ This repository implements the v1 rules defined in `PMS_Rules_v1`: Module A (fun
 
 - `apps/api` — FastAPI service
 - `packages/pms` — deterministic strategy, risk and domain logic
-- `packages/data_layer` — normalized instruments, OHLCV, quotes, filings, validation, provider adapters and ingestion services
+- `packages/data_layer` — normalized instruments, OHLCV, quotes, official exchange filings, XBRL parsing, validation, provider adapters and ingestion services
 - `packages/finstack_gateway` — strategy-facing boundary for point-in-time data access
 - `migrations` — PostgreSQL / Supabase point-in-time schema
 - `scripts` — operational ingestion commands
@@ -42,7 +42,7 @@ pytest -q
 
 ## Data layer
 
-The data layer uses our own canonical models so strategy code never depends directly on Angel One, NSE, Finstack or a vendor-specific response shape.
+The data layer uses our own canonical models so strategy code never depends directly on Angel One, NSE, BSE, Finstack or a vendor-specific response shape.
 
 ### Primary market data
 
@@ -64,18 +64,26 @@ Authentication uses `ANGEL_API_KEY`, `ANGEL_CLIENT_ID`, `ANGEL_PASSWORD` (MPIN/P
 
 `FinstackNSEMarketProvider` uses the existing Finstack project's `nse_history()` and `nse_quote()` helpers as a secondary market-data source and as a cross-check source. Finstack's current Moneycontrol/Screener helpers are useful for research/live enrichment, but they are not used as historical truth for Module A because the PMS requires original exchange filing timestamps and revisions.
 
-### Point-in-time fundamentals
+### Official NSE/BSE fundamentals
 
-Official exchange filings remain the source of truth for Module A. A filing is stored with:
+`NSEIntegratedFinancialsProvider` reads NSE's official Integrated Filing - Financials feed. `BSEFinancialResultsProvider` reads BSE's official company financial-results pages and XBRL links. Both are normalized into the same `FinancialFiling` model.
+
+Each filing preserves:
 
 - period end;
-- filing timestamp;
+- original broadcast/filing timestamp;
+- original vs revised submission type;
+- audited/unaudited status where supplied;
 - consolidated/standalone scope;
-- source;
-- revision number;
-- normalized facts.
+- revision timestamp and remarks;
+- exchange received/disseminated timestamps where supplied;
+- details and XBRL URIs;
+- raw exchange payload;
+- normalized financial facts.
 
-Revisions are appended, never used to rewrite what was known at an earlier `as_of` date.
+The XBRL parser currently normalizes monetary facts to **INR crore** and diluted EPS to **INR/share**. It recognizes the core Module A fields including revenue, operating profit, PAT, diluted EPS, PBT, other income, exceptional items, operating cash flow, borrowings/debt, equity and finance/interest cost. Raw XBRL provenance is retained so taxonomy mappings can be expanded without changing the strategy contract.
+
+Revisions are appended/idempotently upserted and never allowed to rewrite what was knowable at an earlier `as_of` date. Point-in-time queries choose the newest report period available by the requested timestamp, prefer consolidated over standalone for the same period, then choose the latest revision.
 
 ### Data quality
 
@@ -88,9 +96,10 @@ Apply SQL migrations in order to PostgreSQL/Supabase:
 ```text
 migrations/001_initial_schema.sql
 migrations/002_data_layer.sql
+migrations/003_exchange_financials.sql
 ```
 
-The second migration adds normalized instrument metadata, ingestion-run tracking, provider snapshots and data-quality issues.
+Migration 003 adds official-exchange filing provenance, XBRL links, revision metadata and an identity key that distinguishes standalone and consolidated submissions.
 
 ## Angel One data ingestion
 
@@ -102,7 +111,27 @@ Then backfill selected NSE stocks:
 python scripts/ingest_angel.py --symbols RELIANCE,TCS,INFY --start 2020-01-01 --end 2026-10-16
 ```
 
-The script refreshes the current instrument/token mapping, authenticates with Angel One, downloads normalized daily candles, validates them and writes them to PostgreSQL.
+## Official fundamental ingestion
+
+NSE example:
+
+```bash
+python scripts/ingest_exchange_financials.py \
+  --nse-symbols RELIANCE,TCS,INFY \
+  --from-date 2025-01-01 \
+  --to-date 2026-10-16
+```
+
+NSE plus BSE verification for selected companies:
+
+```bash
+python scripts/ingest_exchange_financials.py \
+  --nse-symbols RELIANCE,TCS \
+  --bse 500325:RELIANCE \
+  --bse 532540:TCS
+```
+
+Use `--strict-xbrl` when a production ingestion run should fail rather than retain filing metadata with missing parsed facts when an exchange XBRL download is unavailable.
 
 ## Data design principles
 
@@ -111,7 +140,7 @@ The script refreshes the current instrument/token mapping, authenticates with An
 3. Every time-sensitive record carries the timestamp from which it became knowable.
 4. Historical revisions do not overwrite prior knowledge.
 5. Backtests read through `as_of` semantics to prevent look-ahead bias.
-6. Primary and secondary sources can be reconciled independently.
+6. Primary and secondary official sources can be reconciled independently.
 
 ## Important
 
