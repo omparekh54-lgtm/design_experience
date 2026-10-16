@@ -66,6 +66,16 @@ class FinancialFiling:
     debt: Decimal | None = None
     equity: Decimal | None = None
     interest_expense: Decimal | None = None
+    submission_type: str | None = None
+    audit_status: str | None = None
+    revised_at: datetime | None = None
+    revision_remarks: str | None = None
+    exchange_received_at: datetime | None = None
+    exchange_disseminated_at: datetime | None = None
+    filing_kind: str = "quarter"
+    external_id: str | None = None
+    details_uri: str | None = None
+    xbrl_uri: str | None = None
     raw_payload: dict[str, Any] = field(default_factory=dict)
 
 
