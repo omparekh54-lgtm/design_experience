@@ -39,11 +39,7 @@ def market_cap_cr(close_price: float, shares_outstanding: float) -> float:
 
 
 def split_adjustment_factor(action: CorporateAction) -> float:
-    """Price factor applied to pre-action prices for split/bonus actions.
-
-    A split from face/quantity 1 to 5 makes comparable pre-event prices 1/5.
-    A 1:1 bonus doubles shares, so comparable historical price factor is 1/2.
-    """
+    """Price factor applied to pre-action prices for split/bonus actions."""
     kind = action.action_type.upper()
     if kind not in {"SPLIT", "BONUS"}:
         return 1.0
@@ -197,3 +193,31 @@ class ReferenceDataQueries:
                 {"id": pk, "d": on_date},
             ).scalars().all()
             return any(d in target for d in rows)
+
+    def corporate_actions_between(self, instrument_id: str, start: date, end: date) -> list[CorporateAction]:
+        with self.engine.connect() as conn:
+            pk = self._instrument_pk(conn, instrument_id)
+            rows = conn.execute(
+                text(
+                    """
+                    select action_type, ex_date, ratio_from, ratio_to, cash_amount, announced_at, source
+                    from corporate_actions
+                    where instrument_id=:id and ex_date between :start and :end
+                    order by ex_date
+                    """
+                ),
+                {"id": pk, "start": start, "end": end},
+            ).mappings().all()
+            return [
+                CorporateAction(
+                    instrument_id=instrument_id,
+                    action_type=str(r["action_type"]),
+                    ex_date=r["ex_date"],
+                    ratio_from=float(r["ratio_from"]) if r["ratio_from"] is not None else None,
+                    ratio_to=float(r["ratio_to"]) if r["ratio_to"] is not None else None,
+                    cash_amount=float(r["cash_amount"]) if r["cash_amount"] is not None else None,
+                    announced_at=r["announced_at"],
+                    source=str(r["source"]),
+                )
+                for r in rows
+            ]
