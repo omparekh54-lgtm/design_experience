@@ -66,6 +66,37 @@ class ModuleBPipeline:
             for idx, row in adjusted.iterrows()
         ]
 
+    def _latest_setup1_signal(self, features, as_of: date) -> dict[str, Any] | None:
+        t = self.cfg["technical"]
+        tracker = RallyTracker()
+        latest_signal: dict[str, Any] | None = None
+        frame = features.dropna(subset=["ema21"])
+        for i in range(1, len(frame)):
+            row, prev = frame.iloc[i], frame.iloc[i - 1]
+            bar = Bar(
+                date=str(frame.index[i].date()), open=float(row["open"]), high=float(row["high"]),
+                low=float(row["low"]), close=float(row["close"]), volume=float(row["volume"]),
+                ema21=float(row["ema21"]),
+            )
+            baseline = float(frame.iloc[max(0, i - 50):i]["volume"].mean()) if i > 0 else 0.0
+            tracker = advance_rally(tracker, bar, float(prev["close"]), float(prev["ema21"]), baseline, self.cfg)
+            if tracker.state == RallyState.SIGNAL_CREATED:
+                signal_date = date.fromisoformat(str(tracker.signal_date))
+                if signal_date <= as_of:
+                    latest_signal = {
+                        "signal_date": tracker.signal_date,
+                        "signal_high": tracker.signal_high,
+                        "signal_low": tracker.signal_low,
+                        "rally_start": tracker.start_date,
+                        "rally_high_date": tracker.highest_high_date,
+                        "rally_pct": round(tracker.rally_pct(), 4),
+                        "velocity": round(tracker.velocity(), 4),
+                        "entry_window_days": int(t["entry_window_days"]),
+                    }
+                # A completed setup does not permanently block a later independent rally.
+                tracker = RallyTracker()
+        return latest_signal
+
     def evaluate(self, instrument_id: str, as_of: date) -> ModuleBResult:
         t = self.cfg["technical"]
         rejected: list[str] = []
@@ -111,28 +142,10 @@ class ModuleBPipeline:
         if rejected:
             return ModuleBResult(instrument_id, as_of, False, tuple(dict.fromkeys(rejected)), None)
 
-        tracker = RallyTracker()
-        signal: dict[str, Any] | None = None
-        frame = features.dropna(subset=["ema21"])
-        for i in range(1, len(frame)):
-            row, prev = frame.iloc[i], frame.iloc[i - 1]
-            bar = Bar(
-                date=str(frame.index[i].date()), open=float(row["open"]), high=float(row["high"]),
-                low=float(row["low"]), close=float(row["close"]), volume=float(row["volume"]),
-                ema21=float(row["ema21"]),
-            )
-            baseline = float(frame.iloc[max(0, i - 50):i]["volume"].mean()) if i > 0 else 0.0
-            tracker = advance_rally(tracker, bar, float(prev["close"]), float(prev["ema21"]), baseline, self.cfg)
-            if tracker.state == RallyState.SIGNAL_CREATED:
-                signal_date = date.fromisoformat(str(tracker.signal_date))
-                if signal_date <= as_of:
-                    signal = {
-                        "signal_date": tracker.signal_date, "signal_high": tracker.signal_high,
-                        "signal_low": tracker.signal_low, "rally_start": tracker.start_date,
-                        "rally_high_date": tracker.highest_high_date,
-                        "rally_pct": round(tracker.rally_pct(), 4),
-                        "velocity": round(tracker.velocity(), 4),
-                        "entry_window_days": int(t["entry_window_days"]),
-                    }
-                break
-        return ModuleBResult(instrument_id, as_of, True, (), signal)
+        return ModuleBResult(
+            instrument_id,
+            as_of,
+            True,
+            (),
+            self._latest_setup1_signal(features, as_of),
+        )
