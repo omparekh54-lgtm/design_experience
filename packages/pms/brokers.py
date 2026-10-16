@@ -79,15 +79,23 @@ class PaperBroker:
             order = conn.execute(text("select * from broker_orders where id=:id for update"), {"id": order_id}).mappings().one()
             qty = int(quantity or order["quantity"])
             if qty <= 0 or qty > int(order["quantity"]): raise ValueError("invalid fill quantity")
+            realized = 0.0
+            if str(order["side"]).upper() == "SELL":
+                basis = conn.execute(text("""
+                    select sum(case when quantity>0 then quantity*price else 0 end) / nullif(sum(case when quantity>0 then quantity else 0 end),0)
+                    from portfolio_ledger where account_mode='PAPER' and event_type='FILL' and instrument_id=:instrument
+                """), {"instrument": order["instrument_id"]}).scalar_one_or_none()
+                avg_cost = float(basis or 0.0)
+                realized = (float(price) - avg_cost) * qty - float(fees)
             fill_id = str(uuid4()); now = datetime.now(timezone.utc)
             conn.execute(text("insert into broker_fills(id,order_id,external_trade_id,fill_time,price,quantity,fees) values (:id,:oid,:tid,:t,:p,:q,:f)"), {"id": fill_id, "oid": order_id, "tid": fill_id, "t": now, "p": price, "q": qty, "f": fees})
             conn.execute(text("update broker_orders set status='FILLED',updated_at=:t where id=:id"), {"t": now, "id": order_id})
             cash_delta = -(price * qty + fees) if order["side"] == "BUY" else (price * qty - fees)
             conn.execute(text("""
-                insert into portfolio_ledger(account_mode,event_type,instrument_id,order_id,quantity,price,cash_delta,fees,metadata)
-                values ('PAPER','FILL',:instrument,:oid,:qty,:price,:cash,:fees,jsonb_build_object('side',:side))
-            """), {"instrument": order["instrument_id"], "oid": order_id, "qty": qty if order["side"] == "BUY" else -qty, "price": price, "cash": cash_delta, "fees": fees, "side": order["side"]})
-        return {"fill_id": fill_id, "price": price, "quantity": qty}
+                insert into portfolio_ledger(account_mode,event_type,instrument_id,order_id,quantity,price,cash_delta,realized_pnl_delta,fees,metadata)
+                values ('PAPER','FILL',:instrument,:oid,:qty,:price,:cash,:realized,:fees,jsonb_build_object('side',:side))
+            """), {"instrument": order["instrument_id"], "oid": order_id, "qty": qty if order["side"] == "BUY" else -qty, "price": price, "cash": cash_delta, "realized": realized, "fees": fees, "side": order["side"]})
+        return {"fill_id": fill_id, "price": price, "quantity": qty, "realized_pnl": round(realized, 2)}
 
     def cancel_order(self, order_id: str) -> dict[str, Any]:
         with self.engine.begin() as conn:
@@ -104,7 +112,7 @@ class PaperBroker:
             rows = conn.execute(text("""
                 select i.exchange, coalesce(i.nse_symbol,replace(i.trading_symbol,'-EQ','')) symbol,
                        sum(l.quantity) quantity,
-                       sum(l.quantity*l.price) / nullif(sum(l.quantity),0) avg_price
+                       sum(case when l.quantity>0 then l.quantity*l.price else 0 end) / nullif(sum(case when l.quantity>0 then l.quantity else 0 end),0) avg_price
                 from portfolio_ledger l join instruments i on i.id=l.instrument_id
                 where l.account_mode='PAPER' and l.event_type='FILL'
                 group by i.id,i.exchange,i.nse_symbol,i.trading_symbol having sum(l.quantity)<>0
