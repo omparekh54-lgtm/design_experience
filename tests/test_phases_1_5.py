@@ -1,4 +1,4 @@
-from datetime import date, datetime
+from datetime import date
 
 import pandas as pd
 
@@ -11,6 +11,7 @@ from packages.pms.trade_engine import (
     TradeState,
     activate_entry,
     process_entry_bar,
+    process_next_open,
     process_position_bar,
     reentry_allowed,
 )
@@ -67,17 +68,35 @@ def test_trade_engine_gap_fill_recalculates_stop_and_size():
     assert p.shares > 0
 
 
-def test_trade_engine_leg1_then_leg2_exit_allows_reentry():
+def test_pending_entry_expires_after_three_trading_bars():
+    cfg = load_strategy_config()
+    p = TradePosition("NSE:ABC", date(2026, 10, 1), 100.0, 95.0, 1_000_000)
+    activate_entry(p)
+    for d in (date(2026, 10, 2), date(2026, 10, 5), date(2026, 10, 6)):
+        process_entry_bar(p, d, open_=98.0, high=99.0, cfg=cfg)
+        assert p.state == TradeState.PENDING_ENTRY
+    process_entry_bar(p, date(2026, 10, 7), open_=98.0, high=99.0, cfg=cfg)
+    assert p.state == TradeState.CANCELLED
+    assert p.exit_reason == "entry_window_expired"
+
+
+def test_trade_engine_leg1_then_leg2_exit_at_next_open_allows_reentry():
     cfg = load_strategy_config()
     p = TradePosition("NSE:ABC", date(2026, 10, 1), 100.0, 95.0, 1_000_000)
     activate_entry(p)
     process_entry_bar(p, date(2026, 10, 2), 100.0, 101.0, cfg)
     process_position_bar(p, date(2026, 10, 3), 103.0, 106.0, 102.0, 105.0, 102.0, 101.0, 98.0)
     assert p.state == TradeState.LEG1_ARMED
+
     process_position_bar(p, date(2026, 10, 4), 106.0, 107.0, 103.0, 104.0, 103.0, 105.0, 99.0)
+    assert p.state == TradeState.PENDING_LEG1_PARTIAL_EXIT
+    process_next_open(p, date(2026, 10, 5), 105.0)
     assert p.state == TradeState.LEG2_ACTIVE
     assert p.stop == p.entry
-    process_position_bar(p, date(2026, 10, 5), 104.0, 105.0, 101.0, 102.0, 102.5, 103.0, 103.0)
+
+    process_position_bar(p, date(2026, 10, 5), 105.0, 107.0, 101.0, 102.0, 102.5, 103.0, 103.0)
+    assert p.state == TradeState.PENDING_LEG2_EXIT
+    process_next_open(p, date(2026, 10, 6), 103.0)
     assert p.state == TradeState.CLOSED
     assert p.exit_reason == "leg2_ema21"
     assert reentry_allowed(p) is True
