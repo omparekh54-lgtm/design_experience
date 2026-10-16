@@ -18,15 +18,23 @@ class FundamentalRequest(BaseModel):
     promoter_pledge_pct: float
     quarterly_sales_cr: float
     pat_cr: float
-    sales_yoy_pct: float
-    operating_profit_yoy_pct: float
-    pat_yoy_pct: float
-    eps_yoy_pct: float
+    sales_yoy_pct: float | None
+    operating_profit_yoy_pct: float | None
+    pat_yoy_pct: float | None
+    eps_yoy_pct: float | None
     positive_growth_quarters_last_4: int
     ttm_sales_rising: bool
     ttm_profit_rising: bool
-    ocf_to_pat: float
+    ocf_to_pat: float | None
     quality_pass: bool = True
+    growth_acceleration_pp: float | None = None
+    margin_expansion_bps: float | None = None
+    debt_to_equity: float | None = None
+    interest_coverage: float | None = None
+    record_sales_8q: bool = False
+    record_pat_8q: bool = False
+    turnaround: bool = False
+    triggers: list[str] = []
     flags: list[str] = []
 
 
@@ -55,12 +63,18 @@ def health() -> dict:
 @app.post("/v1/module-a/evaluate")
 def module_a(payload: FundamentalRequest) -> dict:
     cfg = load_strategy_config()
-    snapshot = FundamentalSnapshot(**payload.model_dump(exclude={"flags"}), flags=tuple(payload.flags))
+    snapshot = FundamentalSnapshot(
+        **payload.model_dump(exclude={"flags", "triggers"}),
+        flags=tuple(payload.flags),
+        triggers=tuple(payload.triggers),
+    )
     decision = evaluate_fundamentals(snapshot, cfg)
     return {
         "eligible": decision.eligible,
         "score": decision.score,
+        "score_components": decision.components,
         "failed_rules": decision.failed_rules,
+        "triggers": decision.triggers,
         "flags": decision.flags,
     }
 
