@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import text
 
 from packages.pms.audit import AuditTrail
@@ -35,7 +35,7 @@ class LiveSessionRequest(BaseModel):
     max_order_value: float
     max_open_positions: int = 2
     max_daily_loss: float
-    allowed_symbols: list[str] = []
+    allowed_symbols: list[str] = Field(default_factory=list)
     notes: str | None = None
 
 
@@ -48,6 +48,17 @@ class LiveProposalRequest(BaseModel):
     limit_price: float | None = None
     trigger_price: float | None = None
     reason: str | None = None
+
+
+class LiveObservationRequest(BaseModel):
+    expected_price: float
+    fill_price: float
+    quantity: int
+    executed_at: datetime
+    fees: float = 0.0
+    external_order_reference: str | None = None
+    reconciliation_ok: bool = False
+    notes: str | None = None
 
 
 class RejectRequest(BaseModel):
@@ -86,6 +97,21 @@ def set_mode(payload: ModeRequest):
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"execution_mode": payload.mode.upper(), "new_orders_enabled": False, "live_auto_enabled": False}
+
+
+@router.post("/enable-orders")
+def enable_orders():
+    try:
+        SafetyController(_engine()).enable_new_orders(actor="api_operator")
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"new_orders_enabled": True}
+
+
+@router.post("/disable-orders")
+def disable_orders():
+    SafetyController(_engine()).disable_new_orders(actor="api_operator")
+    return {"new_orders_enabled": False}
 
 
 @router.get("/reconciliation/latest")
@@ -213,3 +239,23 @@ def approve_live_validation_proposal(approval_id: str):
 def reject_live_validation_proposal(approval_id: str, payload: RejectRequest):
     LiveValidationService(_engine()).reject(approval_id, actor="api_operator", reason=payload.reason)
     return {"approval_id":approval_id,"status":"REJECTED"}
+
+
+@router.post("/live-validation/proposal/{approval_id}/observation")
+def record_live_validation_observation(approval_id: str, payload: LiveObservationRequest):
+    try:
+        observation_id = LiveValidationService(_engine()).record_observation(
+            approval_id,
+            expected_price=payload.expected_price,
+            fill_price=payload.fill_price,
+            quantity=payload.quantity,
+            executed_at=payload.executed_at,
+            reconciliation_ok=payload.reconciliation_ok,
+            actor="api_operator",
+            fees=payload.fees,
+            external_order_reference=payload.external_order_reference,
+            notes=payload.notes,
+        )
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"observation_id":observation_id,"recorded":True}
