@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+.env
+.env.*
+!.env.example
+
+# Node
+node_modules/
+.next/
+out/
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Data / secrets
+*.parquet
+*.db
+*.sqlite
+secrets/
+artifacts/
+raw_data/
