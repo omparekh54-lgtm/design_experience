@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from datetime import date
 from enum import Enum
 
-from packages.pms.risk import compute_stop, size_position
+from packages.pms.risk import size_position
 
 
 class TradeState(str, Enum):
@@ -32,6 +32,7 @@ class TradePosition:
     remaining_shares: int = 0
     filled_on: date | None = None
     leg1_armed: bool = False
+    entry_bars_seen: int = 0
     realized_pnl: float = 0.0
     exit_reason: str | None = None
     history: list[dict] = field(default_factory=list)
@@ -44,21 +45,30 @@ def activate_entry(position: TradePosition) -> TradePosition:
     if position.state != TradeState.SIGNAL_CREATED:
         raise ValueError("entry can only be activated from SIGNAL_CREATED")
     position.state = TradeState.PENDING_ENTRY
+    position.entry_bars_seen = 0
     position.log("ENTRY_ACTIVATED", buy_stop=position.signal_high)
     return position
 
 
 def process_entry_bar(position: TradePosition, bar_date: date, open_: float, high: float, cfg: dict) -> TradePosition:
+    """Process one trading-session bar after the signal candle.
+
+    The PMS specification gives the buy-stop exactly three *trading days* of
+    validity. Call this function once per trading bar; no calendar-day math is
+    used, so weekends and exchange holidays cannot shorten the window.
+    """
     if position.state != TradeState.PENDING_ENTRY:
         return position
+    position.entry_bars_seen += 1
     window = int(cfg["technical"]["entry_window_days"])
-    if (bar_date - position.signal_date).days > window + 4:  # calendar guard; scheduler supplies trading bars
+    if position.entry_bars_seen > window:
         position.state = TradeState.CANCELLED
         position.exit_reason = "entry_window_expired"
-        position.log("ENTRY_CANCELLED", reason=position.exit_reason)
+        position.log("ENTRY_CANCELLED", date=str(bar_date), reason=position.exit_reason)
         return position
     if high < position.signal_high:
         return position
+
     fill = max(open_, position.signal_high)
     r = cfg["risk"]
     sizing = size_position(
@@ -73,14 +83,16 @@ def process_entry_bar(position: TradePosition, bar_date: date, open_: float, hig
     if sizing.shares < 1:
         position.state = TradeState.CANCELLED
         position.exit_reason = "position_size_zero"
+        position.log("ENTRY_CANCELLED", date=str(bar_date), reason=position.exit_reason)
         return position
+
     position.entry = fill
     position.stop = sizing.stop
     position.shares = sizing.shares
     position.remaining_shares = sizing.shares
     position.filled_on = bar_date
     position.state = TradeState.FILLED
-    position.log("FILLED", entry=fill, stop=sizing.stop, shares=sizing.shares)
+    position.log("FILLED", date=str(bar_date), entry=fill, stop=sizing.stop, shares=sizing.shares)
     return position
 
 
@@ -108,7 +120,7 @@ def process_position_bar(
     if position.entry is None or position.stop is None:
         raise ValueError("filled trade missing entry/stop")
 
-    # Initial/breakeven stop. Gaps below stop exit at the open.
+    # Initial/breakeven stop. A gap below the active stop exits at the open.
     if low <= position.stop:
         exit_price = open_ if open_ < position.stop else position.stop
         pnl = (exit_price - position.entry) * position.remaining_shares
@@ -119,11 +131,15 @@ def process_position_bar(
         position.log("CLOSED", date=str(bar_date), price=exit_price, reason="stop", pnl=pnl)
         return position
 
+    # Leg 1 is not active until the first close above the same-day EMA9.
     if position.state == TradeState.FILLED and close > ema9:
         position.leg1_armed = True
         position.state = TradeState.LEG1_ARMED
         position.log("LEG1_ARMED", date=str(bar_date))
 
+    # Exit logic is evaluated after close. The backtest/live scheduler executes
+    # these market exits at the next open; this state machine records the signal
+    # price/intent and the broker layer can substitute the next-open fill.
     if position.state == TradeState.LEG1_ARMED and close < previous_ema9:
         if close <= position.entry:
             pnl = (close - position.entry) * position.remaining_shares
