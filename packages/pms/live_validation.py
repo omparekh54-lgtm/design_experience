@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Any
 from uuid import uuid4
 
@@ -38,6 +38,8 @@ class LiveValidationService:
     def create_session(self, limits: LiveValidationLimits, *, actor: str, notes: str | None = None) -> str:
         if min(limits.max_capital, limits.max_order_value, limits.max_daily_loss) <= 0 or limits.max_open_positions <= 0:
             raise ValueError("live-validation limits must be positive")
+        if limits.max_order_value > limits.max_capital:
+            raise ValueError("max_order_value cannot exceed max_capital")
         session_id = str(uuid4())
         with self.engine.begin() as conn:
             conn.execute(text("""
@@ -77,11 +79,26 @@ class LiveValidationService:
         symbol = request.instrument_id.upper()
         allowed = tuple(session.get("allowed_symbols") or [])
         estimated_value = float(estimated_price) * int(request.quantity)
+        if estimated_value <= 0:
+            raise ValueError("estimated order value must be positive")
         if estimated_value > float(session["max_order_value"]):
             raise RuntimeError("order exceeds live-validation max_order_value")
         if allowed and symbol not in {str(x).upper() for x in allowed}:
             raise RuntimeError("instrument is outside the live-validation allowlist")
         with self.engine.connect() as conn:
+            committed = float(conn.execute(text("""
+                select coalesce(sum(estimated_order_value),0) from live_order_approvals
+                where session_id=:session and status in ('PROPOSED','APPROVED') and side='BUY'
+            """), {"session":session_id}).scalar_one())
+            if request.side.upper() == "BUY" and committed + estimated_value > float(session["max_capital"]):
+                raise RuntimeError("session committed notional would exceed max_capital")
+            latest_live = conn.execute(text("""
+                select realized_pnl,unrealized_pnl from portfolio_snapshots
+                where account_mode in ('LIVE_VALIDATION','LIVE_APPROVAL') and snapshot_date=:d
+                order by created_at desc limit 1
+            """), {"d":date.today()}).mappings().first()
+            if latest_live and float(latest_live["realized_pnl"] or 0) + float(latest_live["unrealized_pnl"] or 0) <= -float(session["max_daily_loss"]):
+                raise RuntimeError("live-validation max_daily_loss reached")
             exchange, raw_symbol = symbol.split(":", 1)
             trading_symbol = f"{raw_symbol}-EQ" if exchange == "NSE" else raw_symbol
             instrument = conn.execute(text("select id from instruments where exchange=:e and trading_symbol=:s order by valid_from desc limit 1"), {"e":exchange,"s":trading_symbol}).scalar_one_or_none()
@@ -117,3 +134,16 @@ class LiveValidationService:
         with self.engine.begin() as conn:
             conn.execute(text("update live_order_approvals set status='REJECTED',rejection_reason=:reason,approved_by=:actor,approved_at=:now where id=:id and status='PROPOSED'"), {"id":approval_id,"reason":reason,"actor":actor,"now":datetime.now(timezone.utc)})
         self.audit.record(AuditEvent("LIVE_ORDER_REJECTED", actor, {"reason":reason}, entity_type="live_order_approval", entity_id=approval_id))
+
+    def close_session(self, session_id: str, *, actor: str, completed: bool, notes: str | None = None) -> None:
+        session = self._session(session_id)
+        if session["status"] != "ACTIVE":
+            raise RuntimeError("only ACTIVE sessions can be closed")
+        with self.engine.connect() as conn:
+            unresolved = int(conn.execute(text("select count(*) from live_order_approvals where session_id=:id and status='PROPOSED'"), {"id":session_id}).scalar_one())
+        if completed and unresolved:
+            raise RuntimeError("cannot complete a session with unresolved order proposals")
+        status = "COMPLETED" if completed else "ABORTED"
+        with self.engine.begin() as conn:
+            conn.execute(text("update live_validation_sessions set status=:status,ended_at=:now,closed_by=:actor,notes=coalesce(:notes,notes) where id=:id"), {"status":status,"now":datetime.now(timezone.utc),"actor":actor,"notes":notes,"id":session_id})
+        self.audit.record(AuditEvent("LIVE_VALIDATION_SESSION_CLOSED", actor, {"status":status,"unresolved_proposals":unresolved}, entity_type="live_validation_session", entity_id=session_id))
