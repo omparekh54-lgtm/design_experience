@@ -1,14 +1,18 @@
 from __future__ import annotations
 
 from datetime import date
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import text
 
-from packages.pms.safety import SafetyController
+from packages.pms.audit import AuditTrail
+from packages.pms.brokers import BrokerOrderRequest, PaperBroker
+from packages.pms.live_validation import LiveValidationLimits, LiveValidationService
+from packages.pms.paper_validation import PaperValidationService
 from packages.pms.portfolio_accounting import PortfolioAccountingService
-from packages.pms.brokers import PaperBroker
+from packages.pms.production_readiness import ProductionReadinessController
 from packages.pms.reconciliation import ReconciliationService
+from packages.pms.safety import SafetyController
 
 router = APIRouter(prefix="/v1/execution", tags=["execution"])
 
@@ -19,6 +23,35 @@ class StopRequest(BaseModel):
 
 class ModeRequest(BaseModel):
     mode: str
+
+
+class PaperValidationRequest(BaseModel):
+    started_on: date
+    ended_on: date
+
+
+class LiveSessionRequest(BaseModel):
+    max_capital: float
+    max_order_value: float
+    max_open_positions: int = 2
+    max_daily_loss: float
+    allowed_symbols: list[str] = []
+    notes: str | None = None
+
+
+class LiveProposalRequest(BaseModel):
+    instrument_id: str
+    side: str
+    quantity: int
+    estimated_price: float
+    order_type: str = "MARKET"
+    limit_price: float | None = None
+    trigger_price: float | None = None
+    reason: str | None = None
+
+
+class RejectRequest(BaseModel):
+    reason: str
 
 
 def _engine():
@@ -36,6 +69,7 @@ def safety_status():
         "locked_reason": s.locked_reason,
         "live_auto_enabled": False,
         "can_place_live_order": s.can_place_live_order,
+        "can_place_validation_order": s.can_place_validation_order,
     }
 
 
@@ -90,3 +124,92 @@ def worker_runs():
     with _engine().connect() as conn:
         rows = conn.execute(text("select * from worker_runs order by started_at desc limit 50")).mappings().all()
     return {"count": len(rows), "runs": [dict(r) for r in rows]}
+
+
+@router.get("/audit")
+def audit_history(entity_type: str | None = None, entity_id: str | None = None, limit: int = Query(100, ge=1, le=500)):
+    rows = AuditTrail(_engine()).history(entity_type=entity_type, entity_id=entity_id, limit=limit)
+    return {"count": len(rows), "events": rows}
+
+
+@router.post("/paper-validation")
+def paper_validation(payload: PaperValidationRequest):
+    result = PaperValidationService(_engine()).evaluate(payload.started_on, payload.ended_on, actor="api_operator")
+    return {"run_id":result.run_id,"passed":result.passed,"metrics":result.metrics,"gates":result.gates,"criteria":result.criteria.__dict__}
+
+
+@router.get("/paper-validation/latest")
+def latest_paper_validation():
+    with _engine().connect() as conn:
+        row = conn.execute(text("select * from paper_validation_runs order by created_at desc limit 1")).mappings().first()
+    return dict(row) if row else {"status":"never_run"}
+
+
+@router.get("/readiness")
+def readiness():
+    ctl = ProductionReadinessController(_engine())
+    result = ctl.evaluate()
+    ctl.persist(result, actor="api_operator")
+    return result.__dict__
+
+
+@router.post("/promote/{stage}")
+def promote(stage: str):
+    try:
+        result = ProductionReadinessController(_engine()).promote(stage.upper(), actor="api_operator")
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"promoted_to": stage.upper(), "readiness": result.__dict__, "live_auto_enabled": False}
+
+
+@router.post("/live-validation/session")
+def create_live_validation_session(payload: LiveSessionRequest):
+    limits = LiveValidationLimits(payload.max_capital,payload.max_order_value,payload.max_open_positions,payload.max_daily_loss,tuple(s.upper() for s in payload.allowed_symbols))
+    try:
+        session_id = LiveValidationService(_engine()).create_session(limits, actor="api_operator", notes=payload.notes)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"session_id":session_id,"status":"DRAFT"}
+
+
+@router.post("/live-validation/session/{session_id}/activate")
+def activate_live_validation_session(session_id: str):
+    try:
+        LiveValidationService(_engine()).activate_session(session_id, actor="api_operator")
+    except (RuntimeError, KeyError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"session_id":session_id,"status":"ACTIVE"}
+
+
+@router.post("/live-validation/session/{session_id}/close")
+def close_live_validation_session(session_id: str, completed: bool = True):
+    try:
+        LiveValidationService(_engine()).close_session(session_id, actor="api_operator", completed=completed)
+    except (RuntimeError, KeyError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"session_id":session_id,"status":"COMPLETED" if completed else "ABORTED"}
+
+
+@router.post("/live-validation/session/{session_id}/proposal")
+def create_live_validation_proposal(session_id: str, payload: LiveProposalRequest):
+    request = BrokerOrderRequest(payload.instrument_id.upper(),payload.side.upper(),payload.quantity,payload.order_type.upper(),payload.limit_price,payload.trigger_price)
+    try:
+        approval_id = LiveValidationService(_engine()).propose_order(session_id,request,estimated_price=payload.estimated_price,actor="api_operator",reason=payload.reason)
+    except (RuntimeError, ValueError, KeyError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"approval_id":approval_id,"status":"PROPOSED","broker_submission":False}
+
+
+@router.post("/live-validation/proposal/{approval_id}/approve")
+def approve_live_validation_proposal(approval_id: str):
+    try:
+        LiveValidationService(_engine()).approve(approval_id, actor="api_operator")
+    except (PermissionError, RuntimeError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"approval_id":approval_id,"status":"APPROVED","broker_submission":False}
+
+
+@router.post("/live-validation/proposal/{approval_id}/reject")
+def reject_live_validation_proposal(approval_id: str, payload: RejectRequest):
+    LiveValidationService(_engine()).reject(approval_id, actor="api_operator", reason=payload.reason)
+    return {"approval_id":approval_id,"status":"REJECTED"}
