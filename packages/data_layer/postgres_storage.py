@@ -19,10 +19,10 @@ class PostgresStorage:
             text(
                 """
                 insert into instruments (
-                    isin, nse_symbol, angel_token, sector, active,
+                    isin, nse_symbol, bse_code, angel_token, sector, active,
                     exchange, trading_symbol, name, metadata, updated_at
                 ) values (
-                    :isin, :nse_symbol, :angel_token, :sector, :active,
+                    :isin, :nse_symbol, :bse_code, :angel_token, :sector, :active,
                     :exchange, :trading_symbol, :name, cast(:metadata as jsonb), now()
                 )
                 on conflict (exchange, trading_symbol)
@@ -30,6 +30,7 @@ class PostgresStorage:
                 do update set
                     isin = coalesce(excluded.isin, instruments.isin),
                     nse_symbol = coalesce(excluded.nse_symbol, instruments.nse_symbol),
+                    bse_code = coalesce(excluded.bse_code, instruments.bse_code),
                     angel_token = coalesce(excluded.angel_token, instruments.angel_token),
                     sector = coalesce(excluded.sector, instruments.sector),
                     active = excluded.active,
@@ -42,6 +43,7 @@ class PostgresStorage:
             {
                 "isin": instrument.isin,
                 "nse_symbol": instrument.symbol if instrument.exchange == "NSE" else None,
+                "bse_code": str(instrument.metadata.get("bse_code")) if instrument.metadata.get("bse_code") else None,
                 "angel_token": instrument.token,
                 "sector": instrument.sector,
                 "active": instrument.active,
@@ -71,6 +73,11 @@ class PostgresStorage:
             text("select id from instruments where exchange=:exchange and trading_symbol=:trading_symbol"),
             {"exchange": exchange, "trading_symbol": trading_symbol},
         ).first()
+        if row is None and exchange == "BSE":
+            row = conn.execute(
+                text("select id from instruments where bse_code=:bse_code or trading_symbol=:symbol limit 1"),
+                {"bse_code": symbol, "symbol": symbol},
+            ).first()
         if row is None:
             raise KeyError(f"instrument not found: {instrument_id}")
         return int(row[0])
@@ -123,12 +130,32 @@ class PostgresStorage:
                         """
                         insert into financial_filings (
                             instrument_id, period_end, filing_timestamp, source,
-                            consolidated, revision_number
-                        ) values (:instrument_id, :period_end, :filing_timestamp, :source, :consolidated, :revision_number)
+                            consolidated, revision_number, submission_type, audit_status,
+                            revised_at, revision_remarks, exchange_received_at,
+                            exchange_disseminated_at, filing_kind, external_id,
+                            details_uri, xbrl_uri, raw_payload
+                        ) values (
+                            :instrument_id, :period_end, :filing_timestamp, :source,
+                            :consolidated, :revision_number, :submission_type, :audit_status,
+                            :revised_at, :revision_remarks, :exchange_received_at,
+                            :exchange_disseminated_at, :filing_kind, :external_id,
+                            :details_uri, :xbrl_uri, cast(:raw_payload as jsonb)
+                        )
                         on conflict (
-                            instrument_id, period_end, filing_timestamp, source, revision_number
+                            instrument_id, period_end, filing_timestamp, source,
+                            consolidated, revision_number
                         ) do update set
-                            consolidated=excluded.consolidated,
+                            submission_type=excluded.submission_type,
+                            audit_status=excluded.audit_status,
+                            revised_at=excluded.revised_at,
+                            revision_remarks=excluded.revision_remarks,
+                            exchange_received_at=excluded.exchange_received_at,
+                            exchange_disseminated_at=excluded.exchange_disseminated_at,
+                            filing_kind=excluded.filing_kind,
+                            external_id=coalesce(excluded.external_id, financial_filings.external_id),
+                            details_uri=coalesce(excluded.details_uri, financial_filings.details_uri),
+                            xbrl_uri=coalesce(excluded.xbrl_uri, financial_filings.xbrl_uri),
+                            raw_payload=financial_filings.raw_payload || excluded.raw_payload,
                             ingested_at=now()
                         returning id
                         """
@@ -140,6 +167,17 @@ class PostgresStorage:
                         "source": filing.source,
                         "consolidated": filing.statement_scope.lower() == "consolidated",
                         "revision_number": filing.version,
+                        "submission_type": filing.submission_type,
+                        "audit_status": filing.audit_status,
+                        "revised_at": filing.revised_at,
+                        "revision_remarks": filing.revision_remarks,
+                        "exchange_received_at": filing.exchange_received_at,
+                        "exchange_disseminated_at": filing.exchange_disseminated_at,
+                        "filing_kind": filing.filing_kind,
+                        "external_id": filing.external_id,
+                        "details_uri": filing.details_uri,
+                        "xbrl_uri": filing.xbrl_uri,
+                        "raw_payload": json.dumps(filing.raw_payload),
                     },
                 ).scalar_one()
                 facts = {
@@ -160,13 +198,18 @@ class PostgresStorage:
                         conn.execute(
                             text(
                                 """
-                                insert into financial_facts (filing_id, fact_name, value)
-                                values (:filing_id, :fact_name, :value)
+                                insert into financial_facts (filing_id, fact_name, value, unit)
+                                values (:filing_id, :fact_name, :value, :unit)
                                 on conflict (filing_id, fact_name)
-                                do update set value=excluded.value
+                                do update set value=excluded.value, unit=excluded.unit
                                 """
                             ),
-                            {"filing_id": filing_id, "fact_name": fact_name, "value": value},
+                            {
+                                "filing_id": filing_id,
+                                "fact_name": fact_name,
+                                "value": value,
+                                "unit": "INR/share" if fact_name == "diluted_eps" else "INR crore",
+                            },
                         )
         return len(rows)
 
