@@ -119,7 +119,7 @@ class LiveValidationService:
 
     def approve(self, approval_id: str, *, actor: str) -> None:
         status = self.safety.status()
-        if status.execution_mode != "LIVE_VALIDATION" or status.emergency_stop or status.locked_reason:
+        if not status.can_place_validation_order:
             raise PermissionError("live-validation approval is blocked by safety state")
         with self.engine.begin() as conn:
             updated = conn.execute(text("""
