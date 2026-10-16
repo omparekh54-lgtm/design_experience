@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
-from datetime import date
+from datetime import date, datetime
 
 from sqlalchemy import create_engine
 
@@ -22,6 +22,8 @@ def parser() -> argparse.ArgumentParser:
     sub=p.add_subparsers(dest="command",required=True)
     sub.add_parser("status")
     m=sub.add_parser("mode"); m.add_argument("value",choices=["PAPER","LIVE_VALIDATION","LIVE_APPROVAL"])
+    sub.add_parser("enable-orders")
+    sub.add_parser("disable-orders")
     s=sub.add_parser("emergency-stop"); s.add_argument("--reason",default="operator_emergency_stop")
     sub.add_parser("reconcile-paper")
     snap=sub.add_parser("snapshot"); snap.add_argument("--date",type=date.fromisoformat,default=date.today())
@@ -60,6 +62,17 @@ def parser() -> argparse.ArgumentParser:
 
     approve=sub.add_parser("live-approve"); approve.add_argument("approval_id")
     reject=sub.add_parser("live-reject"); reject.add_argument("approval_id"); reject.add_argument("--reason",required=True)
+
+    obs=sub.add_parser("live-observe")
+    obs.add_argument("approval_id")
+    obs.add_argument("--expected-price",type=float,required=True)
+    obs.add_argument("--fill-price",type=float,required=True)
+    obs.add_argument("--quantity",type=int,required=True)
+    obs.add_argument("--executed-at",type=datetime.fromisoformat,required=True)
+    obs.add_argument("--fees",type=float,default=0.0)
+    obs.add_argument("--external-order-reference")
+    obs.add_argument("--reconciliation-ok",action="store_true")
+    obs.add_argument("--notes")
     return p
 
 
@@ -71,6 +84,10 @@ def main():
         print(json.dumps(safety.status().__dict__,indent=2,default=str)); return
     if args.command=="mode":
         safety.set_mode(args.value,"cli_operator"); print(f"mode={args.value} new_orders_enabled=false"); return
+    if args.command=="enable-orders":
+        safety.enable_new_orders("cli_operator"); print("new_orders_enabled=true"); return
+    if args.command=="disable-orders":
+        safety.disable_new_orders("cli_operator"); print("new_orders_enabled=false"); return
     if args.command=="emergency-stop":
         safety.emergency_stop(args.reason,"cli_operator"); print(f"stopped reason={args.reason}"); return
     if args.command=="reconcile-paper":
@@ -100,6 +117,9 @@ def main():
         LiveValidationService(engine).approve(args.approval_id,actor="cli_operator"); print("approved_for_manual_submission"); return
     if args.command=="live-reject":
         LiveValidationService(engine).reject(args.approval_id,actor="cli_operator",reason=args.reason); print("rejected"); return
+    if args.command=="live-observe":
+        oid=LiveValidationService(engine).record_observation(args.approval_id,expected_price=args.expected_price,fill_price=args.fill_price,quantity=args.quantity,executed_at=args.executed_at,reconciliation_ok=args.reconciliation_ok,actor="cli_operator",fees=args.fees,external_order_reference=args.external_order_reference,notes=args.notes)
+        print(oid); return
 
 
 if __name__=="__main__": main()
