@@ -15,6 +15,15 @@ create index if not exists instruments_angel_token_idx
 create index if not exists daily_prices_trade_date_idx
   on daily_prices (trade_date desc);
 
+create unique index if not exists financial_filings_identity_uq
+  on financial_filings (
+    instrument_id,
+    period_end,
+    filing_timestamp,
+    source,
+    revision_number
+  );
+
 create table if not exists data_quality_issues (
   id bigserial primary key,
   dataset text not null,
