@@ -23,11 +23,11 @@ class LiveValidationLimits:
 
 
 class LiveValidationService:
-    """Creates tightly bounded live-validation proposals.
+    """Creates tightly bounded live-validation proposals and evidence records.
 
     This service never sends an order to a broker. Approval records are an
-    operator decision artifact that can be reviewed before any separate manual
-    broker action is taken.
+    operator decision artifact; separately executed real-world orders can be
+    recorded as observations for validation evidence.
     """
 
     def __init__(self, engine: Engine):
@@ -135,15 +135,49 @@ class LiveValidationService:
             conn.execute(text("update live_order_approvals set status='REJECTED',rejection_reason=:reason,approved_by=:actor,approved_at=:now where id=:id and status='PROPOSED'"), {"id":approval_id,"reason":reason,"actor":actor,"now":datetime.now(timezone.utc)})
         self.audit.record(AuditEvent("LIVE_ORDER_REJECTED", actor, {"reason":reason}, entity_type="live_order_approval", entity_id=approval_id))
 
+    def record_observation(self, approval_id: str, *, expected_price: float, fill_price: float, quantity: int, executed_at: datetime, reconciliation_ok: bool, actor: str, fees: float = 0.0, external_order_reference: str | None = None, notes: str | None = None) -> str:
+        if expected_price <= 0 or fill_price <= 0 or quantity <= 0 or fees < 0:
+            raise ValueError("invalid live-validation observation")
+        with self.engine.connect() as conn:
+            approval = conn.execute(text("select status,quantity from live_order_approvals where id=:id"), {"id":approval_id}).mappings().first()
+        if not approval or approval["status"] != "APPROVED":
+            raise RuntimeError("observation requires an APPROVED proposal")
+        if quantity > int(approval["quantity"]):
+            raise RuntimeError("observed quantity exceeds approved quantity")
+        slippage_bps = (float(fill_price) / float(expected_price) - 1.0) * 10000.0
+        observation_id = str(uuid4())
+        with self.engine.begin() as conn:
+            conn.execute(text("""
+                insert into live_validation_observations
+                (id,approval_id,external_order_reference,executed_at,expected_price,fill_price,quantity,fees,slippage_bps,reconciliation_ok,notes,recorded_by)
+                values (:id,:approval,:external,:executed,:expected,:fill,:qty,:fees,:slippage,:recon,:notes,:actor)
+            """), {"id":observation_id,"approval":approval_id,"external":external_order_reference,"executed":executed_at,"expected":expected_price,"fill":fill_price,"qty":quantity,"fees":fees,"slippage":slippage_bps,"recon":reconciliation_ok,"notes":notes,"actor":actor})
+        self.audit.record(AuditEvent("LIVE_VALIDATION_OBSERVATION_RECORDED", actor, {"approval_id":approval_id,"slippage_bps":slippage_bps,"reconciliation_ok":reconciliation_ok}, entity_type="live_validation_observation", entity_id=observation_id))
+        return observation_id
+
     def close_session(self, session_id: str, *, actor: str, completed: bool, notes: str | None = None) -> None:
         session = self._session(session_id)
         if session["status"] != "ACTIVE":
             raise RuntimeError("only ACTIVE sessions can be closed")
         with self.engine.connect() as conn:
             unresolved = int(conn.execute(text("select count(*) from live_order_approvals where session_id=:id and status='PROPOSED'"), {"id":session_id}).scalar_one())
+            approved_without_evidence = int(conn.execute(text("""
+                select count(*) from live_order_approvals a
+                left join live_validation_observations o on o.approval_id=a.id
+                where a.session_id=:id and a.status='APPROVED' and o.id is null
+            """), {"id":session_id}).scalar_one())
+            bad_reconciliation = int(conn.execute(text("""
+                select count(*) from live_validation_observations o
+                join live_order_approvals a on a.id=o.approval_id
+                where a.session_id=:id and o.reconciliation_ok=false
+            """), {"id":session_id}).scalar_one())
         if completed and unresolved:
             raise RuntimeError("cannot complete a session with unresolved order proposals")
+        if completed and approved_without_evidence:
+            raise RuntimeError("cannot complete a session until every approved proposal has execution evidence")
+        if completed and bad_reconciliation:
+            raise RuntimeError("cannot complete a session with unreconciled validation observations")
         status = "COMPLETED" if completed else "ABORTED"
         with self.engine.begin() as conn:
             conn.execute(text("update live_validation_sessions set status=:status,ended_at=:now,closed_by=:actor,notes=coalesce(:notes,notes) where id=:id"), {"status":status,"now":datetime.now(timezone.utc),"actor":actor,"notes":notes,"id":session_id})
-        self.audit.record(AuditEvent("LIVE_VALIDATION_SESSION_CLOSED", actor, {"status":status,"unresolved_proposals":unresolved}, entity_type="live_validation_session", entity_id=session_id))
+        self.audit.record(AuditEvent("LIVE_VALIDATION_SESSION_CLOSED", actor, {"status":status,"unresolved_proposals":unresolved,"approved_without_evidence":approved_without_evidence,"unreconciled_observations":bad_reconciliation}, entity_type="live_validation_session", entity_id=session_id))
