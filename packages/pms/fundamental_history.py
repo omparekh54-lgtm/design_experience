@@ -23,10 +23,10 @@ class FinancialPeriod:
 class FinancialHistoryMetrics:
     quarterly_sales_cr: float
     pat_cr: float
-    sales_yoy_pct: float
-    operating_profit_yoy_pct: float
-    pat_yoy_pct: float
-    eps_yoy_pct: float
+    sales_yoy_pct: float | None
+    operating_profit_yoy_pct: float | None
+    pat_yoy_pct: float | None
+    eps_yoy_pct: float | None
     positive_growth_quarters_last_4: int
     ttm_sales_rising: bool
     ttm_profit_rising: bool
@@ -102,15 +102,12 @@ def calculate_financial_history(
     consistency_metrics: tuple[str, ...] = ("sales", "pat"),
     min_ocf_to_pat: float = 0.7,
 ) -> FinancialHistoryMetrics:
-    """Calculate Module A financial history using only point-in-time-selected filings.
+    """Calculate Module A metrics from point-in-time-selected exchange filings.
 
-    `history` may contain quarterly and annual records, but each period should already
-    be de-duplicated to the filing version/scope that was knowable at the requested
-    as-of timestamp.
-
-    The rules document says "positive YoY in >=3/4 quarters" without naming a
-    specific line item. The implementation therefore makes the consistency metrics
-    explicit/configurable; v1 defaults to both Sales and PAT being positive YoY.
+    The source rules say "positive YoY in >=3/4 quarters" without identifying a
+    specific line item. That interpretation is therefore explicit/configurable;
+    v1 defaults to requiring both Sales and PAT YoY to be positive for a quarter
+    to count toward the consistency test.
     """
     periods = [_as_period(row) for row in history]
     quarters = sorted(
@@ -137,15 +134,15 @@ def calculate_financial_history(
     if latest_pat is None:
         flags.append("pat_missing")
 
-    yoy: dict[str, float | None] = {key: _quarter_yoy(quarters, 0, key) for key in CORE_GROWTH_METRICS}
+    yoy = {key: _quarter_yoy(quarters, 0, key) for key in CORE_GROWTH_METRICS}
     for key, value in yoy.items():
         if value is None:
             flags.append(f"{key}_yoy_unavailable")
 
     positive_quarters = 0
     for idx in range(min(4, len(quarters))):
-        metric_growth = [_quarter_yoy(quarters, idx, key) for key in consistency_metrics]
-        if metric_growth and all(value is not None and value > 0 for value in metric_growth):
+        growth = [_quarter_yoy(quarters, idx, key) for key in consistency_metrics]
+        if growth and all(value is not None and value > 0 for value in growth):
             positive_quarters += 1
     if len(quarters) < 8:
         flags.append("eight_quarter_history_incomplete")
@@ -155,18 +152,22 @@ def calculate_financial_history(
     current_ttm_pat = _sum_metric(quarters[:4], "pat") if len(quarters) >= 4 else None
     previous_ttm_pat = _sum_metric(quarters[4:8], "pat") if len(quarters) >= 8 else None
     ttm_sales_rising = (
-        current_ttm_sales is not None and previous_ttm_sales is not None and current_ttm_sales > previous_ttm_sales
+        current_ttm_sales is not None
+        and previous_ttm_sales is not None
+        and current_ttm_sales > previous_ttm_sales
     )
     ttm_profit_rising = (
-        current_ttm_pat is not None and previous_ttm_pat is not None and current_ttm_pat > previous_ttm_pat
+        current_ttm_pat is not None
+        and previous_ttm_pat is not None
+        and current_ttm_pat > previous_ttm_pat
     )
 
     acceleration_values: list[float] = []
     for key in CORE_GROWTH_METRICS:
         current_yoy = yoy[key]
-        previous_quarter_yoy = _quarter_yoy(quarters, 1, key) if len(quarters) >= 6 else None
-        if current_yoy is not None and previous_quarter_yoy is not None:
-            acceleration_values.append(current_yoy - previous_quarter_yoy)
+        previous_yoy = _quarter_yoy(quarters, 1, key) if len(quarters) >= 6 else None
+        if current_yoy is not None and previous_yoy is not None:
+            acceleration_values.append(current_yoy - previous_yoy)
     growth_acceleration = max(acceleration_values) if acceleration_values else None
     if growth_acceleration is not None and growth_acceleration >= 10.0:
         triggers.append("growth_acceleration_10pp")
@@ -175,7 +176,10 @@ def calculate_financial_history(
     prior_year_margin = None
     if len(quarters) >= 5:
         prior = quarters[4]
-        prior_year_margin = _margin(_number(prior.facts.get("operating_profit")), _number(prior.facts.get("sales")))
+        prior_year_margin = _margin(
+            _number(prior.facts.get("operating_profit")),
+            _number(prior.facts.get("sales")),
+        )
     margin_expansion_bps = None
     if current_margin is not None and prior_year_margin is not None:
         margin_expansion_bps = (current_margin - prior_year_margin) * 10_000.0
@@ -211,7 +215,8 @@ def calculate_financial_history(
         (
             p
             for p in annual
-            if _number(p.facts.get("operating_cash_flow")) is not None and _number(p.facts.get("pat")) is not None
+            if _number(p.facts.get("operating_cash_flow")) is not None
+            and _number(p.facts.get("pat")) is not None
         ),
         None,
     )
@@ -241,21 +246,18 @@ def calculate_financial_history(
     if _number(latest.facts.get("other_income")) is not None:
         flags.append("other_income_review_required")
 
-    # The document calls for sector-adjusted leverage/coverage guards but does
-    # not define numerical thresholds. Calculate and expose the ratios without
-    # inventing pass/fail cutoffs. Annual OCF/PAT is the objective quality guard
-    # that can be enforced from the currently confirmed rules.
+    # Sector-adjusted leverage and coverage thresholds are required by the rules,
+    # but the source specification does not supply numerical cutoffs. Ratios are
+    # therefore calculated/exposed without inventing pass/fail thresholds.
     quality_pass = ocf_to_pat is not None and ocf_to_pat >= min_ocf_to_pat
 
     return FinancialHistoryMetrics(
         quarterly_sales_cr=latest_sales or 0.0,
         pat_cr=latest_pat or 0.0,
-        sales_yoy_pct=yoy["sales"] if yoy["sales"] is not None else float("-inf"),
-        operating_profit_yoy_pct=(
-            yoy["operating_profit"] if yoy["operating_profit"] is not None else float("-inf")
-        ),
-        pat_yoy_pct=yoy["pat"] if yoy["pat"] is not None else float("-inf"),
-        eps_yoy_pct=yoy["diluted_eps"] if yoy["diluted_eps"] is not None else float("-inf"),
+        sales_yoy_pct=yoy["sales"],
+        operating_profit_yoy_pct=yoy["operating_profit"],
+        pat_yoy_pct=yoy["pat"],
+        eps_yoy_pct=yoy["diluted_eps"],
         positive_growth_quarters_last_4=positive_quarters,
         ttm_sales_rising=ttm_sales_rising,
         ttm_profit_rising=ttm_profit_rising,
