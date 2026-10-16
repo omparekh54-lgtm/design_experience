@@ -29,6 +29,12 @@ export const api = {
   researchRuns: () => request<{ count: number; runs: any[] }>("/v1/research/runs"),
   stress: () => request<{ count: number; runs: any[] }>("/v1/research/stress"),
   walkForward: () => request<{ count: number; runs: any[] }>("/v1/research/walk-forward"),
+  executionSafety: () => request<any>("/v1/execution/safety"),
+  executionReadiness: () => request<any>("/v1/execution/readiness"),
+  latestPaperValidation: () => request<any>("/v1/execution/paper-validation/latest"),
+  latestReconciliation: () => request<any>("/v1/execution/reconciliation/latest"),
+  workers: () => request<{ count: number; runs: any[] }>("/v1/execution/workers"),
+  audit: (limit = 25) => request<{ count: number; events: any[] }>(`/v1/execution/audit?limit=${limit}`),
 };
 
 export function formatMoney(value: unknown): string {
