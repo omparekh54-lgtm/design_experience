@@ -1,12 +1,14 @@
 from __future__ import annotations
 
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timedelta
 
 from celery import shared_task
 from sqlalchemy import text
 
 from packages.pms.module_a_pipeline import ModuleAPipeline
+from packages.pms.paper_validation import PaperValidationService
 from packages.pms.portfolio_accounting import PortfolioAccountingService
+from packages.pms.production_readiness import ProductionReadinessController
 from packages.pms.safety import SafetyController
 from packages.pms.workers import _engine, _record, _finish
 
@@ -59,6 +61,30 @@ def research_snapshot(trade_date: str | None = None):
         snap = PortfolioAccountingService(engine).snapshot(d, "PAPER")
         PortfolioAccountingService(engine).persist_snapshot(snap)
         payload={"trade_date":str(d),"module_c_selected":selected,"regime":dict(regime) if regime else None,"paper_nav":snap.nav}
+        _finish(engine,run_id,"SUCCESS",payload); return payload
+    except Exception as exc:
+        _finish(engine,run_id,"FAILED",{"error":str(exc)}); raise
+
+
+@shared_task(name="pms.paper_validation")
+def paper_validation(lookback_days: int = 60):
+    engine, run_id = _record("research_worker", "paper_validation")
+    end = date.today(); start = end - timedelta(days=max(1, lookback_days) - 1)
+    try:
+        result = PaperValidationService(engine).evaluate(start, end, actor="paper_validation_worker")
+        payload={"validation_id":result.run_id,"passed":result.passed,"metrics":result.metrics,"gates":result.gates}
+        _finish(engine,run_id,"SUCCESS" if result.passed else "NOT_READY",payload); return payload
+    except Exception as exc:
+        _finish(engine,run_id,"FAILED",{"error":str(exc)}); raise
+
+
+@shared_task(name="pms.readiness_refresh")
+def readiness_refresh():
+    engine, run_id = _record("execution_worker", "readiness_refresh")
+    try:
+        controller = ProductionReadinessController(engine)
+        result = controller.evaluate(); controller.persist(result, actor="readiness_worker")
+        payload={"stage":result.stage,"readiness_status":result.readiness_status,"gates":result.gates,"details":result.details}
         _finish(engine,run_id,"SUCCESS",payload); return payload
     except Exception as exc:
         _finish(engine,run_id,"FAILED",{"error":str(exc)}); raise
