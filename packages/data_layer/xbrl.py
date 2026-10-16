@@ -22,8 +22,6 @@ class XbrlFact:
     instant: date | None
 
 
-# Indian exchange XBRL taxonomies have changed over time. Keep aliases broad and
-# resolve by local XML element name rather than hard-coding one namespace URI.
 FACT_ALIASES: dict[str, tuple[str, ...]] = {
     "sales": (
         "RevenueFromOperations",
@@ -194,8 +192,6 @@ def _is_inr_unit(unit: str | None) -> bool:
 
 
 def _normalize_value(key: str, fact: XbrlFact) -> Decimal:
-    # Canonical monetary storage for PMS fundamentals is INR crore. EPS remains
-    # INR/share. XBRL monetary facts with explicit INR units are normally base INR.
     if key == "diluted_eps" or _is_eps_unit(fact.unit):
         return fact.value
     if _is_inr_unit(fact.unit):
@@ -218,7 +214,7 @@ def extract_canonical_financials(
                 _period_score(f, period_end),
                 1 if (key == "diluted_eps" and _is_eps_unit(f.unit)) else 0,
                 1 if _is_inr_unit(f.unit) else 0,
-                -(f.period_start.toordinal() if f.period_start else 0),
+                f.period_start.toordinal() if f.period_start else 0,
             ),
             reverse=True,
         )
