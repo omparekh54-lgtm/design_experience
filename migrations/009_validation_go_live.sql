@@ -59,6 +59,22 @@ create table if not exists live_order_approvals (
   rejection_reason text
 );
 
+create table if not exists live_validation_observations (
+  id uuid primary key,
+  approval_id uuid not null unique references live_order_approvals(id) on delete cascade,
+  external_order_reference text,
+  executed_at timestamptz not null,
+  expected_price numeric not null,
+  fill_price numeric not null,
+  quantity integer not null,
+  fees numeric not null default 0,
+  slippage_bps numeric not null default 0,
+  reconciliation_ok boolean not null default false,
+  notes text,
+  recorded_at timestamptz not null default now(),
+  recorded_by text not null
+);
+
 create table if not exists production_readiness (
   singleton boolean primary key default true check (singleton),
   stage text not null default 'PAPER',
@@ -77,6 +93,7 @@ on conflict (singleton) do nothing;
 create index if not exists paper_validation_runs_date_idx on paper_validation_runs(created_at desc);
 create index if not exists live_validation_sessions_status_idx on live_validation_sessions(status, created_at desc);
 create index if not exists live_order_approvals_status_idx on live_order_approvals(status, proposed_at desc);
+create index if not exists live_validation_observations_time_idx on live_validation_observations(executed_at desc);
 
 create or replace function audit_operational_change() returns trigger as $$
 declare
@@ -97,7 +114,10 @@ begin
   entity := coalesce(after_json->>'id', before_json->>'id', after_json->>'singleton', before_json->>'singleton');
   insert into audit_log(event_type,actor,payload,entity_type,entity_id,before_state,after_state)
   values (upper(tg_table_name)||'_'||tg_op,'db_trigger',jsonb_build_object('operation',tg_op),tg_table_name,entity,before_json,after_json);
-  return coalesce(new, old);
+  if tg_op = 'DELETE' then
+    return old;
+  end if;
+  return new;
 end;
 $$ language plpgsql;
 
@@ -107,7 +127,7 @@ begin
   foreach t in array array[
     'broker_orders','broker_fills','portfolio_ledger','portfolio_snapshots',
     'reconciliation_runs','worker_runs','safety_state','paper_validation_runs',
-    'live_validation_sessions','live_order_approvals','production_readiness'
+    'live_validation_sessions','live_order_approvals','live_validation_observations','production_readiness'
   ] loop
     execute format('drop trigger if exists audit_%I on %I', t, t);
     execute format('create trigger audit_%I after insert or update or delete on %I for each row execute function audit_operational_change()', t, t);
