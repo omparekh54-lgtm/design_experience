@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from typing import Any
 
 import pyotp
-from SmartApi import SmartConnect
 
 
 @dataclass(frozen=True)
@@ -37,12 +37,20 @@ class AngelSessionTokens:
 
 def create_angel_session(
     credentials: AngelCredentials | None = None,
-) -> tuple[SmartConnect, AngelSessionTokens]:
-    """Create an authenticated SmartAPI session.
+) -> tuple[Any, AngelSessionTokens]:
+    """Create an authenticated SmartAPI session only when Angel access is needed.
 
-    Angel sessions expire at midnight, so deployment workers should create a
-    fresh session each trading day and never persist these tokens in GitHub.
+    SmartAPI and its optional runtime dependencies are intentionally imported lazily
+    so research, paper-broker and scheduler processes can start without loading the
+    live broker SDK. Angel sessions expire at midnight; deployment workers should
+    create a fresh session each trading day and never persist tokens in GitHub.
     """
+    try:
+        from SmartApi import SmartConnect
+    except ModuleNotFoundError as exc:
+        raise RuntimeError(
+            "Angel SmartAPI runtime dependency is unavailable; install the broker runtime extras before using Angel execution"
+        ) from exc
 
     credentials = credentials or AngelCredentials.from_env()
     client = SmartConnect(api_key=credentials.api_key)
