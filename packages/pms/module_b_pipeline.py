@@ -93,45 +93,36 @@ class ModuleBPipeline:
                         "velocity": round(tracker.velocity(), 4),
                         "entry_window_days": int(t["entry_window_days"]),
                     }
-                # A completed setup does not permanently block a later independent rally.
                 tracker = RallyTracker()
         return latest_signal
 
-    def evaluate(self, instrument_id: str, as_of: date) -> ModuleBResult:
+    def evaluate(self, instrument_id: str, as_of: date, *, require_module_a: bool = True) -> ModuleBResult:
         t = self.cfg["technical"]
         rejected: list[str] = []
         candles = self._candles(instrument_id, as_of)
         if len(candles) < int(t["min_history_days"]):
             return ModuleBResult(instrument_id, as_of, False, ("insufficient_history",), None)
 
-        _, a_decision = self.module_a.evaluate(
-            instrument_id, datetime.combine(as_of, datetime.max.time()).replace(microsecond=0)
-        )
-        if not a_decision.eligible:
-            rejected.append("module_a_ineligible")
+        if require_module_a:
+            _, a_decision = self.module_a.evaluate(
+                instrument_id, datetime.combine(as_of, datetime.max.time()).replace(microsecond=0)
+            )
+            if not a_decision.eligible:
+                rejected.append("module_a_ineligible")
 
         features = compute_features(candles).data
         latest = features.iloc[-1]
-        if float(latest["close"]) <= float(t["min_price"]):
-            rejected.append("price")
-        if float(latest.get("avg_volume20", 0) or 0) <= float(t["min_avg_volume_20d"]):
-            rejected.append("avg_volume_20d")
-        if float(latest.get("worst_volume20", 0) or 0) <= float(t["min_worst_day_volume_20d"]):
-            rejected.append("worst_volume_20d")
+        if float(latest["close"]) <= float(t["min_price"]): rejected.append("price")
+        if float(latest.get("avg_volume20", 0) or 0) <= float(t["min_avg_volume_20d"]): rejected.append("avg_volume_20d")
+        if float(latest.get("worst_volume20", 0) or 0) <= float(t["min_worst_day_volume_20d"]): rejected.append("worst_volume_20d")
         turnover_cr = float(latest.get("avg_turnover20", 0) or 0) / 10_000_000.0
-        if turnover_cr < float(t["min_avg_turnover_20d_cr"]):
-            rejected.append("turnover_low")
-        if turnover_cr > float(t["max_avg_turnover_20d_cr"]):
-            rejected.append("turnover_high")
-        if float(latest.get("adr20_pct", 0) or 0) < float(t["min_adr_20d_pct"]):
-            rejected.append("adr")
-        high52 = float(latest.get("high_52w", 0) or 0)
-        close = float(latest["close"])
+        if turnover_cr < float(t["min_avg_turnover_20d_cr"]): rejected.append("turnover_low")
+        if turnover_cr > float(t["max_avg_turnover_20d_cr"]): rejected.append("turnover_high")
+        if float(latest.get("adr20_pct", 0) or 0) < float(t["min_adr_20d_pct"]): rejected.append("adr")
+        high52 = float(latest.get("high_52w", 0) or 0); close = float(latest["close"])
         distance_pct = ((high52 - close) / high52 * 100.0) if high52 > 0 else 100.0
-        if distance_pct > float(t["max_distance_from_52w_high_pct"]):
-            rejected.append("distance_52w_high")
-        if self.reference.is_index_member(instrument_id, "NIFTY50", as_of):
-            rejected.append("nifty50_excluded")
+        if distance_pct > float(t["max_distance_from_52w_high_pct"]): rejected.append("distance_52w_high")
+        if self.reference.is_index_member(instrument_id, "NIFTY50", as_of): rejected.append("nifty50_excluded")
 
         future_rows = self.prices.daily_prices(instrument_id, as_of, as_of + timedelta(days=10), preferred_source=None)
         trading_dates = sorted({r["trade_date"] for r in future_rows if r["trade_date"] >= as_of})
@@ -141,11 +132,4 @@ class ModuleBPipeline:
 
         if rejected:
             return ModuleBResult(instrument_id, as_of, False, tuple(dict.fromkeys(rejected)), None)
-
-        return ModuleBResult(
-            instrument_id,
-            as_of,
-            True,
-            (),
-            self._latest_setup1_signal(features, as_of),
-        )
+        return ModuleBResult(instrument_id, as_of, True, (), self._latest_setup1_signal(features, as_of))
