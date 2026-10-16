@@ -7,6 +7,7 @@ const links = [
   ["Research", "/research"],
   ["Backtests", "/backtests"],
   ["Data Health", "/data-health"],
+  ["Operations", "/operations"],
 ];
 
 export function Shell({ children }: { children: ReactNode }) {
@@ -17,7 +18,7 @@ export function Shell({ children }: { children: ReactNode }) {
         <nav className="nav">
           {links.map(([label, href]) => <Link key={href} href={href}>{label}</Link>)}
         </nav>
-        <div className="sidebar-note">Research / paper mode only. Live execution remains disabled.</div>
+        <div className="sidebar-note">Paper and human-approved validation only. Unattended live execution is disabled.</div>
       </aside>
       <main className="main">
         <header className="topbar">
