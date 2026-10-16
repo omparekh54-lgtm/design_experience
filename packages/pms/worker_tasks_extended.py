@@ -1,0 +1,64 @@
+from __future__ import annotations
+
+from datetime import date, datetime, time
+
+from celery import shared_task
+from sqlalchemy import text
+
+from packages.pms.module_a_pipeline import ModuleAPipeline
+from packages.pms.portfolio_accounting import PortfolioAccountingService
+from packages.pms.safety import SafetyController
+from packages.pms.workers import _engine, _record, _finish
+
+
+def _day_end(d: date) -> datetime:
+    return datetime.combine(d, time(23, 59, 59))
+
+
+@shared_task(name="pms.financial_refresh")
+def financial_refresh(symbols: list[str], trade_date: str | None = None):
+    engine, run_id = _record("financial_worker", "module_a_refresh")
+    d = date.fromisoformat(trade_date) if trade_date else date.today()
+    pipeline = ModuleAPipeline(engine); results = []
+    try:
+        for instrument_id in symbols:
+            try:
+                snapshot, decision = pipeline.evaluate(instrument_id, _day_end(d))
+                results.append({"instrument_id": instrument_id, "eligible": decision.eligible, "score": decision.score})
+            except Exception as exc:
+                results.append({"instrument_id": instrument_id, "error": str(exc)})
+        _finish(engine, run_id, "SUCCESS", {"trade_date": str(d), "results": results})
+        return results
+    except Exception as exc:
+        _finish(engine, run_id, "FAILED", {"error": str(exc)}); raise
+
+
+@shared_task(name="pms.surveillance_guard")
+def surveillance_guard(max_age_days: int = 7):
+    engine, run_id = _record("surveillance_worker", "surveillance_guard")
+    try:
+        with engine.connect() as conn:
+            latest = conn.execute(text("select max(effective_from) from surveillance_history")).scalar_one_or_none()
+        stale = latest is None or (date.today() - latest.date()).days > max_age_days
+        if stale: SafetyController(engine).lock("surveillance_data_stale")
+        payload={"latest_surveillance": str(latest) if latest else None, "stale": stale}
+        _finish(engine,run_id,"DEGRADED" if stale else "SUCCESS",payload); return payload
+    except Exception as exc:
+        SafetyController(engine).lock("surveillance_guard_exception")
+        _finish(engine,run_id,"FAILED",{"error":str(exc)}); raise
+
+
+@shared_task(name="pms.research_snapshot")
+def research_snapshot(trade_date: str | None = None):
+    engine, run_id = _record("research_worker", "daily_snapshot")
+    d = date.fromisoformat(trade_date) if trade_date else date.today()
+    try:
+        with engine.connect() as conn:
+            selected = int(conn.execute(text("select count(*) from module_c_rankings where trade_date=:d and selected=true"), {"d": d}).scalar_one())
+            regime = conn.execute(text("select band,max_open_trades from market_regime_history where trade_date=:d"), {"d": d}).mappings().first()
+        snap = PortfolioAccountingService(engine).snapshot(d, "PAPER")
+        PortfolioAccountingService(engine).persist_snapshot(snap)
+        payload={"trade_date":str(d),"module_c_selected":selected,"regime":dict(regime) if regime else None,"paper_nav":snap.nav}
+        _finish(engine,run_id,"SUCCESS",payload); return payload
+    except Exception as exc:
+        _finish(engine,run_id,"FAILED",{"error":str(exc)}); raise
