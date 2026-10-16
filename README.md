@@ -9,13 +9,13 @@ This repository implements the v1 rules defined in `PMS_Rules_v1`: Module A (fun
 ## Architecture
 
 - `apps/api` — FastAPI service
-- `packages/pms` — deterministic strategy, risk and domain logic
+- `packages/pms` — deterministic strategy, risk, trade-state, transaction-cost and backtest logic
 - `packages/data_layer` — normalized instruments, OHLCV, official filings, XBRL, reference data, corporate actions and point-in-time queries
 - `packages/finstack_gateway` — strategy-facing boundary for point-in-time data access
 - `migrations` — PostgreSQL / Supabase point-in-time schema
-- `scripts` — operational ingestion commands
-- `config` — versioned strategy parameters
-- `tests` — strategy and data regression tests
+- `scripts` — ingestion and research/backtest commands
+- `config` — versioned strategy and backtest parameters
+- `tests` — strategy, data and backtest regression tests
 - `apps/web` — Next.js dashboard shell (after backend contracts stabilize)
 
 ## Safety / execution status
@@ -43,21 +43,22 @@ migrations/001_initial_schema.sql
 migrations/002_data_layer.sql
 migrations/003_exchange_financials.sql
 migrations/004_phases_1_5.sql
+migrations/005_backtest_engine.sql
 ```
 
 Migration 004 adds historical shareholding/pledge data, shares outstanding, sector history, index constituents, corporate actions, earnings calendar, Module A history, Module B signals and trade-state events.
+
+Migration 005 adds persisted trades plus versioned backtest runs, events and fills.
 
 ## Phases 1–5 implemented
 
 ### Phase 1 — Fully automatic Module A inputs
 
-`ModuleAPipeline` now combines point-in-time financial filings with stored shareholding/pledge history, historical shares outstanding, price history, average traded value and ASM/GSM state. Historical market cap is reconstructed as historical close × shares outstanding. Missing hard-filter data fails closed and is surfaced as a flag rather than silently passing.
-
-Official NSE shareholding/pledge CSV exports can be ingested through `scripts/ingest_reference_csv.py`. This file-import path is intentionally supported because NSE may block some cloud hosts; the scheduler can run the same ingestion from an India/local worker.
+`ModuleAPipeline` combines point-in-time financial filings with stored shareholding/pledge history, historical shares outstanding, price history, average traded value and ASM/GSM state. Historical market cap is reconstructed as historical close × shares outstanding. Missing hard-filter data fails closed and is surfaced as a flag rather than silently passing.
 
 ### Phase 2 — Historical tradable universe
 
-The data layer now tracks listing/delisting windows, sector history and index membership intervals. `ReferenceDataQueries.universe_as_of()` reconstructs the exchange universe for a historical date, and `is_index_member()` supports point-in-time exclusions such as NIFTY50.
+The data layer tracks listing/delisting windows, sector history and index membership intervals. `ReferenceDataQueries.universe_as_of()` reconstructs the exchange universe for a historical date, and `is_index_member()` supports point-in-time exclusions such as NIFTY50.
 
 ### Phase 3 — Corporate-action adjustments
 
@@ -65,11 +66,41 @@ The data layer now tracks listing/delisting windows, sector history and index me
 
 ### Phase 4 — Real-data Module B pipeline
 
-`ModuleBPipeline` now pulls stored daily prices and Module A eligibility, applies the documented price/volume/turnover/ADR/52-week-high/NIFTY50/result-blackout filters, runs the rally state machine, and returns a normalized Setup-1 signal from real point-in-time data.
+`ModuleBPipeline` pulls stored daily prices and Module A eligibility, applies the documented price/volume/turnover/ADR/52-week-high/NIFTY50/result-blackout filters, runs the rally state machine, and can detect repeated independent Setup-1 signals through history.
 
 ### Phase 5 — Shared trade engine
 
-`packages/pms/trade_engine.py` models signal -> pending entry -> fill -> Leg 1 -> Leg 2 -> close/cancel states. It implements the three-trading-day buy-stop window, gap-up fills with stop/size recalculation, intraday stop handling, 9EMA arming, partial/full Leg-1 decisions, breakeven protection, 21EMA Leg-2 exit and re-entry eligibility. EMA exits are generated after close and executed at the next market open.
+`packages/pms/trade_engine.py` models signal -> pending entry -> fill -> Leg 1 -> Leg 2 -> close/cancel states. It implements the three-trading-day buy-stop window, gap-up fills with stop/size recalculation, intraday stop handling, 9EMA arming, partial/full Leg-1 decisions, breakeven protection and 21EMA Leg-2 exits. EMA exits are generated after close and executed at the next market open.
+
+## Phases 6–8 implemented
+
+### Phase 6 — Complete exit and re-entry lifecycle
+
+The trade engine preserves the Leg-2 EMA21 exit-signal candle and can create the rule-defined re-entry order from that candle's high/low. Automatic re-entry is available only after a Leg-2 EMA21 exit; stop-loss and Leg-1 loss exits do not create this re-entry path. The backtester reuses this exact state machine and can require point-in-time Module A eligibility before activating the re-entry.
+
+### Phase 7 — Event-driven backtester
+
+`packages/pms/backtest.py` processes daily market-open, bar, signal, fill, state-change, re-entry and market-close events. Entries begin only after a close-generated signal. EMA exits execute at the following open. Stops remain intraday. Gap fills, same-day stop ambiguity (configurable conservative mode), cash limits and the seven-position capacity guard are modeled.
+
+`DatabaseBacktestStrategy` reuses production `ModuleAPipeline`, `ModuleBPipeline`, corporate-action-adjusted candles and the shared trade engine. There is no separate simplified backtest strategy.
+
+Run a database-backed test with:
+
+```bash
+python scripts/run_backtest.py \
+  --symbols NSE:ABC,NSE:XYZ \
+  --start 2022-01-01 \
+  --end 2026-10-16 \
+  --capital 10000000
+```
+
+The result is persisted by default to `backtest_runs`, `backtest_events` and `backtest_fills`. Add `--no-persist` for an ad-hoc run.
+
+### Phase 8 — Indian transaction-cost model
+
+`packages/pms/costs.py` models delivery-market STT, stamp duty, NSE cash-market transaction charges, SEBI turnover fees, GST, brokerage, slippage and impact cost. Statutory/exchange rates are stored in versioned configuration, with dated NSE cash-market charge handling. Brokerage, slippage and impact assumptions are deliberately configurable.
+
+Default research assumptions are in `config/strategy_v1.yaml` under `backtest`.
 
 ## Market data
 
@@ -111,6 +142,8 @@ Corporate-action exports can be loaded with `--corporate-actions SYMBOL:FILE` an
 5. Backtests use `as_of` semantics to prevent look-ahead bias.
 6. Primary and secondary official sources can be reconciled independently.
 7. Missing hard-filter data fails closed.
+8. Backtest and live/paper execution share the same trade-state logic.
+9. Costs and strategy configuration are versioned with the run.
 
 ## Important
 
