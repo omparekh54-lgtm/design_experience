@@ -29,7 +29,7 @@ def test_regime_upgrade_requires_two_closes_but_downgrade_is_immediate():
     high2 = tracker.update(healthy_regime_inputs(), cfg)
     assert high1.band == first.band or high1.max_open_trades <= high2.max_open_trades
     assert high2.max_open_trades >= high1.max_open_trades
-    down = tracker.update(healthy_regime_inputs(midcap_close=80, midcap_dma50=100, midcap_dma200=110, breadth_above_50dma_pct=20))
+    down = tracker.update(healthy_regime_inputs(midcap_close=80, midcap_dma50=100, midcap_dma200=110, breadth_above_50dma_pct=20), cfg)
     assert down.max_open_trades == 0
 
 
