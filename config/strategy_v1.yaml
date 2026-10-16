@@ -1,0 +1,54 @@
+version: PMS_v1.0.0
+
+fundamental:
+  min_market_cap_cr: 1000
+  min_avg_traded_value_cr: 2
+  max_promoter_pledge_pct: 20
+  min_quarterly_sales_cr: 50
+  require_positive_pat: true
+  min_sales_yoy_pct: 15
+  min_operating_profit_yoy_pct: 20
+  min_pat_yoy_pct: 25
+  min_eps_yoy_pct: 20
+  min_positive_quarters_last_4: 3
+  min_ocf_to_pat: 0.7
+
+technical:
+  min_price: 30
+  min_avg_volume_20d: 100000
+  min_worst_day_volume_20d: 75000
+  min_avg_turnover_20d_cr: 1
+  max_avg_turnover_20d_cr: 500
+  min_adr_20d_pct: 3
+  max_distance_from_52w_high_pct: 50
+  min_history_days: 252
+  earnings_blackout_trading_days: 3
+  rally_min_pct: 15
+  rally_min_velocity_pct_per_day: 1
+  rally_max_days: 30
+  rally_min_volume_ratio: 1.5
+  entry_window_days: 3
+
+risk:
+  risk_per_trade_pct: 0.5
+  max_position_pct: 10
+  max_portfolio_heat_pct: 3.5
+  max_open_trades: 7
+  max_positions_per_sector: 2
+  raw_stop_buffer_pct: 0.5
+  max_stop_risk_pct: 5.5
+
+ranking:
+  minimum_score: 60
+  rally_quality_points: 25
+  pullback_quality_points: 20
+  fundamental_strength_points: 20
+  relative_strength_points: 15
+  proximity_52w_high_points: 10
+  sector_strength_points: 10
+
+regime:
+  defensive_below: 35
+  weak_below: 50
+  neutral_below: 65
+  healthy_below: 80
