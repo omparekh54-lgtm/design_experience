@@ -27,7 +27,7 @@ class BacktestEvent:
     event_type:EventType; trade_date:date; instrument_id:str|None=None; payload:dict=field(default_factory=dict)
 @dataclass
 class BacktestResult:
-    initial_capital:float; ending_cash:float; realized_gross_pnl:float; total_costs:float; realized_net_pnl:float; return_pct:float; fills:list[Fill]; events:list[BacktestEvent]; closed_trades:int
+    initial_capital:float; ending_cash:float; realized_gross_pnl:float; total_costs:float; realized_net_pnl:float; return_pct:float; fills:list[Fill]; events:list[BacktestEvent]; closed_trades:int; equity_curve:list[tuple[date,float]]=field(default_factory=list)
 
 SignalProvider=Callable[[date],Iterable[Signal]]
 EligibilityProvider=Callable[[str,date],bool]
@@ -36,7 +36,7 @@ CapacityProvider=Callable[[date],int]
 class EventDrivenBacktester:
     def __init__(self, initial_capital:float|None=None, cfg:dict|None=None):
         self.cfg=cfg or load_strategy_config(); bt=self.cfg["backtest"]; self.initial_capital=float(initial_capital or bt["initial_capital"]); self.cash=self.initial_capital
-        self.positions={}; self.fills=[]; self.events=[]; self.total_costs=0.0; self.realized_gross_pnl=0.0; self.closed_trade_count=0
+        self.positions={}; self.fills=[]; self.events=[]; self.total_costs=0.0; self.realized_gross_pnl=0.0; self.closed_trade_count=0; self.equity_curve=[]
     def _active_count(self):
         return sum(1 for p in self.positions.values() if p.state not in {TradeState.CLOSED,TradeState.CANCELLED})
     def _record_fill(self,*,d,instrument_id,side,price,qty,reason):
@@ -72,6 +72,13 @@ class EventDrivenBacktester:
             price=float(position.history[-1].get("price",bar.close)); self._record_fill(d=bar.trade_date,instrument_id=position.instrument_id,side="SELL",price=price,qty=before_remaining,reason=position.exit_reason or "exit"); self.closed_trade_count+=1
         self.realized_gross_pnl+=position.realized_pnl-before_pnl
         if position.state!=before_state:self.events.append(BacktestEvent(EventType.POSITION_STATE,bar.trade_date,position.instrument_id,{"from":before_state.value,"to":position.state.value}))
+    def _mark_equity(self,d,daily):
+        holdings=0.0
+        for instrument_id,p in self.positions.items():
+            if p.remaining_shares<=0:continue
+            bar=daily.get(instrument_id)
+            if bar: holdings+=p.remaining_shares*bar.close
+        self.equity_curve.append((d,round(self.cash+holdings,2)))
     def run(self,bars,signal_provider,eligibility_provider=None,capacity_provider=None,*,allow_reentry=True):
         eligibility_provider=eligibility_provider or (lambda _i,_d:True); capacity_provider=capacity_provider or (lambda _d:int(self.cfg["risk"]["max_open_trades"])); bars_by_date={}
         for bar in bars:bars_by_date.setdefault(bar.trade_date,{})[bar.instrument_id]=bar
@@ -94,5 +101,6 @@ class EventDrivenBacktester:
                 if existing and existing.state not in {TradeState.CLOSED,TradeState.CANCELLED}:continue
                 if self._active_count()>=daily_capacity or not eligibility_provider(signal.instrument_id,d):continue
                 p=TradePosition(signal.instrument_id,signal.signal_date,signal.signal_high,signal.signal_low,max(self.cash,0.0)); activate_entry(p); self.positions[signal.instrument_id]=p; self.events.append(BacktestEvent(EventType.SIGNAL,d,signal.instrument_id,{"signal_high":signal.signal_high,"signal_low":signal.signal_low}))
+            self._mark_equity(d,daily)
         net=self.realized_gross_pnl-self.total_costs
-        return BacktestResult(self.initial_capital,round(self.cash,2),round(self.realized_gross_pnl,2),round(self.total_costs,2),round(net,2),round(net/self.initial_capital*100.0,4),self.fills,self.events,self.closed_trade_count)
+        return BacktestResult(self.initial_capital,round(self.cash,2),round(self.realized_gross_pnl,2),round(self.total_costs,2),round(net,2),round(net/self.initial_capital*100.0,4),self.fills,self.events,self.closed_trade_count,self.equity_curve)
