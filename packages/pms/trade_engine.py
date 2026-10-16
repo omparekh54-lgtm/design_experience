@@ -12,8 +12,10 @@ class TradeState(str, Enum):
     PENDING_ENTRY = "PENDING_ENTRY"
     FILLED = "FILLED"
     LEG1_ARMED = "LEG1_ARMED"
-    PARTIAL_EXIT = "PARTIAL_EXIT"
+    PENDING_LEG1_FULL_EXIT = "PENDING_LEG1_FULL_EXIT"
+    PENDING_LEG1_PARTIAL_EXIT = "PENDING_LEG1_PARTIAL_EXIT"
     LEG2_ACTIVE = "LEG2_ACTIVE"
+    PENDING_LEG2_EXIT = "PENDING_LEG2_EXIT"
     CLOSED = "CLOSED"
     CANCELLED = "CANCELLED"
 
@@ -51,12 +53,6 @@ def activate_entry(position: TradePosition) -> TradePosition:
 
 
 def process_entry_bar(position: TradePosition, bar_date: date, open_: float, high: float, cfg: dict) -> TradePosition:
-    """Process one trading-session bar after the signal candle.
-
-    The PMS specification gives the buy-stop exactly three *trading days* of
-    validity. Call this function once per trading bar; no calendar-day math is
-    used, so weekends and exchange holidays cannot shorten the window.
-    """
     if position.state != TradeState.PENDING_ENTRY:
         return position
     position.entry_bars_seen += 1
@@ -85,7 +81,6 @@ def process_entry_bar(position: TradePosition, bar_date: date, open_: float, hig
         position.exit_reason = "position_size_zero"
         position.log("ENTRY_CANCELLED", date=str(bar_date), reason=position.exit_reason)
         return position
-
     position.entry = fill
     position.stop = sizing.stop
     position.shares = sizing.shares
@@ -104,6 +99,47 @@ def cancel_if_fundamental_ineligible(position: TradePosition) -> TradePosition:
     return position
 
 
+def process_next_open(position: TradePosition, bar_date: date, open_: float) -> TradePosition:
+    """Execute close-generated EMA exits at the next session's open."""
+    if position.entry is None:
+        return position
+    if position.state == TradeState.PENDING_LEG1_FULL_EXIT:
+        pnl = (open_ - position.entry) * position.remaining_shares
+        position.realized_pnl += pnl
+        position.remaining_shares = 0
+        position.state = TradeState.CLOSED
+        position.exit_reason = "leg1_full_exit"
+        position.log("CLOSED", date=str(bar_date), price=open_, reason=position.exit_reason, pnl=pnl)
+    elif position.state == TradeState.PENDING_LEG1_PARTIAL_EXIT:
+        qty = max(1, position.remaining_shares // 2)
+        pnl = (open_ - position.entry) * qty
+        position.realized_pnl += pnl
+        position.remaining_shares -= qty
+        if position.remaining_shares <= 0:
+            position.state = TradeState.CLOSED
+            position.exit_reason = "leg1_partial_completed"
+        elif open_ <= position.entry:
+            # A gap through the new breakeven stop means the remainder also exits at the open.
+            remainder_pnl = (open_ - position.entry) * position.remaining_shares
+            position.realized_pnl += remainder_pnl
+            position.remaining_shares = 0
+            position.state = TradeState.CLOSED
+            position.exit_reason = "breakeven_gap"
+            pnl += remainder_pnl
+        else:
+            position.stop = position.entry
+            position.state = TradeState.LEG2_ACTIVE
+        position.log("LEG1_EXECUTED", date=str(bar_date), price=open_, shares=qty, pnl=pnl, stop=position.stop)
+    elif position.state == TradeState.PENDING_LEG2_EXIT:
+        pnl = (open_ - position.entry) * position.remaining_shares
+        position.realized_pnl += pnl
+        position.remaining_shares = 0
+        position.state = TradeState.CLOSED
+        position.exit_reason = "leg2_ema21"
+        position.log("CLOSED", date=str(bar_date), price=open_, reason=position.exit_reason, pnl=pnl)
+    return position
+
+
 def process_position_bar(
     position: TradePosition,
     bar_date: date,
@@ -115,12 +151,12 @@ def process_position_bar(
     previous_ema9: float,
     previous_ema21: float,
 ) -> TradePosition:
-    if position.state not in {TradeState.FILLED, TradeState.LEG1_ARMED, TradeState.PARTIAL_EXIT, TradeState.LEG2_ACTIVE}:
+    if position.state not in {TradeState.FILLED, TradeState.LEG1_ARMED, TradeState.LEG2_ACTIVE}:
         return position
     if position.entry is None or position.stop is None:
         raise ValueError("filled trade missing entry/stop")
 
-    # Initial/breakeven stop. A gap below the active stop exits at the open.
+    # Stops are intraday. A gap below the active stop exits at the open.
     if low <= position.stop:
         exit_price = open_ if open_ < position.stop else position.stop
         pnl = (exit_price - position.entry) * position.remaining_shares
@@ -131,31 +167,19 @@ def process_position_bar(
         position.log("CLOSED", date=str(bar_date), price=exit_price, reason="stop", pnl=pnl)
         return position
 
-    # Leg 1 is not active until the first close above the same-day EMA9.
     if position.state == TradeState.FILLED and close > ema9:
         position.leg1_armed = True
         position.state = TradeState.LEG1_ARMED
         position.log("LEG1_ARMED", date=str(bar_date))
 
-    # Exit logic is evaluated after close. The backtest/live scheduler executes
-    # these market exits at the next open; this state machine records the signal
-    # price/intent and the broker layer can substitute the next-open fill.
     if position.state == TradeState.LEG1_ARMED and close < previous_ema9:
         if close <= position.entry:
-            pnl = (close - position.entry) * position.remaining_shares
-            position.realized_pnl += pnl
-            position.remaining_shares = 0
-            position.state = TradeState.CLOSED
-            position.exit_reason = "leg1_full_exit"
-            position.log("CLOSED", date=str(bar_date), price=close, reason=position.exit_reason, pnl=pnl)
-            return position
-        qty = max(1, position.remaining_shares // 2)
-        pnl = (close - position.entry) * qty
-        position.realized_pnl += pnl
-        position.remaining_shares -= qty
-        position.stop = position.entry
-        position.state = TradeState.LEG2_ACTIVE
-        position.log("PARTIAL_EXIT", date=str(bar_date), price=close, shares=qty, pnl=pnl, stop=position.stop)
+            position.state = TradeState.PENDING_LEG1_FULL_EXIT
+            position.log("EXIT_SIGNAL", date=str(bar_date), reason="leg1_full_exit", execution="next_open")
+        else:
+            position.state = TradeState.PENDING_LEG1_PARTIAL_EXIT
+            position.log("EXIT_SIGNAL", date=str(bar_date), reason="leg1_partial_exit", execution="next_open")
+        return position
 
     if position.state == TradeState.LEG2_ACTIVE:
         if low <= position.entry:
@@ -167,12 +191,8 @@ def process_position_bar(
             position.exit_reason = "breakeven_stop"
             position.log("CLOSED", date=str(bar_date), price=exit_price, reason=position.exit_reason, pnl=pnl)
         elif close < previous_ema21:
-            pnl = (close - position.entry) * position.remaining_shares
-            position.realized_pnl += pnl
-            position.remaining_shares = 0
-            position.state = TradeState.CLOSED
-            position.exit_reason = "leg2_ema21"
-            position.log("CLOSED", date=str(bar_date), price=close, reason=position.exit_reason, pnl=pnl)
+            position.state = TradeState.PENDING_LEG2_EXIT
+            position.log("EXIT_SIGNAL", date=str(bar_date), reason="leg2_ema21", execution="next_open")
     return position
 
 
