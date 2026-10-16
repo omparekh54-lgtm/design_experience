@@ -18,17 +18,17 @@ async function request<T>(path: string): Promise<ApiResult<T>> {
 export const api = {
   health: () => request<Record<string, unknown>>("/health"),
   portfolio: () => request<any>("/v1/portfolio"),
-  positions: () => request<any[]>("/v1/positions"),
-  orders: () => request<any>("/v1/orders"),
+  positions: () => request<{ count: number; positions: any[] }>("/v1/positions"),
+  orders: () => request<{ execution_enabled: boolean; count: number; order_candidates: any[] }>("/v1/orders"),
   dataHealth: () => request<any>("/v1/data-health"),
   moduleE: (d: string) => request<any>(`/v1/module-e/${d}`),
-  moduleC: (d: string, selectedOnly = true) => request<any[]>(`/v1/module-c?trade_date=${d}&selected_only=${selectedOnly}`),
+  moduleC: (d: string, selectedOnly = true) => request<{ trade_date: string; count: number; rankings: any[] }>(`/v1/module-c?trade_date=${d}&selected_only=${selectedOnly}`),
   moduleA: (instrument: string, d: string) => request<any>(`/v1/module-a/${encodeURIComponent(instrument)}?as_of=${d}`),
   moduleB: (instrument: string, d: string) => request<any>(`/v1/module-b/${encodeURIComponent(instrument)}?as_of=${d}`),
-  backtests: () => request<any[]>("/v1/backtests"),
-  researchRuns: () => request<any[]>("/v1/research/runs"),
-  stress: () => request<any[]>("/v1/research/stress"),
-  walkForward: () => request<any[]>("/v1/research/walk-forward"),
+  backtests: () => request<{ count: number; runs: any[] }>("/v1/backtests"),
+  researchRuns: () => request<{ count: number; runs: any[] }>("/v1/research/runs"),
+  stress: () => request<{ count: number; runs: any[] }>("/v1/research/stress"),
+  walkForward: () => request<{ count: number; runs: any[] }>("/v1/research/walk-forward"),
 };
 
 export function formatMoney(value: unknown): string {
