@@ -22,6 +22,15 @@ class SafetyStatus:
             and not self.locked_reason
         )
 
+    @property
+    def can_place_validation_order(self) -> bool:
+        return (
+            self.execution_mode == "LIVE_VALIDATION"
+            and self.new_orders_enabled
+            and not self.emergency_stop
+            and not self.locked_reason
+        )
+
 
 class SafetyController:
     def __init__(self, engine: Engine):
@@ -49,9 +58,9 @@ class SafetyController:
             conn.execute(text("insert into audit_log(event_type,actor,payload) values ('EMERGENCY_STOP',:actor,jsonb_build_object('reason',:reason))"), {"actor": actor, "reason": reason})
 
     def set_mode(self, mode: str, actor: str = "operator") -> None:
-        allowed = {"PAPER", "LIVE_APPROVAL"}
+        allowed = {"PAPER", "LIVE_VALIDATION", "LIVE_APPROVAL"}
         if mode not in allowed:
-            raise ValueError("Only PAPER and LIVE_APPROVAL are supported; LIVE_AUTO remains disabled")
+            raise ValueError("Only PAPER, LIVE_VALIDATION and LIVE_APPROVAL are supported; LIVE_AUTO remains disabled")
         with self.engine.begin() as conn:
             conn.execute(text("""
                 update safety_state set execution_mode=:mode, new_orders_enabled=false,
@@ -63,7 +72,7 @@ class SafetyController:
         status = self.status()
         if status.emergency_stop or status.locked_reason:
             raise RuntimeError("Execution is locked; clear the cause before enabling new orders")
-        if status.execution_mode not in {"PAPER", "LIVE_APPROVAL"}:
+        if status.execution_mode not in {"PAPER", "LIVE_VALIDATION", "LIVE_APPROVAL"}:
             raise RuntimeError("Unsupported execution mode")
         with self.engine.begin() as conn:
             conn.execute(text("update safety_state set new_orders_enabled=true,updated_at=:now,updated_by=:actor where singleton=true"), {"now": datetime.now(timezone.utc), "actor": actor})
