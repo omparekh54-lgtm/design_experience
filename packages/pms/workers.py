@@ -24,6 +24,8 @@ celery_app.conf.beat_schedule = {
     "data-health-check": {"task": "pms.data_health", "schedule": crontab(hour=18, minute=40, day_of_week="1-5")},
     "surveillance-guard": {"task": "pms.surveillance_guard", "schedule": crontab(hour=18, minute=45, day_of_week="1-5")},
     "research-snapshot": {"task": "pms.research_snapshot", "schedule": crontab(hour=18, minute=50, day_of_week="1-5")},
+    "readiness-refresh": {"task": "pms.readiness_refresh", "schedule": crontab(hour=19, minute=0, day_of_week="1-5")},
+    "weekly-paper-validation": {"task": "pms.paper_validation", "schedule": crontab(hour=19, minute=10, day_of_week="5"), "args": (60,)},
 }
 
 
