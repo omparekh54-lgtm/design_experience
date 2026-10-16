@@ -76,3 +76,7 @@ class SafetyController:
             raise RuntimeError("Unsupported execution mode")
         with self.engine.begin() as conn:
             conn.execute(text("update safety_state set new_orders_enabled=true,updated_at=:now,updated_by=:actor where singleton=true"), {"now": datetime.now(timezone.utc), "actor": actor})
+
+    def disable_new_orders(self, actor: str = "operator") -> None:
+        with self.engine.begin() as conn:
+            conn.execute(text("update safety_state set new_orders_enabled=false,updated_at=:now,updated_by=:actor where singleton=true"), {"now": datetime.now(timezone.utc), "actor": actor})
