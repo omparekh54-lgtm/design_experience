@@ -36,72 +36,105 @@ class PointInTimeQueries:
             raise KeyError(f"instrument not found: {instrument_id}")
         return int(value)
 
+    def _filing_to_dict(self, conn, instrument_id: str, filing: Any) -> dict[str, Any]:
+        facts = conn.execute(
+            text("select fact_name, value, unit from financial_facts where filing_id=:filing_id"),
+            {"filing_id": filing["id"]},
+        ).mappings().all()
+        return {
+            "instrument_id": instrument_id,
+            "period_end": filing["period_end"],
+            "filed_at": filing["filing_timestamp"],
+            "source": filing["source"],
+            "consolidated": filing["consolidated"],
+            "revision_number": filing["revision_number"],
+            "submission_type": filing["submission_type"],
+            "audit_status": filing["audit_status"],
+            "revised_at": filing["revised_at"],
+            "revision_remarks": filing["revision_remarks"],
+            "exchange_received_at": filing["exchange_received_at"],
+            "exchange_disseminated_at": filing["exchange_disseminated_at"],
+            "filing_kind": filing["filing_kind"],
+            "external_id": filing["external_id"],
+            "details_uri": filing["details_uri"],
+            "xbrl_uri": filing["xbrl_uri"],
+            "facts": {row["fact_name"]: row["value"] for row in facts},
+            "units": {row["fact_name"]: row["unit"] for row in facts if row["unit"]},
+        }
+
     def latest_financials_as_of(
         self,
         instrument_id: str,
         as_of: datetime,
         prefer_consolidated: bool = True,
     ) -> dict[str, Any] | None:
-        """Return the newest report period that was knowable by `as_of`.
+        """Return the newest report period that was knowable by `as_of`."""
+        history = self.financial_history_as_of(
+            instrument_id,
+            as_of,
+            prefer_consolidated=prefer_consolidated,
+            limit_periods=1,
+        )
+        return history[0] if history else None
 
-        For the same report period the PMS prefers consolidated over standalone,
-        then the latest disseminated revision. NSE is preferred over BSE only when
-        otherwise equivalent; both exchange observations remain stored for audit.
+    def financial_history_as_of(
+        self,
+        instrument_id: str,
+        as_of: datetime,
+        *,
+        prefer_consolidated: bool = True,
+        limit_periods: int = 16,
+    ) -> list[dict[str, Any]]:
+        """Return one knowable filing per report period/kind as of a timestamp.
+
+        For each report period the query first prefers consolidated (when requested),
+        then the latest disseminated revision. NSE is only a tie-breaker versus BSE;
+        both exchange observations remain stored for audit and reconciliation.
+        Quarterly and annual records are ranked independently so the Module A history
+        calculator can use quarterly growth plus annual cash-flow quality.
         """
+        if limit_periods <= 0:
+            return []
         with self.engine.connect() as conn:
             db_id = self._db_instrument_id(conn, instrument_id)
-            filing = conn.execute(
+            rows = conn.execute(
                 text(
                     """
+                    with ranked as (
+                      select ff.*,
+                             row_number() over (
+                               partition by ff.period_end, ff.filing_kind
+                               order by
+                                 case when ff.consolidated=:prefer_consolidated then 0 else 1 end,
+                                 ff.filing_timestamp desc,
+                                 ff.revision_number desc,
+                                 case when ff.source='NSE' then 0 when ff.source='BSE' then 1 else 2 end
+                             ) as rn
+                      from financial_filings ff
+                      where ff.instrument_id=:instrument_id
+                        and ff.filing_timestamp <= :as_of
+                    )
                     select id, period_end, filing_timestamp, source,
                            consolidated, revision_number, submission_type,
                            audit_status, revised_at, revision_remarks,
                            exchange_received_at, exchange_disseminated_at,
                            filing_kind, external_id, details_uri, xbrl_uri
-                    from financial_filings
-                    where instrument_id=:instrument_id
-                      and filing_timestamp <= :as_of
+                    from ranked
+                    where rn=1
                     order by period_end desc,
-                             case when consolidated=:prefer_consolidated then 0 else 1 end,
-                             filing_timestamp desc,
-                             revision_number desc,
-                             case when source='NSE' then 0 when source='BSE' then 1 else 2 end
-                    limit 1
+                             case when filing_kind='annual' then 1 else 0 end,
+                             filing_timestamp desc
+                    limit :limit_periods
                     """
                 ),
                 {
                     "instrument_id": db_id,
                     "as_of": as_of,
                     "prefer_consolidated": prefer_consolidated,
+                    "limit_periods": limit_periods,
                 },
-            ).mappings().first()
-            if filing is None:
-                return None
-
-            facts = conn.execute(
-                text("select fact_name, value, unit from financial_facts where filing_id=:filing_id"),
-                {"filing_id": filing["id"]},
             ).mappings().all()
-            return {
-                "instrument_id": instrument_id,
-                "period_end": filing["period_end"],
-                "filed_at": filing["filing_timestamp"],
-                "source": filing["source"],
-                "consolidated": filing["consolidated"],
-                "revision_number": filing["revision_number"],
-                "submission_type": filing["submission_type"],
-                "audit_status": filing["audit_status"],
-                "revised_at": filing["revised_at"],
-                "revision_remarks": filing["revision_remarks"],
-                "exchange_received_at": filing["exchange_received_at"],
-                "exchange_disseminated_at": filing["exchange_disseminated_at"],
-                "filing_kind": filing["filing_kind"],
-                "external_id": filing["external_id"],
-                "details_uri": filing["details_uri"],
-                "xbrl_uri": filing["xbrl_uri"],
-                "facts": {row["fact_name"]: row["value"] for row in facts},
-                "units": {row["fact_name"]: row["unit"] for row in facts if row["unit"]},
-            }
+            return [self._filing_to_dict(conn, instrument_id, row) for row in rows]
 
     def daily_prices(
         self,
