@@ -41,7 +41,7 @@ class EventDrivenBacktester:
         return sum(1 for p in self.positions.values() if p.state not in {TradeState.CLOSED,TradeState.CANCELLED})
     def _record_fill(self,*,d,instrument_id,side,price,qty,reason):
         if qty<=0:return
-        costs=estimate_delivery_costs(d,side,price,qty,self.cfg["backtest"]); self.total_costs+=costs.total; turnover=price*qty
+        costs=estimate_delivery_costs(trade_date=d,side=side,price=price,quantity=qty,cfg=self.cfg["backtest"]); self.total_costs+=costs.total; turnover=price*qty
         self.cash+=(-turnover-costs.total) if side=="BUY" else (turnover-costs.total)
         self.fills.append(Fill(instrument_id,d,side,price,qty,reason,costs)); self.events.append(BacktestEvent(EventType.ENTRY_FILL if side=="BUY" else EventType.EXIT_FILL,d,instrument_id,{"reason":reason,"price":price,"quantity":qty,"costs":costs.total}))
     def _apply_open_execution(self,position,bar,eligibility_provider,allow_reentry):
