@@ -12,6 +12,11 @@ fundamental:
   min_eps_yoy_pct: 20
   min_positive_quarters_last_4: 3
   min_ocf_to_pat: 0.7
+  # The source rules say "positive YoY in >=3/4 quarters" but do not name
+  # a line item. Keep the v1 interpretation explicit and configurable.
+  consistency_growth_metrics:
+    - sales
+    - pat
 
 technical:
   min_price: 30
