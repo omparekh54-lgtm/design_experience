@@ -88,11 +88,18 @@ There is no public live-place-order API and `LIVE_AUTO` is not supported.
 
 Automatic or operator locks cover reconciliation mismatch, stale market data, surveillance-data staleness and worker/reconciliation exceptions. Emergency stop disables new orders and persists an audit event.
 
+Mode changes always leave new orders disabled. Enabling new orders is a separate operator action:
+
+```bash
+python scripts/operations.py enable-orders
+python scripts/operations.py disable-orders
+```
+
 ## Phase 28 — complete audit trail
 
 `AuditTrail` writes structured events with actor, entity, correlation ID, strategy/data versions and before/after state. Migration 009 also adds database triggers for operational tables so worker-originated changes cannot bypass auditing.
 
-Audited entities include broker orders/fills, portfolio ledger/snapshots, reconciliation, workers, safety state, paper validation, live-validation sessions/proposals and production readiness.
+Audited entities include broker orders/fills, portfolio ledger/snapshots, reconciliation, workers, safety state, paper validation, live-validation sessions/proposals/observations and production readiness.
 
 Inspect audit history:
 
@@ -141,12 +148,24 @@ Example flow:
 python scripts/operations.py mode LIVE_VALIDATION
 python scripts/operations.py live-session-create --max-capital 100000 --max-order-value 25000 --max-open-positions 2 --max-daily-loss 1500 --symbols NSE:ABC,NSE:XYZ
 python scripts/operations.py live-session-activate <session_id>
+python scripts/operations.py enable-orders
 python scripts/operations.py live-propose <session_id> NSE:ABC BUY 10 --estimated-price 1000 --reason validation_entry
 python scripts/operations.py live-approve <approval_id>
-python scripts/operations.py live-session-close <session_id>
 ```
 
-Approval does **not** equal broker submission.
+Approval does **not** equal broker submission. After the separately executed real-world order, record the observed fill and reconciliation result:
+
+```bash
+python scripts/operations.py live-observe <approval_id> --expected-price 1000 --fill-price 1002 --quantity 10 --executed-at 2026-10-16T10:15:00+05:30 --fees 25 --external-order-reference BROKER-REF --reconciliation-ok
+```
+
+A completed session cannot contain unresolved proposals, approved proposals without execution evidence, or unreconciled observations.
+
+Close only after evidence has been captured:
+
+```bash
+python scripts/operations.py live-session-close <session_id>
+```
 
 ## Phase 31 — production readiness framework
 
@@ -158,7 +177,7 @@ PAPER -> LIVE_VALIDATION -> LIVE_APPROVAL
 
 Promotion to `LIVE_VALIDATION` requires the latest paper validation to pass, latest reconciliation to be clean, no unresolved data-quality errors, no recent failed workers and an unlocked safety state.
 
-Promotion to `LIVE_APPROVAL` additionally requires a completed live-validation session.
+Promotion to `LIVE_APPROVAL` additionally requires a completed live-validation session with at least five reconciled execution observations. Five is an implementation default and can be changed before production use.
 
 The scheduler refreshes readiness daily but cannot promote the stage. Promotion is an explicit operator action:
 
@@ -168,6 +187,8 @@ python scripts/operations.py promote LIVE_VALIDATION
 python scripts/operations.py promote LIVE_APPROVAL
 ```
 
+Every promotion disables new orders again; the operator must explicitly run `enable-orders` afterwards.
+
 `LIVE_AUTO` has no supported promotion path.
 
 ## Operations CLI
@@ -175,6 +196,8 @@ python scripts/operations.py promote LIVE_APPROVAL
 ```bash
 python scripts/operations.py status
 python scripts/operations.py mode PAPER
+python scripts/operations.py enable-orders
+python scripts/operations.py disable-orders
 python scripts/operations.py emergency-stop --reason manual_review
 python scripts/operations.py reconcile-paper
 python scripts/operations.py snapshot --date 2026-10-16
@@ -185,7 +208,7 @@ python scripts/operations.py audit --limit 50
 
 ## Production API
 
-Run:
+Run the extended API entrypoint:
 
 ```bash
 uvicorn apps.api.main_exec:app --reload
@@ -196,6 +219,8 @@ Important execution/validation endpoints include:
 - `GET /v1/execution/safety`
 - `POST /v1/execution/emergency-stop`
 - `POST /v1/execution/mode`
+- `POST /v1/execution/enable-orders`
+- `POST /v1/execution/disable-orders`
 - `GET /v1/execution/reconciliation/latest`
 - `POST /v1/execution/reconciliation/paper`
 - `GET /v1/execution/portfolio-snapshot/{date}`
@@ -211,5 +236,6 @@ Important execution/validation endpoints include:
 - `POST /v1/execution/live-validation/session/{id}/proposal`
 - `POST /v1/execution/live-validation/proposal/{id}/approve`
 - `POST /v1/execution/live-validation/proposal/{id}/reject`
+- `POST /v1/execution/live-validation/proposal/{id}/observation`
 
 No endpoint submits a live-validation proposal directly to the broker.
