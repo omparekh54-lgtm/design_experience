@@ -2,7 +2,7 @@ import pytest
 
 from packages.pms.live_validation import LiveValidationLimits, LiveValidationService
 from packages.pms.paper_validation import PaperValidationCriteria
-from packages.pms.production_readiness import ProductionReadinessController
+from packages.pms.production_readiness import MIN_LIVE_VALIDATION_OBSERVATIONS, ProductionReadinessController
 from packages.pms.safety import SafetyStatus
 
 
@@ -13,6 +13,17 @@ def test_live_validation_is_separate_from_normal_live_approval():
     assert validation.can_place_live_order is False
     assert approval.can_place_live_order is True
     assert approval.can_place_validation_order is False
+
+
+def test_validation_approval_requires_separate_new_orders_switch():
+    class FakeSafety:
+        def status(self):
+            return SafetyStatus("LIVE_VALIDATION", False, False, None)
+
+    service = object.__new__(LiveValidationService)
+    service.safety = FakeSafety()
+    with pytest.raises(PermissionError, match="blocked by safety state"):
+        service.approve("proposal", actor="test")
 
 
 def test_live_auto_cannot_be_promoted_even_without_database_access():
@@ -31,6 +42,10 @@ def test_invalid_live_validation_envelope_fails_before_database_access():
 def test_live_validation_service_never_submits_to_broker():
     assert not hasattr(LiveValidationService, "submit")
     assert not hasattr(LiveValidationService, "approve_and_submit")
+
+
+def test_live_approval_readiness_requires_multiple_observations():
+    assert MIN_LIVE_VALIDATION_OBSERVATIONS >= 5
 
 
 def test_paper_validation_defaults_require_meaningful_evidence():
