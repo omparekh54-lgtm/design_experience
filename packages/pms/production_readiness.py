@@ -11,6 +11,9 @@ from packages.pms.audit import AuditEvent, AuditTrail
 from packages.pms.safety import SafetyController
 
 
+MIN_LIVE_VALIDATION_OBSERVATIONS = 5
+
+
 @dataclass(frozen=True)
 class ReadinessResult:
     stage: str
@@ -38,7 +41,19 @@ class ProductionReadinessController:
             dq_errors = int(conn.execute(text("select count(*) from data_quality_issues where severity='ERROR'")).scalar_one())
             failed_workers = int(conn.execute(text("select count(*) from worker_runs where started_at >= now()-interval '7 days' and status='FAILED'")).scalar_one())
             live_session = conn.execute(text("select id,status,started_at,ended_at from live_validation_sessions order by created_at desc limit 1")).mappings().first()
-        gates = {
+            live_observations = 0
+            unreconciled_live = 0
+            if live_session:
+                live_observations = int(conn.execute(text("""
+                    select count(*) from live_validation_observations o
+                    join live_order_approvals a on a.id=o.approval_id where a.session_id=:id
+                """), {"id":live_session["id"]}).scalar_one())
+                unreconciled_live = int(conn.execute(text("""
+                    select count(*) from live_validation_observations o
+                    join live_order_approvals a on a.id=o.approval_id
+                    where a.session_id=:id and o.reconciliation_ok=false
+                """), {"id":live_session["id"]}).scalar_one())
+        base_gates = {
             "paper_validation_passed": bool(paper and paper["passed"]),
             "latest_reconciliation_clean": bool(recon and recon["status"] == "SUCCESS"),
             "no_data_quality_errors": dq_errors == 0,
@@ -46,24 +61,30 @@ class ProductionReadinessController:
             "safety_unlocked": not safety.emergency_stop and not safety.locked_reason,
         }
         live_completed = bool(live_session and live_session["status"] == "COMPLETED")
+        live_evidence_gate = live_completed and live_observations >= MIN_LIVE_VALIDATION_OBSERVATIONS and unreconciled_live == 0
+        gates = {**base_gates, "live_validation_evidence": live_evidence_gate}
         details = {
             "latest_paper_validation_id": str(paper["id"]) if paper else None,
             "latest_live_validation_id": str(live_session["id"]) if live_session else None,
             "live_validation_completed": live_completed,
+            "live_validation_observations": live_observations,
+            "minimum_live_validation_observations": MIN_LIVE_VALIDATION_OBSERVATIONS,
+            "unreconciled_live_observations": unreconciled_live,
             "data_quality_errors": dq_errors,
             "recent_worker_failures": failed_workers,
             "execution_mode": safety.execution_mode,
         }
-        if all(gates.values()) and live_completed:
-            stage = "LIVE_APPROVAL"
+        base_ready = all(base_gates.values())
+        if base_ready and live_evidence_gate:
+            eligible_stage = "LIVE_APPROVAL"
             readiness = "READY_FOR_LIVE_APPROVAL"
-        elif all(gates.values()):
-            stage = "LIVE_VALIDATION"
+        elif base_ready:
+            eligible_stage = "LIVE_VALIDATION"
             readiness = "READY_FOR_LIVE_VALIDATION"
         else:
-            stage = "PAPER"
+            eligible_stage = "PAPER"
             readiness = "NOT_READY"
-        return ReadinessResult(stage, readiness, gates, details)
+        return ReadinessResult(eligible_stage, readiness, gates, details)
 
     def persist(self, result: ReadinessResult, *, actor: str = "system") -> None:
         with self.engine.begin() as conn:
@@ -87,13 +108,23 @@ class ProductionReadinessController:
         target = target.upper()
         if target == "LIVE_AUTO":
             raise ValueError("LIVE_AUTO remains disabled")
-        result = self.evaluate()
-        allowed = {"PAPER": True, "LIVE_VALIDATION": result.stage in {"LIVE_VALIDATION","LIVE_APPROVAL"}, "LIVE_APPROVAL": result.stage == "LIVE_APPROVAL"}
+        eligibility = self.evaluate()
+        allowed = {
+            "PAPER": True,
+            "LIVE_VALIDATION": eligibility.stage in {"LIVE_VALIDATION", "LIVE_APPROVAL"},
+            "LIVE_APPROVAL": eligibility.stage == "LIVE_APPROVAL",
+        }
         if target not in allowed:
             raise ValueError("unsupported production stage")
         if not allowed[target]:
             raise RuntimeError(f"readiness gates do not allow promotion to {target}")
         self.safety.set_mode(target, actor=actor)
-        self.persist(result, actor=actor)
-        self.audit.record(AuditEvent("PRODUCTION_STAGE_PROMOTED", actor, {"target":target}, entity_type="production_readiness", entity_id="singleton"))
-        return result
+        selected = ReadinessResult(
+            target,
+            eligibility.readiness_status,
+            eligibility.gates,
+            {**eligibility.details, "eligible_stage": eligibility.stage, "selected_stage": target},
+        )
+        self.persist(selected, actor=actor)
+        self.audit.record(AuditEvent("PRODUCTION_STAGE_PROMOTED", actor, {"target":target,"eligible_stage":eligibility.stage}, entity_type="production_readiness", entity_id="singleton"))
+        return selected
