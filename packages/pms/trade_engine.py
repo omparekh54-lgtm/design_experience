@@ -37,6 +37,9 @@ class TradePosition:
     entry_bars_seen: int = 0
     realized_pnl: float = 0.0
     exit_reason: str | None = None
+    reentry_signal_date: date | None = None
+    reentry_signal_high: float | None = None
+    reentry_signal_low: float | None = None
     history: list[dict] = field(default_factory=list)
 
     def log(self, event: str, **payload) -> None:
@@ -100,7 +103,6 @@ def cancel_if_fundamental_ineligible(position: TradePosition) -> TradePosition:
 
 
 def process_next_open(position: TradePosition, bar_date: date, open_: float) -> TradePosition:
-    """Execute close-generated EMA exits at the next session's open."""
     if position.entry is None:
         return position
     if position.state == TradeState.PENDING_LEG1_FULL_EXIT:
@@ -119,7 +121,6 @@ def process_next_open(position: TradePosition, bar_date: date, open_: float) -> 
             position.state = TradeState.CLOSED
             position.exit_reason = "leg1_partial_completed"
         elif open_ <= position.entry:
-            # A gap through the new breakeven stop means the remainder also exits at the open.
             remainder_pnl = (open_ - position.entry) * position.remaining_shares
             position.realized_pnl += remainder_pnl
             position.remaining_shares = 0
@@ -156,7 +157,6 @@ def process_position_bar(
     if position.entry is None or position.stop is None:
         raise ValueError("filled trade missing entry/stop")
 
-    # Stops are intraday. A gap below the active stop exits at the open.
     if low <= position.stop:
         exit_price = open_ if open_ < position.stop else position.stop
         pnl = (exit_price - position.entry) * position.remaining_shares
@@ -191,10 +191,38 @@ def process_position_bar(
             position.exit_reason = "breakeven_stop"
             position.log("CLOSED", date=str(bar_date), price=exit_price, reason=position.exit_reason, pnl=pnl)
         elif close < previous_ema21:
+            position.reentry_signal_date = bar_date
+            position.reentry_signal_high = high
+            position.reentry_signal_low = low
             position.state = TradeState.PENDING_LEG2_EXIT
-            position.log("EXIT_SIGNAL", date=str(bar_date), reason="leg2_ema21", execution="next_open")
+            position.log(
+                "EXIT_SIGNAL",
+                date=str(bar_date),
+                reason="leg2_ema21",
+                execution="next_open",
+                reentry_signal_high=high,
+                reentry_signal_low=low,
+            )
     return position
 
 
 def reentry_allowed(position: TradePosition) -> bool:
-    return position.state == TradeState.CLOSED and position.exit_reason == "leg2_ema21"
+    return (
+        position.state == TradeState.CLOSED
+        and position.exit_reason == "leg2_ema21"
+        and position.reentry_signal_date is not None
+        and position.reentry_signal_high is not None
+        and position.reentry_signal_low is not None
+    )
+
+
+def create_reentry(position: TradePosition, capital: float) -> TradePosition:
+    if not reentry_allowed(position):
+        raise ValueError("reentry is only allowed after a Leg2 EMA21 exit")
+    return TradePosition(
+        instrument_id=position.instrument_id,
+        signal_date=position.reentry_signal_date,
+        signal_high=float(position.reentry_signal_high),
+        signal_low=float(position.reentry_signal_low),
+        capital=capital,
+    )
