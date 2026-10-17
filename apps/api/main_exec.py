@@ -8,6 +8,7 @@ from fastapi.responses import JSONResponse
 
 from apps.api.main import app
 from apps.api.execution_routes import router as execution_router
+from apps.api.data_gap_routes import router as data_gap_router
 
 
 @app.middleware("http")
@@ -27,3 +28,4 @@ async def protect_execution_mutations(request: Request, call_next):
 
 
 app.include_router(execution_router)
+app.include_router(data_gap_router)
