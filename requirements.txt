@@ -13,4 +13,5 @@ polars==1.34.0
 pytest==8.4.2
 beautifulsoup4==4.14.2
 lxml==6.0.2
+nse
 finstack @ git+https://github.com/omparekh54-lgtm/Finstack.git@main
