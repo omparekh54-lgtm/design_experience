@@ -46,7 +46,7 @@ def _render_safe_database_url(raw: str) -> str:
     region = os.getenv("SUPABASE_POOLER_REGION", "ap-south-1").strip() or "ap-south-1"
     pooler_host = os.getenv("SUPABASE_POOLER_HOST", f"aws-0-{region}.pooler.supabase.com").strip()
     pooler_user = os.getenv("SUPABASE_POOLER_USER", f"postgres.{project_ref}").strip()
-    return str(url.set(host=pooler_host, port=5432, username=pooler_user))
+    return url.set(host=pooler_host, port=5432, username=pooler_user).render_as_string(hide_password=False)
 
 
 @lru_cache(maxsize=1)
