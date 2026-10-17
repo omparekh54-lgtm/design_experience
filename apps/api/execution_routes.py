@@ -8,6 +8,7 @@ from sqlalchemy import text
 from packages.pms.audit import AuditTrail
 from packages.pms.brokers import BrokerOrderRequest, PaperBroker
 from packages.pms.live_validation import LiveValidationLimits, LiveValidationService
+from packages.pms.paper_execution import PaperExecutionService
 from packages.pms.paper_validation import PaperValidationService
 from packages.pms.portfolio_accounting import PortfolioAccountingService
 from packages.pms.production_readiness import ProductionReadinessController
@@ -28,6 +29,19 @@ class ModeRequest(BaseModel):
 class PaperValidationRequest(BaseModel):
     started_on: date
     ended_on: date
+
+
+class PaperSandboxOrderRequest(BaseModel):
+    instrument_id: str
+    side: str
+    quantity: int = Field(gt=0)
+    order_type: str = "MARKET"
+    limit_price: float | None = Field(default=None, gt=0)
+    trigger_price: float | None = Field(default=None, gt=0)
+
+
+class PaperSandboxProcessRequest(BaseModel):
+    trade_date: date | None = None
 
 
 class LiveSessionRequest(BaseModel):
@@ -70,6 +84,10 @@ def _engine():
     return db_engine()
 
 
+def _sandbox_broker():
+    return PaperBroker(_engine(), account_mode="PAPER_SANDBOX", broker_name="PAPER_SANDBOX")
+
+
 @router.get("/safety")
 def safety_status():
     s = SafetyController(_engine()).status()
@@ -79,8 +97,89 @@ def safety_status():
         "emergency_stop": s.emergency_stop,
         "locked_reason": s.locked_reason,
         "live_auto_enabled": False,
-        "can_place_live_order": s.can_place_live_order,
+        "can_place_live_order": False,
         "can_place_validation_order": s.can_place_validation_order,
+        "real_money_execution_available": False,
+        "data_provider": "FINSTACK_OPEN_SOURCE",
+    }
+
+
+@router.get("/paper-sandbox/account")
+def paper_sandbox_account():
+    broker = _sandbox_broker()
+    with _engine().connect() as conn:
+        latest_trade_date = conn.execute(text("select max(trade_date) from daily_prices")).scalar_one_or_none()
+        fills = int(conn.execute(text("""
+            select count(*) from broker_fills f
+            join broker_orders o on o.id=f.order_id
+            where o.mode='PAPER_SANDBOX'
+        """)).scalar_one())
+        realized = float(conn.execute(text("""
+            select coalesce(sum(realized_pnl_delta),0)
+            from portfolio_ledger where account_mode='PAPER_SANDBOX'
+        """)).scalar_one())
+    return {
+        "account_mode": "PAPER_SANDBOX",
+        "starting_cash": broker.initial_cash,
+        "cash": broker.get_cash(),
+        "positions": broker.get_positions(),
+        "orders": broker.get_orders()[:100],
+        "fills": fills,
+        "realized_pnl": realized,
+        "latest_market_date": latest_trade_date,
+        "real_money": False,
+        "formal_validation_evidence": False,
+    }
+
+
+@router.post("/paper-sandbox/orders")
+def create_paper_sandbox_order(payload: PaperSandboxOrderRequest):
+    request = BrokerOrderRequest(
+        instrument_id=payload.instrument_id.upper(),
+        side=payload.side.upper(),
+        quantity=payload.quantity,
+        order_type=payload.order_type.upper(),
+        limit_price=payload.limit_price,
+        trigger_price=payload.trigger_price,
+    )
+    try:
+        result = _sandbox_broker().place_order(request)
+    except (ValueError, KeyError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {
+        "order_id": result.order_id,
+        "status": result.status,
+        "account_mode": "PAPER_SANDBOX",
+        "real_money": False,
+        "message": "Paper order created. It fills only when processed against an observed market bar.",
+    }
+
+
+@router.post("/paper-sandbox/orders/{order_id}/cancel")
+def cancel_paper_sandbox_order(order_id: str):
+    return _sandbox_broker().cancel_order(order_id)
+
+
+@router.post("/paper-sandbox/process")
+def process_paper_sandbox(payload: PaperSandboxProcessRequest):
+    engine = _engine()
+    trade_date = payload.trade_date
+    if trade_date is None:
+        with engine.connect() as conn:
+            trade_date = conn.execute(text("select max(trade_date) from daily_prices")).scalar_one_or_none()
+    if trade_date is None:
+        raise HTTPException(status_code=400, detail="No market bars are available")
+    broker = PaperBroker(engine, account_mode="PAPER_SANDBOX", broker_name="PAPER_SANDBOX")
+    try:
+        fills = PaperExecutionService(engine, broker=broker, account_mode="PAPER_SANDBOX").process_date(trade_date)
+    except (ValueError, KeyError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {
+        "trade_date": trade_date,
+        "fills": fills,
+        "fill_count": len(fills),
+        "real_money": False,
+        "formal_validation_evidence": False,
     }
 
 
