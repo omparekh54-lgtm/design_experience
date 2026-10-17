@@ -8,6 +8,7 @@ from uuid import UUID
 from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import create_engine, text
+from sqlalchemy.engine import make_url
 
 from packages.data_layer.reference_data import ReferenceDataQueries
 from packages.pms.config import load_strategy_config
@@ -24,12 +25,36 @@ app = FastAPI(
 )
 
 
+def _render_safe_database_url(raw: str) -> str:
+    """Use Supabase's IPv4-compatible session pooler when a direct DB URL is supplied.
+
+    Supabase direct hosts can resolve IPv6-only from some Render instances. The session
+    pooler keeps the same password/database while changing only host, port and username.
+    Non-Supabase URLs pass through unchanged.
+    """
+    try:
+        url = make_url(raw)
+    except Exception:
+        return raw
+    host = (url.host or "").lower()
+    if not (host.startswith("db.") and host.endswith(".supabase.co")):
+        return raw
+    parts = host.split(".")
+    if len(parts) < 4:
+        return raw
+    project_ref = parts[1]
+    region = os.getenv("SUPABASE_POOLER_REGION", "ap-south-1").strip() or "ap-south-1"
+    pooler_host = os.getenv("SUPABASE_POOLER_HOST", f"aws-0-{region}.pooler.supabase.com").strip()
+    pooler_user = os.getenv("SUPABASE_POOLER_USER", f"postgres.{project_ref}").strip()
+    return str(url.set(host=pooler_host, port=5432, username=pooler_user))
+
+
 @lru_cache(maxsize=1)
 def _db_engine():
     url = os.getenv("DATABASE_URL")
     if not url:
         raise RuntimeError("DATABASE_URL is not configured")
-    return create_engine(url, pool_pre_ping=True)
+    return create_engine(_render_safe_database_url(url), pool_pre_ping=True)
 
 
 def db_engine():
@@ -89,7 +114,6 @@ def health() -> dict:
     return {"status": "ok", "strategy_version": cfg["version"], "live_trading": False, "database": db_status}
 
 
-# Pure calculation endpoints are retained for deterministic diagnostics.
 @app.post("/v1/module-a/evaluate")
 def module_a_calculation(payload: FundamentalRequest) -> dict:
     cfg = load_strategy_config()
@@ -197,7 +221,6 @@ def portfolio() -> dict:
 
 @app.get("/v1/orders")
 def orders() -> dict:
-    # Until the paper/live broker phases add an order ledger, pending strategy entries are the authoritative order candidates.
     with db_engine().connect() as conn:
         rows = conn.execute(text("""
             select t.id, i.exchange, coalesce(i.nse_symbol, replace(i.trading_symbol,'-EQ','')) as symbol,
