@@ -18,7 +18,7 @@ def _india_module():
         from finstack import india
     except ImportError as exc:
         raise FinstackUnavailable(
-            "Finstack is not installed. Install the sibling Finstack package or configure Angel One as primary provider."
+            "Finstack is not installed. The PMS now uses Finstack/open-source sources as its primary market-data layer."
         ) from exc
     return india
 
@@ -33,7 +33,11 @@ def _find_column(columns, *candidates: str) -> str | None:
 
 
 class FinstackNSEMarketProvider:
-    """Fallback/validation provider backed by the user's existing Finstack NSE helpers."""
+    """Primary free/open-source NSE market provider for the PMS.
+
+    Finstack performs source routing/fallbacks. Official NSE/BSE data remains the
+    authority for hard eligibility/reference rules such as filings and surveillance.
+    """
 
     name = "finstack_nse"
 
@@ -65,7 +69,13 @@ class FinstackNSEMarketProvider:
         result: list[Candle] = []
         for idx, row in df.iterrows():
             raw_ts = row.get("Date") if "Date" in df.columns else idx
-            ts = datetime.fromisoformat(str(raw_ts)) if isinstance(raw_ts, str) else raw_ts.to_pydatetime() if hasattr(raw_ts, "to_pydatetime") else datetime.combine(raw_ts, datetime.min.time())
+            ts = (
+                datetime.fromisoformat(str(raw_ts))
+                if isinstance(raw_ts, str)
+                else raw_ts.to_pydatetime()
+                if hasattr(raw_ts, "to_pydatetime")
+                else datetime.combine(raw_ts, datetime.min.time())
+            )
             if ts.tzinfo is None:
                 ts = ts.replace(tzinfo=IST)
             result.append(
