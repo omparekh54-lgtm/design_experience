@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 const links = [
   ["Dashboard", "/"],
   ["Signals", "/signals"],
+  ["Paper Trading", "/paper-trading"],
   ["Research", "/research"],
   ["Backtests", "/backtests"],
   ["Data Health", "/data-health"],
@@ -18,7 +19,7 @@ export function Shell({ children }: { children: ReactNode }) {
         <nav className="nav">
           {links.map(([label, href]) => <Link key={href} href={href}>{label}</Link>)}
         </nav>
-        <div className="sidebar-note">Paper and human-approved validation only. Unattended live execution is disabled.</div>
+        <div className="sidebar-note">Finstack/open-source data + fake-money paper execution. Real-money broker execution is disabled.</div>
       </aside>
       <main className="main">
         <header className="topbar">
