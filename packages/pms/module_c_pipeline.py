@@ -42,8 +42,9 @@ def _clamp100(value: float) -> float:
 def _percentile_map(values: dict[int, float], *, reverse: bool = False) -> dict[int, float]:
     """Return deterministic 0..100 percentile ranks, averaging ties.
 
-    ``reverse=True`` makes smaller raw values better (used for stop width).
-    A one-item cross section receives a neutral 50 rather than an artificial 100.
+    Higher raw values rank better by default. ``reverse=True`` makes smaller raw
+    values better (used for stop width). A one-item cross section receives a
+    neutral 50 rather than an artificial 100.
     """
     if not values:
         return {}
@@ -51,7 +52,7 @@ def _percentile_map(values: dict[int, float], *, reverse: bool = False) -> dict[
         key = next(iter(values))
         return {key: 50.0}
 
-    ordered = sorted(values.items(), key=lambda kv: (kv[1], kv[0]), reverse=reverse)
+    ordered = sorted(values.items(), key=lambda kv: (kv[1], kv[0]), reverse=not reverse)
     n = len(ordered)
     out: dict[int, float] = {}
     i = 0
@@ -61,7 +62,6 @@ def _percentile_map(values: dict[int, float], *, reverse: bool = False) -> dict[
         while j + 1 < n and ordered[j + 1][1] == raw:
             j += 1
         avg_position = (i + j) / 2.0
-        # ordered best -> worst, therefore 100 -> 0.
         score = 100.0 * (1.0 - avg_position / (n - 1))
         for k in range(i, j + 1):
             out[ordered[k][0]] = round(score, 4)
@@ -92,7 +92,6 @@ class ModuleCPipeline:
         return datetime.combine(d, time(23, 59, 59))
 
     def _universe(self, d: date) -> list[dict[str, Any]]:
-        """Return the conservative production universe for the daily generator."""
         with self.engine.connect() as conn:
             rows = conn.execute(
                 text(
@@ -121,7 +120,6 @@ class ModuleCPipeline:
         return [dict(r) for r in rows]
 
     def _market_stats(self, instrument_pk: int, d: date) -> dict[str, float] | None:
-        """Compute only as-of market statistics needed by Module C."""
         with self.engine.connect() as conn:
             rows = conn.execute(
                 text(
@@ -137,7 +135,6 @@ class ModuleCPipeline:
             ).mappings().all()
         if len(rows) < 63:
             return None
-        # Query is newest first.
         latest = rows[0]
         sixty_third = rows[min(62, len(rows) - 1)]
         latest_close = float(latest["close"])
@@ -150,7 +147,6 @@ class ModuleCPipeline:
             sum(100.0 * ((float(r["high"]) / float(r["low"])) - 1.0) for r in last20 if float(r["low"]) > 0)
             / max(sum(1 for r in last20 if float(r["low"]) > 0), 1)
         )
-        # ADTV is rupees/day and uses close*volume, matching the liquidity convention elsewhere.
         adtv = sum(float(r["close"]) * float(r["volume"]) for r in rows[:63]) / min(63, len(rows))
         return {
             "close": latest_close,
@@ -234,7 +230,6 @@ class ModuleCPipeline:
                 {"d": d},
             ).scalar_one_or_none()
         if value is None:
-            # Missing Module E is a hard fail-closed state, not an implicit seven slots.
             return 0
         return int(value)
 
@@ -291,8 +286,6 @@ class ModuleCPipeline:
         a_pass = 0
         raw: list[dict[str, Any]] = []
 
-        # A -> B is intentionally sequential and fail-closed. Errors are recorded as
-        # non-candidates by omission; worker-level diagnostics capture the aggregate counts.
         for item in universe:
             instrument_key = f"NSE:{item['symbol']}"
             try:
@@ -332,8 +325,6 @@ class ModuleCPipeline:
                 }
             )
 
-        # Cross-sectional scoring is computed only across valid A+B Setup-1 candidates.
-        ids = [r["instrument_pk"] for r in raw]
         rally_pct = {r["instrument_pk"]: float(r["signal"].get("rally_pct", 0.0)) for r in raw}
         velocity = {r["instrument_pk"]: float(r["signal"].get("velocity", 0.0)) for r in raw}
         returns = {r["instrument_pk"]: float(r["return_63"]) for r in raw}
