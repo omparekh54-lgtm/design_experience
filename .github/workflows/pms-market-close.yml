@@ -2,13 +2,16 @@ name: PMS Market Close (PAPER)
 
 on:
   schedule:
-    # 19:00 India time (13:30 UTC), Monday-Friday. Push below is only for workflow self-tests/backfill verification.
+    # 19:00 India time (13:30 UTC), Monday-Friday. Push paths below are only for safe pipeline verification.
     - cron: '30 13 * * 1-5'
   workflow_dispatch:
   push:
     branches: [main]
     paths:
       - '.github/workflows/pms-market-close.yml'
+      - 'run_benchmark_ingest.py'
+      - 'scripts/ingest_module_e_benchmarks.py'
+      - 'scripts/run_market_close.py'
 
 concurrency:
   group: pms-market-close-paper
