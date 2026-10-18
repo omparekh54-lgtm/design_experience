@@ -276,3 +276,12 @@ Then use `--all --persist` to save decisions and Setup-1 signals, or add
 `--research-only` diagnostics and `--setup 2` cannot persist production signals.
 See [Module B rules and validation](docs/module_b.md) for calendar conventions,
 price-source checks, signal expiry and current upstream data blockers.
+
+### Shared trade engine
+
+`python scripts/replay_trade_engine.py --demo` runs a synthetic, local-only
+entry → partial exit → Leg-2 exit demonstration and prints the audit checkpoint.
+`--input replay.json` resumes a supplied checkpoint with daily bars and explicit
+A eligibility. Neither command connects to a broker. See
+[trade engine rules and limits](docs/trade_engine.md) for session calendars,
+conservative same-day stops, restart behavior and backtester integration.

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from decimal import Decimal, ROUND_CEILING
 import math
 
 
@@ -13,10 +14,28 @@ class PositionSize:
     position_pct: float
 
 
-def compute_stop(entry: float, signal_low: float, raw_stop_buffer_pct: float, max_stop_risk_pct: float) -> float:
-    raw = signal_low * (1 - raw_stop_buffer_pct / 100)
-    capped_floor = entry * (1 - max_stop_risk_pct / 100)
-    return round(max(raw, capped_floor), 4)
+def compute_stop(
+    entry: float,
+    signal_low: float,
+    raw_stop_buffer_pct: float,
+    max_stop_risk_pct: float,
+) -> float:
+    values = (entry, signal_low, raw_stop_buffer_pct, max_stop_risk_pct)
+    if not all(math.isfinite(float(v)) for v in values):
+        raise ValueError("Risk inputs must be finite")
+    if (
+        entry <= 0
+        or signal_low <= 0
+        or not 0 <= raw_stop_buffer_pct < 100
+        or not 0 < max_stop_risk_pct < 100
+    ):
+        raise ValueError("Invalid price or stop percentage")
+    raw = Decimal(str(signal_low)) * (1 - Decimal(str(raw_stop_buffer_pct)) / 100)
+    capped_floor = Decimal(str(entry)) * (1 - Decimal(str(max_stop_risk_pct)) / 100)
+    # Round the protective level up so precision never widens the risk cap.
+    return float(
+        max(raw, capped_floor).quantize(Decimal("0.0001"), rounding=ROUND_CEILING)
+    )
 
 
 def size_position(
@@ -28,6 +47,13 @@ def size_position(
     raw_stop_buffer_pct: float,
     max_stop_risk_pct: float,
 ) -> PositionSize:
+    if not all(
+        math.isfinite(float(v))
+        for v in (capital, entry, signal_low, risk_per_trade_pct, max_position_pct)
+    ):
+        raise ValueError("Sizing inputs must be finite")
+    if not 0 <= risk_per_trade_pct <= 100 or not 0 <= max_position_pct <= 100:
+        raise ValueError("Risk and position percentages must be between 0 and 100")
     if capital <= 0 or entry <= 0 or signal_low <= 0:
         raise ValueError("capital, entry and signal_low must be positive")
 
@@ -36,9 +62,13 @@ def size_position(
     if risk_per_share <= 0:
         raise ValueError("stop must be below entry")
 
-    risk_budget = capital * risk_per_trade_pct / 100
-    by_risk = math.floor(risk_budget / risk_per_share)
-    by_cap = math.floor((capital * max_position_pct / 100) / entry)
+    risk_budget = Decimal(str(capital)) * Decimal(str(risk_per_trade_pct)) / 100
+    precise_risk = Decimal(str(entry)) - Decimal(str(stop))
+    by_risk = int(risk_budget // precise_risk)
+    by_cap = int(
+        (Decimal(str(capital)) * Decimal(str(max_position_pct)) / 100)
+        // Decimal(str(entry))
+    )
     shares = max(0, min(by_risk, by_cap))
 
     value = shares * entry

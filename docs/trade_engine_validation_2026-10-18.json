@@ -1,0 +1,87 @@
+{
+  "date": "2026-10-18",
+  "engine_version": "TRADE_ENGINE_v1.1",
+  "tests": {
+    "passed": 220,
+    "failed": 0,
+    "skipped": 1,
+    "skip_reason": "Pre-existing optional direct PostgreSQL test needs PMS_TEST_DATABASE_URL."
+  },
+  "synthetic_simulation": {
+    "instrument": "NSE:DEMO",
+    "actual_market_data": false,
+    "orders_submitted": 0,
+    "final_state": "CLOSED",
+    "entry": 103,
+    "initial_shares": 882,
+    "remaining_shares": 0,
+    "gross_pnl": 2205.0,
+    "exit_reason": "leg2_ema21",
+    "reentry_allowed": true,
+    "events": [
+      {
+        "event": "ENTRY_ACTIVATED",
+        "buy_stop": 100
+      },
+      {
+        "event": "FILLED",
+        "date": "2026-10-19",
+        "entry": 103,
+        "stop": 97.335,
+        "shares": 882
+      },
+      {
+        "event": "LEG1_ARMED",
+        "date": "2026-10-19"
+      },
+      {
+        "event": "EXIT_SIGNAL",
+        "date": "2026-10-21",
+        "reason": "leg1_partial_exit",
+        "execution": "next_open"
+      },
+      {
+        "event": "LEG1_EXECUTED",
+        "date": "2026-10-22",
+        "price": 106,
+        "shares": 441,
+        "pnl": 1323
+      },
+      {
+        "event": "EXIT_SIGNAL",
+        "date": "2026-10-22",
+        "reason": "leg2_ema21",
+        "execution": "next_open"
+      },
+      {
+        "event": "CLOSED",
+        "date": "2026-10-23",
+        "price": 105,
+        "shares": 441,
+        "reason": "leg2_ema21",
+        "pnl": 882
+      }
+    ]
+  },
+  "verified_behaviors": [
+    "Three-session calendar expiry despite missing stock bars",
+    "Gap entry and actual-fill sizing",
+    "Protective-stop priority and gap pricing",
+    "After-close EMA signals execute at next open",
+    "Odd-share partial exits conserve quantities",
+    "Leg2-only, single-use, eligibility-gated re-entry",
+    "Identical checkpoint restart and uninterrupted replay",
+    "Pending A/regime cancellation before fill",
+    "Cash includes entry costs; no ghost holdings",
+    "Return uses ending equity, with last-known marks for missing bars",
+    "Pre-open A timestamp and prior-session regime; separate close-time callbacks"
+  ],
+  "limitations": [
+    "Synthetic/fixture validation only: no successful production broker execution was attempted.",
+    "Module A/B previously reported zero production-eligible stocks; upstream data/policy gaps remain.",
+    "Portfolio heat, sector caps and ranking belong to Module C, not this research harness.",
+    "Checkpoint generation is implemented; transactional database storage and broker reconciliation are later orchestration/paper-execution work.",
+    "Daily bars cannot establish intraday entry/stop order; conservative same-day stop assumption is used.",
+    "Historical price vintages, corporate-action point-in-time reconstruction, special sessions and current fee/tick schedules require separate acceptance checks."
+  ]
+}

@@ -26,11 +26,12 @@ def test_delivery_costs_apply_statutory_sides_and_2026_exchange_rate():
 def test_event_backtester_executes_next_open_exits_and_leg2_reentry():
     bars = [
         MarketBar("NSE:ABC", date(2026, 10, 1), 98, 101, 97, 100, 99, 98, 97),
-        MarketBar("NSE:ABC", date(2026, 10, 2), 100, 102, 96, 103, 102, 101, 98),
-        MarketBar("NSE:ABC", date(2026, 10, 3), 104, 106, 103, 102, 103, 103, 99),
+        # OHLC ranges must contain both the open and close.
+        MarketBar("NSE:ABC", date(2026, 10, 2), 100, 103, 96, 103, 102, 101, 98),
+        MarketBar("NSE:ABC", date(2026, 10, 3), 104, 106, 102, 102, 103, 103, 99),
         MarketBar("NSE:ABC", date(2026, 10, 4), 105, 107, 104, 104, 103, 103, 102),
         MarketBar("NSE:ABC", date(2026, 10, 5), 104, 105, 101, 102, 103, 103, 103),
-        MarketBar("NSE:ABC", date(2026, 10, 6), 101, 106, 102, 105, 103, 103, 103),
+        MarketBar("NSE:ABC", date(2026, 10, 6), 101, 106, 101, 105, 103, 103, 103),
     ]
 
     def signals(d):
