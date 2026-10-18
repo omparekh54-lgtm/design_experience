@@ -9,9 +9,6 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Iterable
 
-# When this file is executed as `python scripts/...`, Python puts `scripts/`
-# on sys.path rather than the repository root. Add the root explicitly so
-# package imports behave the same way in GitHub Actions and local execution.
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
@@ -33,8 +30,8 @@ HEADERS = {
     "Referer": LANDING_URL,
     "Origin": BASE,
     "User-Agent": (
-        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-        "(KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36"
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36"
     ),
 }
 
@@ -88,12 +85,17 @@ def _double_json(response: httpx.Response) -> list[dict[str, Any]]:
 
 
 def _client() -> httpx.Client:
-    client = httpx.Client(headers=HEADERS, timeout=httpx.Timeout(60.0), follow_redirects=True)
+    # Do not make a request here. The returned client is opened by the caller's
+    # context manager. Making a request before `with client:` causes httpx to
+    # reject the second open on local Python/httpx versions.
+    return httpx.Client(headers=HEADERS, timeout=httpx.Timeout(60.0), follow_redirects=True)
+
+
+def _warm(client: httpx.Client) -> None:
     try:
-        client.get(LANDING_URL, timeout=10.0)
+        client.get(LANDING_URL, timeout=15.0)
     except httpx.HTTPError:
         pass
-    return client
 
 
 def _post_with_retry(client: httpx.Client, url: str, *, content: str, attempts: int = 3) -> list[dict[str, Any]]:
@@ -106,10 +108,7 @@ def _post_with_retry(client: httpx.Client, url: str, *, content: str, attempts: 
             error = exc
             if attempt + 1 < attempts:
                 time.sleep(2 ** attempt)
-                try:
-                    client.get(LANDING_URL, timeout=10.0)
-                except httpx.HTTPError:
-                    pass
+                _warm(client)
     raise RuntimeError(f"official benchmark fetch failed after {attempts} attempts: {error}") from error
 
 
@@ -174,7 +173,7 @@ def upsert_rows(engine, rows: list[dict[str, Any]]) -> int:
     if not rows:
         return 0
     statement = text("""
-        insert into module_e_benchmark_bars(
+        insert into pms.module_e_benchmark_bars(
             benchmark_code,trade_date,open,high,low,close,source,raw_payload
         ) values (
             :benchmark_code,:trade_date,:open,:high,:low,:close,:source,cast(:raw_payload as jsonb)
@@ -191,7 +190,7 @@ def upsert_rows(engine, rows: list[dict[str, Any]]) -> int:
 def default_start(engine, code: str) -> date:
     with engine.connect() as conn:
         last = conn.execute(
-            text("select max(trade_date) from module_e_benchmark_bars where benchmark_code=:code and source=:source"),
+            text("select max(trade_date) from pms.module_e_benchmark_bars where benchmark_code=:code and source=:source"),
             {"code": code, "source": SOURCE},
         ).scalar_one_or_none()
     if last is None:
@@ -207,6 +206,7 @@ def ingest(start: date | None = None, end: date | None = None) -> dict[str, Any]
     counts = {"index": 0, "vix": 0}
 
     with _client() as client:
+        _warm(client)
         for chunk_start, chunk_end in _chunks(index_start, end):
             counts["index"] += upsert_rows(engine, _normalise_index(fetch_index(client, chunk_start, chunk_end)))
         for chunk_start, chunk_end in _chunks(vix_start, end):
@@ -215,7 +215,7 @@ def ingest(start: date | None = None, end: date | None = None) -> dict[str, Any]
     with engine.connect() as conn:
         health = conn.execute(text("""
             select benchmark_code,count(*) rows,min(trade_date) min_date,max(trade_date) max_date
-            from module_e_benchmark_bars
+            from pms.module_e_benchmark_bars
             where benchmark_code in ('NIFTYMIDSMALLCAP400','INDIAVIX')
             group by benchmark_code order by benchmark_code
         """)).mappings().all()
