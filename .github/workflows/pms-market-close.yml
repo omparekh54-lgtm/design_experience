@@ -1,0 +1,55 @@
+name: PMS Market Close (PAPER)
+
+on:
+  schedule:
+    # 19:00 India time (13:30 UTC), Monday-Friday.
+    - cron: '30 13 * * 1-5'
+  workflow_dispatch:
+
+concurrency:
+  group: pms-market-close-paper
+  cancel-in-progress: false
+
+jobs:
+  market-close:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    env:
+      DATABASE_URL: ${{ secrets.PMS_DATABASE_URL }}
+      SUPABASE_PROJECT_REF: cxrkicqggsuylirzohqw
+      EXECUTION_MODE: PAPER
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check database secret
+        id: guard
+        shell: bash
+        run: |
+          if [ -z "$DATABASE_URL" ]; then
+            echo "PMS_DATABASE_URL is not configured; skipping safely."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/setup-python@v5
+        if: steps.guard.outputs.skip != 'true'
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install dependencies
+        if: steps.guard.outputs.skip != 'true'
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Refresh official Module E benchmarks
+        if: steps.guard.outputs.skip != 'true'
+        run: python scripts/ingest_module_e_benchmarks.py
+
+      - name: Run after-market-close PAPER pipeline
+        if: steps.guard.outputs.skip != 'true'
+        run: python scripts/run_market_close.py
