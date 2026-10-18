@@ -4,36 +4,23 @@ import argparse
 import json
 import os
 import sys
-import time
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-import httpx
+from dotenv import load_dotenv
+from nse import NSE
 from sqlalchemy import create_engine, text
 
 from apps.api.main import _render_safe_database_url
 
-BASE = "https://www.niftyindices.com"
-HISTORICAL_URL = f"{BASE}/Backpage.aspx/getHistoricaldatatabletoString"
-VIX_URL = f"{BASE}/Backpage.aspx/BindHistoricalIndiaVixData"
-LANDING_URL = f"{BASE}/reports/historical-data"
+load_dotenv(ROOT / ".env")
+SOURCE = "NSE_HISTORICAL_OR"
 INDEX_NAME = "NIFTY MIDSMALLCAP 400"
-SOURCE = "NIFTY_INDICES_OFFICIAL"
-HEADERS = {
-    "Content-Type": "application/json; charset=UTF-8",
-    "X-Requested-With": "XMLHttpRequest",
-    "Referer": LANDING_URL,
-    "Origin": BASE,
-    "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-        "(KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36"
-    ),
-}
 
 
 def _engine():
@@ -43,19 +30,19 @@ def _engine():
     return create_engine(_render_safe_database_url(raw), pool_pre_ping=True)
 
 
-def _format_date(d: date) -> str:
-    return d.strftime("%d %b %Y")
-
-
 def _parse_date(value: Any) -> date | None:
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
     if value in (None, ""):
         return None
-    text_value = str(value).strip()
-    for fmt in ("%d %b %Y", "%d-%b-%Y", "%d/%m/%Y", "%Y-%m-%d"):
+    txt = str(value).strip()
+    for fmt in ("%d-%b-%Y", "%d %b %Y", "%d-%m-%Y", "%d/%m/%Y", "%Y-%m-%d", "%d-%b-%y"):
         try:
-            return datetime.strptime(text_value, fmt).date()
+            return datetime.strptime(txt, fmt).date()
         except ValueError:
-            continue
+            pass
     return None
 
 
@@ -64,106 +51,52 @@ def _number(value: Any) -> float | None:
         return None
     try:
         return float(str(value).replace(",", "").strip())
-    except ValueError:
+    except (TypeError, ValueError):
         return None
 
 
-def _double_json(response: httpx.Response) -> list[dict[str, Any]]:
-    response.raise_for_status()
-    content_type = response.headers.get("content-type", "").lower()
-    body = response.text.lstrip()
-    if body.startswith("<") or "text/html" in content_type:
-        raise RuntimeError("Nifty Indices returned HTML instead of historical JSON")
-    outer = response.json()
-    inner = outer.get("d") if isinstance(outer, dict) else None
-    if inner in (None, False, "false", "False", "[]"):
-        return []
-    parsed = json.loads(inner) if isinstance(inner, str) else inner
-    if not isinstance(parsed, list):
-        raise RuntimeError("Unexpected Nifty Indices response shape")
-    return [row for row in parsed if isinstance(row, dict)]
-
-
-def _client() -> httpx.Client:
-    # Do not make a request here. The returned client is opened by the caller's
-    # context manager. Making a request before `with client:` causes httpx to
-    # reject the second open on local Python/httpx versions.
-    return httpx.Client(headers=HEADERS, timeout=httpx.Timeout(60.0), follow_redirects=True)
-
-
-def _warm(client: httpx.Client) -> None:
-    try:
-        client.get(LANDING_URL, timeout=15.0)
-    except httpx.HTTPError:
-        pass
-
-
-def _post_with_retry(client: httpx.Client, url: str, *, content: str, attempts: int = 3) -> list[dict[str, Any]]:
-    error: Exception | None = None
-    for attempt in range(attempts):
-        try:
-            response = client.post(url, content=content)
-            return _double_json(response)
-        except (httpx.HTTPError, ValueError, RuntimeError) as exc:
-            error = exc
-            if attempt + 1 < attempts:
-                time.sleep(2 ** attempt)
-                _warm(client)
-    raise RuntimeError(f"official benchmark fetch failed after {attempts} attempts: {error}") from error
-
-
-def fetch_index(client: httpx.Client, start: date, end: date) -> list[dict[str, Any]]:
-    cinfo = (
-        "{'name':'" + INDEX_NAME + "','startDate':'" + _format_date(start)
-        + "','endDate':'" + _format_date(end) + "','indexName':'" + INDEX_NAME + "'}"
-    )
-    return _post_with_retry(client, HISTORICAL_URL, content=json.dumps({"cinfo": cinfo}))
-
-
-def fetch_vix(client: httpx.Client, start: date, end: date) -> list[dict[str, Any]]:
-    payload = "{'name':'India VIX','startDate':'" + _format_date(start) + "','endDate':'" + _format_date(end) + "'}"
-    return _post_with_retry(client, VIX_URL, content=payload)
-
-
-def _chunks(start: date, end: date) -> Iterable[tuple[date, date]]:
-    cursor = start
-    while cursor <= end:
-        chunk_end = min(date(cursor.year, 12, 31), end)
-        yield cursor, chunk_end
-        cursor = chunk_end + timedelta(days=1)
+def _first(row: dict, *keys: str):
+    for key in keys:
+        if key in row and row[key] not in (None, ""):
+            return row[key]
+    return None
 
 
 def _normalise_index(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    out = []
+    out: list[dict[str, Any]] = []
     for row in rows:
-        d = _parse_date(row.get("HistoricalDate") or row.get("DATE") or row.get("Date") or row.get("date"))
-        close = _number(row.get("CLOSE") or row.get("close"))
+        d = _parse_date(_first(row, "EOD_TIMESTAMP", "HistoricalDate", "DATE", "Date", "date"))
+        close = _number(_first(row, "EOD_CLOSE_INDEX_VAL", "CLOSE", "close"))
         if d is None or close is None:
             continue
         out.append({
-            "benchmark_code": "NIFTYMIDSMALLCAP400", "trade_date": d,
-            "open": _number(row.get("OPEN") or row.get("open")),
-            "high": _number(row.get("HIGH") or row.get("high")),
-            "low": _number(row.get("LOW") or row.get("low")),
-            "close": close, "source": SOURCE,
+            "benchmark_code": "NIFTYMIDSMALLCAP400",
+            "trade_date": d,
+            "open": _number(_first(row, "EOD_OPEN_INDEX_VAL", "OPEN", "open")),
+            "high": _number(_first(row, "EOD_HIGH_INDEX_VAL", "HIGH", "high")),
+            "low": _number(_first(row, "EOD_LOW_INDEX_VAL", "LOW", "low")),
+            "close": close,
+            "source": SOURCE,
             "raw_payload": json.dumps(row, default=str),
         })
     return out
 
 
 def _normalise_vix(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    out = []
+    out: list[dict[str, Any]] = []
     for row in rows:
-        d = _parse_date(row.get("date") or row.get("DATE") or row.get("Date"))
-        close = _number(row.get("close") or row.get("CLOSE"))
+        d = _parse_date(_first(row, "EOD_TIMESTAMP", "date", "DATE", "Date"))
+        close = _number(_first(row, "EOD_CLOSE_INDEX_VAL", "EOD_CLOSE", "close", "CLOSE"))
         if d is None or close is None:
             continue
         out.append({
-            "benchmark_code": "INDIAVIX", "trade_date": d,
-            "open": _number(row.get("open") or row.get("OPEN")),
-            "high": _number(row.get("high") or row.get("HIGH")),
-            "low": _number(row.get("low") or row.get("LOW")),
-            "close": close, "source": SOURCE,
+            "benchmark_code": "INDIAVIX",
+            "trade_date": d,
+            "open": _number(_first(row, "EOD_OPEN_INDEX_VAL", "EOD_OPEN", "open", "OPEN")),
+            "high": _number(_first(row, "EOD_HIGH_INDEX_VAL", "EOD_HIGH", "high", "HIGH")),
+            "low": _number(_first(row, "EOD_LOW_INDEX_VAL", "EOD_LOW", "low", "LOW")),
+            "close": close,
+            "source": SOURCE,
             "raw_payload": json.dumps(row, default=str),
         })
     return out
@@ -172,7 +105,7 @@ def _normalise_vix(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 def upsert_rows(engine, rows: list[dict[str, Any]]) -> int:
     if not rows:
         return 0
-    statement = text("""
+    stmt = text("""
         insert into pms.module_e_benchmark_bars(
             benchmark_code,trade_date,open,high,low,close,source,raw_payload
         ) values (
@@ -183,34 +116,27 @@ def upsert_rows(engine, rows: list[dict[str, Any]]) -> int:
                       close=excluded.close,raw_payload=excluded.raw_payload
     """)
     with engine.begin() as conn:
-        conn.execute(statement, rows)
+        conn.execute(stmt, rows)
     return len(rows)
-
-
-def default_start(engine, code: str) -> date:
-    with engine.connect() as conn:
-        last = conn.execute(
-            text("select max(trade_date) from pms.module_e_benchmark_bars where benchmark_code=:code and source=:source"),
-            {"code": code, "source": SOURCE},
-        ).scalar_one_or_none()
-    if last is None:
-        return date(2018, 1, 1)
-    return max(date(2018, 1, 1), last - timedelta(days=10))
 
 
 def ingest(start: date | None = None, end: date | None = None) -> dict[str, Any]:
     engine = _engine()
+    start = start or date(2018, 1, 1)
     end = end or date.today()
-    index_start = start or default_start(engine, "NIFTYMIDSMALLCAP400")
-    vix_start = start or default_start(engine, "INDIAVIX")
-    counts = {"index": 0, "vix": 0}
+    cache = ROOT / ".cache_nse"
+    cache.mkdir(exist_ok=True)
 
-    with _client() as client:
-        _warm(client)
-        for chunk_start, chunk_end in _chunks(index_start, end):
-            counts["index"] += upsert_rows(engine, _normalise_index(fetch_index(client, chunk_start, chunk_end)))
-        for chunk_start, chunk_end in _chunks(vix_start, end):
-            counts["vix"] += upsert_rows(engine, _normalise_vix(fetch_vix(client, chunk_start, chunk_end)))
+    with NSE(download_folder=cache) as nse:
+        index_raw = nse.fetch_historical_index_data(INDEX_NAME, from_date=start, to_date=end)
+        vix_raw = nse.fetch_historical_vix_data(from_date=start, to_date=end)
+
+    index_rows = _normalise_index(index_raw)
+    vix_rows = _normalise_vix(vix_raw)
+    counts = {
+        "index": upsert_rows(engine, index_rows),
+        "vix": upsert_rows(engine, vix_rows),
+    }
 
     with engine.connect() as conn:
         health = conn.execute(text("""
@@ -219,6 +145,11 @@ def ingest(start: date | None = None, end: date | None = None) -> dict[str, Any]
             where benchmark_code in ('NIFTYMIDSMALLCAP400','INDIAVIX')
             group by benchmark_code order by benchmark_code
         """)).mappings().all()
+
+    if counts["index"] == 0:
+        raise RuntimeError("NSE returned no usable Nifty MidSmallcap 400 rows")
+    if counts["vix"] == 0:
+        raise RuntimeError("NSE returned no usable India VIX rows")
     return {"written": counts, "coverage": [dict(row) for row in health]}
 
 
