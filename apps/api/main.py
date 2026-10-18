@@ -26,27 +26,40 @@ app = FastAPI(
 
 
 def _render_safe_database_url(raw: str) -> str:
-    """Use Supabase's IPv4-compatible session pooler when a direct DB URL is supplied.
+    """Normalize Supabase URLs for Render's IPv4-compatible session pooler.
 
-    Supabase direct hosts can resolve IPv6-only from some Render instances. The session
-    pooler keeps the same password/database while changing only host, port and username.
-    Non-Supabase URLs pass through unchanged.
+    Handles both a direct ``db.<ref>.supabase.co`` URL and an already-configured
+    ``*.pooler.supabase.com`` URL whose username is still the plain ``postgres``.
+    Password/query/database values are preserved and never logged.
     """
     try:
         url = make_url(raw)
     except Exception:
         return raw
+
     host = (url.host or "").lower()
-    if not (host.startswith("db.") and host.endswith(".supabase.co")):
-        return raw
-    parts = host.split(".")
-    if len(parts) < 4:
-        return raw
-    project_ref = parts[1]
-    region = os.getenv("SUPABASE_POOLER_REGION", "ap-south-1").strip() or "ap-south-1"
-    pooler_host = os.getenv("SUPABASE_POOLER_HOST", f"aws-0-{region}.pooler.supabase.com").strip()
-    pooler_user = os.getenv("SUPABASE_POOLER_USER", f"postgres.{project_ref}").strip()
-    return url.set(host=pooler_host, port=5432, username=pooler_user).render_as_string(hide_password=False)
+    configured_ref = os.getenv("SUPABASE_PROJECT_REF", "").strip()
+
+    if host.startswith("db.") and host.endswith(".supabase.co"):
+        parts = host.split(".")
+        if len(parts) < 4:
+            return raw
+        project_ref = parts[1]
+        region = os.getenv("SUPABASE_POOLER_REGION", "ap-south-1").strip() or "ap-south-1"
+        pooler_host = os.getenv("SUPABASE_POOLER_HOST", f"aws-0-{region}.pooler.supabase.com").strip()
+        pooler_user = os.getenv("SUPABASE_POOLER_USER", f"postgres.{project_ref}").strip()
+        return url.set(host=pooler_host, port=5432, username=pooler_user).render_as_string(hide_password=False)
+
+    if host.endswith(".pooler.supabase.com"):
+        project_ref = configured_ref
+        if not project_ref:
+            return raw
+        current_user = (url.username or "").strip()
+        if current_user in {"", "postgres"}:
+            pooler_user = os.getenv("SUPABASE_POOLER_USER", f"postgres.{project_ref}").strip()
+            return url.set(username=pooler_user).render_as_string(hide_password=False)
+
+    return raw
 
 
 @lru_cache(maxsize=1)
