@@ -19,7 +19,8 @@ def engine_from_env():
     raw = os.getenv("DATABASE_URL") or os.getenv("PMS_DATABASE_URL")
     if not raw:
         raise RuntimeError("DATABASE_URL/PMS_DATABASE_URL is required")
-    return create_engine(_render_safe_database_url(raw), pool_pre_ping=True)
+    return create_engine(_render_safe_database_url(raw), pool_pre_ping=True,
+                         connect_args={'options':'-c search_path=pms,public'})
 
 
 def latest_price_date(engine) -> date | None:
@@ -94,11 +95,10 @@ def run(trade_date: date | None = None) -> dict:
         }
 
     _, regime = ModuleEPipeline(engine).evaluate(d, persist=True)
-    module_c = ModuleCPipeline(engine).generate(d)
-
     accounting = PortfolioAccountingService(engine)
     snapshot = accounting.snapshot(d, "PAPER")
     accounting.persist_snapshot(snapshot)
+    module_c = ModuleCPipeline(engine).generate(d)
 
     return {
         "status": "SUCCESS",

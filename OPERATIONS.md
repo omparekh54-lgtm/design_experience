@@ -285,3 +285,13 @@ entry → partial exit → Leg-2 exit demonstration and prints the audit checkpo
 A eligibility. Neither command connects to a broker. See
 [trade engine rules and limits](docs/trade_engine.md) for session calendars,
 conservative same-day stops, restart behavior and backtester integration.
+
+### Module C readiness and order proposals
+
+`python scripts/evaluate_module_c.py` runs a read-only after-close PAPER plan.
+Use `--persist --details` to save all decision records. The output includes the
+order sheet, watchlist, rejection counts and missing account/regime/data gates.
+`python scripts/ingest_module_c_benchmark.py` refreshes the official Nifty 500
+history used for three/six-month relative strength. See
+[Module C scoring and account contracts](docs/module_c.md). The plan submits no
+broker orders and must be revalidated at execution time.

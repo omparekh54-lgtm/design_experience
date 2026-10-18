@@ -135,8 +135,8 @@ def month_windows(start: date, end: date):
 
 
 def fetch_window(nse, code: str, start: date, end: date) -> tuple[list[dict], dict]:
-    if code in {"NIFTYMIDSMALLCAP400", CALENDAR_CODE}:
-        name = INDEX_NAME if code == "NIFTYMIDSMALLCAP400" else "NIFTY 50"
+    if code in {"NIFTYMIDSMALLCAP400", CALENDAR_CODE, "NIFTY500"}:
+        name = {"NIFTYMIDSMALLCAP400":INDEX_NAME, CALENDAR_CODE:"NIFTY 50", "NIFTY500":"NIFTY 500"}[code]
         raw = nse.fetch_historical_index_data(name, from_date=start, to_date=end)
         rows = _normalise_index(raw)
         for row in rows:

@@ -1,0 +1,60 @@
+{
+  "date": "2026-10-18",
+  "implementation_version": "MODULE_C_v1.1",
+  "tests": {
+    "passed": 274,
+    "failed": 0,
+    "skipped": 1,
+    "skip_reason": "Existing optional direct PostgreSQL test requires PMS_TEST_DATABASE_URL."
+  },
+  "official_nifty500_import": {
+    "start": "2026-01-01",
+    "end": "2026-10-16",
+    "rows": 196,
+    "expected_sessions": 196,
+    "missing_sessions": 0,
+    "source": "NSE_HISTORICAL_OR",
+    "historical_scope": "Current 3/6-month ranking readiness; this does not backfill all pre-2026 history."
+  },
+  "pipeline_gate_replay": {
+    "trade_date": "2026-10-18",
+    "universe_size": 2302,
+    "a_eligible": 0,
+    "b_signals": 0,
+    "ranked": 0,
+    "qualified": 0,
+    "selected": 0,
+    "rejected": 2302,
+    "regime_capacity": 0,
+    "watchlist": [],
+    "order_sheet": [],
+    "blockers": [
+      "portfolio_snapshot_unavailable",
+      "market_regime_unavailable"
+    ],
+    "strategy_version": "PMS_v1.1.0_module_a:MODULE_C_v1.1:PAPER",
+    "persisted": false,
+    "projected_heat_pct": 0.0,
+    "remaining_cash": 0.0,
+    "rejection_counts": {
+      "module_a_ineligible": 2302
+    },
+    "validation_mode": "Offline pipeline replay of stored 2302-stock Module A decisions at 2026-10-18T18:53:41.392200+05:30; benchmark and empty account/regime tables independently checked against the database. Not a fresh upstream scan or successful production trade."
+  },
+  "postgres_validation": {
+    "passed": true,
+    "synthetic_rows_rolled_back": true,
+    "checks": [
+      "idempotent ranking/detail writes",
+      "empty rerun invalidates prior selection and details",
+      "rejection reasons replace earlier qualification"
+    ]
+  },
+  "limitations": [
+    "Zero stocks passed the stored Module A gate.",
+    "No market regime or portfolio snapshot exists; both block new selection.",
+    "Scoring normalizations are explicit proposed starting formulas, not optimized or confirmed trading performance.",
+    "Order sheets are proposals; no orders are submitted or account reservations written by this module.",
+    "Historical account/regime/price vintages and actual broker gap-fill revalidation need later execution/backtest audits."
+  ]
+}

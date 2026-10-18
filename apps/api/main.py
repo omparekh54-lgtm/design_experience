@@ -16,6 +16,7 @@ from packages.pms.config import load_strategy_config
 from packages.pms.module_a import FundamentalSnapshot, evaluate_fundamentals
 from packages.pms.module_a_pipeline import ModuleAPipeline
 from packages.pms.module_b_pipeline import ModuleBPipeline
+from packages.pms.module_c_pipeline import ModuleCPipeline
 from packages.pms.module_e import decide_regime
 from packages.pms.risk import size_position
 
@@ -207,15 +208,28 @@ def module_e_from_database(trade_date: date) -> dict:
 @app.get("/v1/module-c")
 def module_c_rankings(trade_date: date, selected_only: bool = False, limit: int = Query(100, ge=1, le=1000)) -> dict:
     clause = "and r.selected=true" if selected_only else ""
+    version=ModuleCPipeline(None).version
     with db_engine().connect() as conn:
         rows = conn.execute(text(f"""
             select r.trade_date, i.exchange, coalesce(i.nse_symbol, replace(i.trading_symbol,'-EQ','')) as symbol,
-                   r.score, r.qualified, r.selected, r.components, r.rejected_reasons, r.strategy_version
-            from module_c_rankings r join instruments i on i.id=r.instrument_id
-            where r.trade_date=:d {clause}
-            order by r.selected desc, r.score desc limit :limit
-        """), {"d": trade_date, "limit": limit}).mappings().all()
-    return {"trade_date": trade_date, "count": len(rows), "rankings": [dict(r) for r in rows]}
+                   r.score, r.qualified, r.selected, r.components, r.rejected_reasons, r.strategy_version,
+                   detail.decision as details
+            from pms.module_c_rankings r join pms.instruments i on i.id=r.instrument_id
+            left join lateral (
+              select s.decision from pms.strategy_decisions s where s.instrument_id=r.instrument_id
+                and s.module='C' and s.strategy_version=r.strategy_version
+                and (s.as_of at time zone 'Asia/Kolkata')::date=r.trade_date
+              order by s.as_of desc limit 1
+            ) detail on true
+            where r.trade_date=:d and r.strategy_version=:version {clause}
+            order by r.selected desc, r.score desc, i.id limit :limit
+        """), {"d": trade_date, "limit": limit, "version":version}).mappings().all()
+    details=[dict(r['details']) for r in rows if r['details']]
+    return {"trade_date": trade_date, "count": len(rows), "strategy_version":version,
+            "rankings": [dict(r) for r in rows],
+            "order_sheet":sorted([r for r in details if r.get('selected')],key=lambda r:r.get('rank',0)),
+            "watchlist":sorted([r for r in details if r.get('kind')=='WATCHLIST'],key=lambda r:r.get('watchlist_rank',0)),
+            "proposal_only":True,"broker_orders_submitted":0}
 
 
 @app.get("/v1/positions")

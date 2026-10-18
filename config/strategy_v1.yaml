@@ -67,6 +67,12 @@ risk:
   max_stop_risk_pct: 5.5
 
 ranking:
+  implementation_version: MODULE_C_v1.1
+  # Explicit starting scoring normalizations; tune only through the research matrix.
+  velocity_full_score: 2
+  volume_ratio_full_score: 3
+  pullback_full_depth_atr: 1
+  stage3_bonus: 10
   minimum_score: 60
   rally_quality_points: 25
   pullback_quality_points: 20
