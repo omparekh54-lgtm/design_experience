@@ -3,7 +3,8 @@ from __future__ import annotations
 import os
 import time
 from datetime import date
-from typing import Callable, Any
+from pathlib import Path
+from typing import Callable
 
 from dotenv import load_dotenv
 from nse import NSE
@@ -19,57 +20,30 @@ def _engine():
     return create_engine(url, pool_pre_ping=True)
 
 
-def _clean(value: Any) -> str | None:
-    if isinstance(value, str) and value.strip():
-        return value.strip()
-    return None
-
-
-def _industry_info(payload: dict) -> tuple[str | None, str | None]:
-    """Read NSE's classification from both current and legacy response shapes."""
-    if not isinstance(payload, dict):
+def _classification(payload: dict) -> tuple[str | None, str | None]:
+    """Extract NSE 4-tier classification from the current Next API payload."""
+    eq = None
+    if isinstance(payload, dict):
+        rows = payload.get("equityResponse")
+        if isinstance(rows, list) and rows:
+            eq = rows[0]
+        elif isinstance(payload.get("secInfo"), dict):
+            eq = payload
+    if not isinstance(eq, dict):
         return None, None
 
-    # Older quote-equity response shape.
-    info = payload.get("industryInfo")
-    if isinstance(info, dict):
-        sector = _clean(info.get("sector")) or _clean(info.get("macro"))
-        industry = _clean(info.get("industry")) or _clean(info.get("basicIndustry"))
-        if sector:
-            return sector, industry
+    sec = eq.get("secInfo") or eq.get("securityInfo") or {}
+    if not isinstance(sec, dict):
+        return None, None
 
-    # NSE client 5.x simplified quote response.
-    for key in ("metaData", "metadata"):
-        meta = payload.get(key)
-        if isinstance(meta, dict):
-            sector = _clean(meta.get("sector")) or _clean(meta.get("macro"))
-            industry = (
-                _clean(meta.get("industryInfo"))
-                or _clean(meta.get("industry"))
-                or _clean(meta.get("basicIndustry"))
-            )
-            if sector:
-                return sector, industry
-
-    # Detailed NextApi response shape.
-    equity = payload.get("equityResponse")
-    if isinstance(equity, list) and equity and isinstance(equity[0], dict):
-        first = equity[0]
-        sec_info = first.get("secInfo") or {}
-        if isinstance(sec_info, dict):
-            sector = _clean(sec_info.get("sector")) or _clean(sec_info.get("macro"))
-            industry = _clean(sec_info.get("industryInfo")) or _clean(sec_info.get("basicIndustry"))
-            if sector:
-                return sector, industry
-        return _industry_info(first)
-
-    # Defensive flattened fallback.
-    sector = _clean(payload.get("sector")) or _clean(payload.get("macro"))
-    industry = _clean(payload.get("industryInfo")) or _clean(payload.get("industry")) or _clean(payload.get("basicIndustry"))
+    sector = sec.get("sector") or sec.get("macro")
+    industry = sec.get("industryInfo") or sec.get("industry") or sec.get("basicIndustry")
+    sector = sector.strip() if isinstance(sector, str) and sector.strip() else None
+    industry = industry.strip() if isinstance(industry, str) and industry.strip() else None
     return sector, industry
 
 
-def ingest(progress: Callable[[int, int, str], None] | None = None, delay: float = 0.40) -> dict:
+def ingest(progress: Callable[[int, int, str], None] | None = None, delay: float = 0.05) -> dict:
     engine = _engine()
     with engine.connect() as conn:
         rows = conn.execute(text("""
@@ -84,18 +58,19 @@ def ingest(progress: Callable[[int, int, str], None] | None = None, delay: float
     total = len(rows)
     updated = 0
     failed: list[str] = []
-    first_errors: list[str] = []
+    errors: list[str] = []
+    download_dir = Path(".cache_nse")
+    download_dir.mkdir(exist_ok=True)
 
-    # nse 5.x manages the current NSE request flow, cookies and throttling.
-    with NSE(download_folder=".") as nse:
+    # The nse package handles cookies, current Next API routing, throttling and retries.
+    with NSE(download_folder=download_dir) as nse:
         for done, row in enumerate(rows, start=1):
             symbol = row["nse_symbol"]
             try:
-                payload = nse.equity_quote(symbol)
-                sector, industry = _industry_info(payload)
+                payload = nse.get_detailed_scrip_data(symbol)
+                sector, industry = _classification(payload)
                 if not sector:
-                    raise RuntimeError("classification missing in NSE quote response")
-
+                    raise RuntimeError("classification missing in NSE Next API response")
                 with engine.begin() as conn:
                     conn.execute(text("""
                         update pms.instruments
@@ -104,35 +79,29 @@ def ingest(progress: Callable[[int, int, str], None] | None = None, delay: float
                     """), {"sector": sector, "instrument_id": row["id"]})
                     conn.execute(text("""
                         insert into pms.sector_history(instrument_id,sector,industry,effective_from,effective_to,source)
-                        select :instrument_id,:sector,:industry,:effective_from,null,'NSE_EQUITY_QUOTE_V5'
-                        where not exists (
-                            select 1 from pms.sector_history
-                            where instrument_id=:instrument_id
-                              and sector=:sector
-                              and effective_to is null
-                        )
+                        values(:instrument_id,:sector,:industry,:effective_from,null,'NSE_NEXT_API')
+                        on conflict do nothing
                     """), {
-                        "instrument_id": row["id"],
-                        "sector": sector,
-                        "industry": industry,
+                        "instrument_id": row["id"], "sector": sector, "industry": industry,
                         "effective_from": date.today(),
                     })
                 updated += 1
             except Exception as exc:
                 failed.append(symbol)
-                if len(first_errors) < 5:
-                    first_errors.append(f"{symbol}: {type(exc).__name__}: {exc}")
+                if len(errors) < 10:
+                    errors.append(f"{symbol}: {type(exc).__name__}: {exc}")
             finally:
                 if progress:
                     progress(done, total, symbol)
-                time.sleep(delay)
+                if delay:
+                    time.sleep(delay)
 
     return {
         "requested": total,
         "updated": updated,
         "failed": len(failed),
         "failed_symbols": failed[:50],
-        "sample_errors": first_errors,
+        "sample_errors": errors,
     }
 
 
