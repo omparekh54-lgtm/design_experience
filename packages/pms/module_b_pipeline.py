@@ -5,6 +5,8 @@ from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
+from sqlalchemy import text
+
 from packages.data_layer.corporate_actions import adjust_ohlcv_for_actions
 from packages.data_layer.features import candles_to_frame, compute_features
 from packages.data_layer.models import Candle
@@ -66,6 +68,37 @@ class ModuleBPipeline:
             for idx, row in adjusted.iterrows()
         ]
 
+    def _trading_dates(self, start: date, sessions: int) -> list[date]:
+        """Return exchange-wide trading dates, never instrument-specific future bars.
+
+        The daily_prices warehouse is used only as a market calendar: a date is a
+        trading session when the market has any stored NSE bars. No future price or
+        volume value is read into the decision.
+        """
+        if sessions <= 0:
+            return []
+        with self.engine.connect() as conn:
+            rows = conn.execute(
+                text(
+                    """
+                    select distinct p.trade_date
+                    from daily_prices p
+                    join instruments i on i.id=p.instrument_id
+                    where i.exchange='NSE'
+                      and p.trade_date>=:start
+                      and p.trade_date<=:end
+                    order by p.trade_date
+                    limit :limit
+                    """
+                ),
+                {
+                    "start": start,
+                    "end": start + timedelta(days=max(14, sessions * 4)),
+                    "limit": sessions,
+                },
+            ).scalars().all()
+        return list(rows)
+
     def _latest_setup1_signal(self, features, as_of: date) -> dict[str, Any] | None:
         t = self.cfg["technical"]
         tracker = RallyTracker()
@@ -124,10 +157,12 @@ class ModuleBPipeline:
         if distance_pct > float(t["max_distance_from_52w_high_pct"]): rejected.append("distance_52w_high")
         if self.reference.is_index_member(instrument_id, "NIFTY50", as_of): rejected.append("nifty50_excluded")
 
-        future_rows = self.prices.daily_prices(instrument_id, as_of, as_of + timedelta(days=10), preferred_source=None)
-        trading_dates = sorted({r["trade_date"] for r in future_rows if r["trade_date"] >= as_of})
         blackout_n = int(t["earnings_blackout_trading_days"])
-        if self.reference.earnings_within_trading_window(instrument_id, as_of, trading_dates[: blackout_n + 1]):
+        trading_dates = self._trading_dates(as_of, blackout_n + 1)
+        if len(trading_dates) < blackout_n + 1:
+            # A future blackout cannot be verified without a market calendar; fail closed.
+            rejected.append("earnings_calendar_market_dates_unavailable")
+        elif self.reference.earnings_within_trading_window(instrument_id, as_of, trading_dates):
             rejected.append("earnings_blackout")
 
         if rejected:
