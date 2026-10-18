@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, time
 from typing import Any, Iterable
 
 from sqlalchemy import Engine, text
@@ -184,13 +184,38 @@ class ReferenceDataQueries:
             ).mappings().all()
             return [f"{r['exchange']}:{r['symbol']}" for r in rows]
 
-    def earnings_within_trading_window(self, instrument_id: str, on_date: date, calendar_dates: Iterable[date]) -> bool:
+    def earnings_within_trading_window(
+        self,
+        instrument_id: str,
+        on_date: date,
+        calendar_dates: Iterable[date],
+        *,
+        as_of: datetime | None = None,
+    ) -> bool:
+        """Return True only for result dates that were already announced by `as_of`.
+
+        This prevents historical backtests from learning a future board-meeting/result
+        date before the exchange actually disseminated that date.
+        """
         target = set(calendar_dates)
+        if not target:
+            return False
+        known_at = as_of or datetime.combine(on_date, time(23, 59, 59))
         with self.engine.connect() as conn:
             pk = self._instrument_pk(conn, instrument_id)
             rows = conn.execute(
-                text("select event_date from earnings_calendar where instrument_id=:id and event_date>=:d order by event_date limit 5"),
-                {"id": pk, "d": on_date},
+                text(
+                    """
+                    select event_date
+                    from earnings_calendar
+                    where instrument_id=:id
+                      and event_date>=:d
+                      and announced_at<=:known_at
+                    order by event_date
+                    limit 10
+                    """
+                ),
+                {"id": pk, "d": on_date, "known_at": known_at},
             ).scalars().all()
             return any(d in target for d in rows)
 
