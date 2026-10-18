@@ -5,6 +5,10 @@ on:
     # 19:00 India time (13:30 UTC), Monday-Friday.
     - cron: '30 13 * * 1-5'
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/pms-market-close.yml'
 
 concurrency:
   group: pms-market-close-paper
