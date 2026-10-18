@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import os
 import sys
-import time
 from datetime import date
 from pathlib import Path
 
@@ -13,8 +12,6 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 load_dotenv(ROOT / ".env")
-# All PMS-local reference tables live in the isolated pms schema.  Setting
-# PGOPTIONS keeps older unqualified SQL in existing ingestion scripts safe.
 os.environ.setdefault("PGOPTIONS", "-c search_path=pms,public")
 
 BAR = 34
@@ -71,8 +68,6 @@ def percentages(s: dict) -> dict[str, float]:
     sector = 100.0 * s["sector"] / max(1, s["total"])
     mid = date_coverage(s["bench"].get("NIFTYMIDSMALLCAP400"))
     vix = date_coverage(s["bench"].get("INDIAVIX"))
-    # Historical GSM is event based rather than one row per day. The live
-    # meter is deliberately conservative; the final audit decides completion.
     gsm = min(99.0, s["gsm"] / 12.0) if s["gsm"] else 0.0
     return {"Sectors": sector, "MidSmallcap 400": mid, "India VIX": vix, "Pre-2024 GSM": gsm}
 
@@ -104,34 +99,52 @@ def main():
         conn.execute(text("select 1"))
     dashboard(db, "Database connection OK. Starting remaining Phase-1 jobs...")
 
-    from scripts.ingest_sector_classifications import ingest as ingest_sectors
-
-    def sector_progress(n, total, symbol):
-        pct = 100 * n / max(1, total)
-        print(f"\r[1/4] Fetching NSE sectors {bar(pct)}  {n}/{total}  {symbol:16}", end="", flush=True)
+    job_errors: list[str] = []
 
     print("\n[1/4] Sector classifications")
-    sector_result = ingest_sectors(sector_progress)
-    print("\nSector result:", sector_result)
-    dashboard(db, "Sector pass finished.")
+    try:
+        from scripts.ingest_sector_classifications import ingest as ingest_sectors
+
+        def sector_progress(n, total, symbol):
+            pct = 100 * n / max(1, total)
+            print(f"\r[1/4] Fetching NSE sectors {bar(pct)}  {n}/{total}  {symbol:16}", end="", flush=True)
+
+        sector_result = ingest_sectors(sector_progress)
+        print("\nSector result:", sector_result)
+    except Exception as exc:
+        msg = f"Sector job failed: {type(exc).__name__}: {exc}"
+        job_errors.append(msg)
+        print("\n", msg)
+    dashboard(db, "Sector pass finished. Continuing to benchmarks...")
 
     print("\n[2/4 + 3/4] Official Nifty MidSmallcap 400 + India VIX history")
-    print("Fetching official history in yearly chunks. This step may sit on the same percentage for a few minutes.")
-    import scripts.ingest_module_e_benchmarks as benchmark
-    benchmark_result = benchmark.ingest(date(2018, 1, 1), date.today())
-    print("Benchmark result:", benchmark_result)
-    dashboard(db, "Benchmark/VIX pass finished.")
+    print("Fetching official history in yearly chunks. This can take several minutes.")
+    try:
+        import scripts.ingest_module_e_benchmarks as benchmark
+        benchmark_result = benchmark.ingest(date(2018, 1, 1), date.today())
+        print("Benchmark result:", benchmark_result)
+    except Exception as exc:
+        msg = f"Benchmark/VIX job failed: {type(exc).__name__}: {exc}"
+        job_errors.append(msg)
+        print(msg)
+    dashboard(db, "Benchmark/VIX pass finished. Continuing to legacy GSM...")
 
     print("\n[4/4] Pre-2024 GSM reconstruction from NSE circular archive")
-    from scripts.ingest_legacy_gsm import ingest as ingest_gsm
+    try:
+        from scripts.ingest_legacy_gsm import ingest as ingest_gsm
 
-    def gsm_progress(n, total, window):
-        pct = 100 * n / max(1, total)
-        print(f"\r[4/4] Reading GSM circulars {bar(pct)}  {n}/{total}  {window:28}", end="", flush=True)
+        def gsm_progress(n, total, window):
+            pct = 100 * n / max(1, total)
+            print(f"\r[4/4] Reading GSM circulars {bar(pct)}  {n}/{total}  {window:28}", end="", flush=True)
 
-    gsm_result = ingest_gsm(gsm_progress)
-    print("\nGSM result:", gsm_result)
-    final, p = dashboard(db, "All four fetchers have finished. Running final audit...")
+        gsm_result = ingest_gsm(gsm_progress)
+        print("\nGSM result:", gsm_result)
+    except Exception as exc:
+        msg = f"Legacy GSM job failed: {type(exc).__name__}: {exc}"
+        job_errors.append(msg)
+        print("\n", msg)
+
+    final, _ = dashboard(db, "All available fetchers have finished. Running final audit...")
 
     failures = []
     if final["sector"] < final["total"]:
@@ -146,11 +159,15 @@ def main():
         failures.append(f"{final['errors']} unresolved ERROR data-quality issue(s)")
 
     print("\nFINAL AUDIT")
+    if job_errors:
+        print("Source/job errors encountered:")
+        for item in job_errors:
+            print(" -", item)
     if failures:
         print("NOT 100% YET. Remaining items:")
         for item in failures:
             print(" -", item)
-        print("\nThe command is resumable: run it again after any source/network issue; existing rows are preserved.")
+        print("\nThis command is resumable. Fix/retry any failed source and run it again; existing rows are preserved.")
         raise SystemExit(2)
     print("PASS: Phase-1 mandatory data checks are complete.")
 
