@@ -3,9 +3,18 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import sys
 import time
 from datetime import date, datetime, timedelta
+from pathlib import Path
 from typing import Any, Iterable
+
+# When this file is executed as `python scripts/...`, Python puts `scripts/`
+# on sys.path rather than the repository root. Add the root explicitly so
+# package imports behave the same way in GitHub Actions and local execution.
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 import httpx
 from sqlalchemy import create_engine, text
@@ -80,7 +89,6 @@ def _double_json(response: httpx.Response) -> list[dict[str, Any]]:
 
 def _client() -> httpx.Client:
     client = httpx.Client(headers=HEADERS, timeout=httpx.Timeout(60.0), follow_redirects=True)
-    # Warm the anti-bot/session layer. Failure is tolerated because the API can still work cold.
     try:
         client.get(LANDING_URL, timeout=10.0)
     except httpx.HTTPError:
@@ -114,7 +122,6 @@ def fetch_index(client: httpx.Client, start: date, end: date) -> list[dict[str, 
 
 
 def fetch_vix(client: httpx.Client, start: date, end: date) -> list[dict[str, Any]]:
-    # This endpoint intentionally expects a raw JSON-like string rather than a cinfo wrapper.
     payload = "{'name':'India VIX','startDate':'" + _format_date(start) + "','endDate':'" + _format_date(end) + "'}"
     return _post_with_retry(client, VIX_URL, content=payload)
 
@@ -134,18 +141,14 @@ def _normalise_index(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         close = _number(row.get("CLOSE") or row.get("close"))
         if d is None or close is None:
             continue
-        out.append(
-            {
-                "benchmark_code": "NIFTYMIDSMALLCAP400",
-                "trade_date": d,
-                "open": _number(row.get("OPEN") or row.get("open")),
-                "high": _number(row.get("HIGH") or row.get("high")),
-                "low": _number(row.get("LOW") or row.get("low")),
-                "close": close,
-                "source": SOURCE,
-                "raw_payload": json.dumps(row, default=str),
-            }
-        )
+        out.append({
+            "benchmark_code": "NIFTYMIDSMALLCAP400", "trade_date": d,
+            "open": _number(row.get("OPEN") or row.get("open")),
+            "high": _number(row.get("HIGH") or row.get("high")),
+            "low": _number(row.get("LOW") or row.get("low")),
+            "close": close, "source": SOURCE,
+            "raw_payload": json.dumps(row, default=str),
+        })
     return out
 
 
@@ -156,26 +159,21 @@ def _normalise_vix(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         close = _number(row.get("close") or row.get("CLOSE"))
         if d is None or close is None:
             continue
-        out.append(
-            {
-                "benchmark_code": "INDIAVIX",
-                "trade_date": d,
-                "open": _number(row.get("open") or row.get("OPEN")),
-                "high": _number(row.get("high") or row.get("HIGH")),
-                "low": _number(row.get("low") or row.get("LOW")),
-                "close": close,
-                "source": SOURCE,
-                "raw_payload": json.dumps(row, default=str),
-            }
-        )
+        out.append({
+            "benchmark_code": "INDIAVIX", "trade_date": d,
+            "open": _number(row.get("open") or row.get("OPEN")),
+            "high": _number(row.get("high") or row.get("HIGH")),
+            "low": _number(row.get("low") or row.get("LOW")),
+            "close": close, "source": SOURCE,
+            "raw_payload": json.dumps(row, default=str),
+        })
     return out
 
 
 def upsert_rows(engine, rows: list[dict[str, Any]]) -> int:
     if not rows:
         return 0
-    statement = text(
-        """
+    statement = text("""
         insert into module_e_benchmark_bars(
             benchmark_code,trade_date,open,high,low,close,source,raw_payload
         ) values (
@@ -184,8 +182,7 @@ def upsert_rows(engine, rows: list[dict[str, Any]]) -> int:
         on conflict (benchmark_code,trade_date,source)
         do update set open=excluded.open,high=excluded.high,low=excluded.low,
                       close=excluded.close,raw_payload=excluded.raw_payload
-        """
-    )
+    """)
     with engine.begin() as conn:
         conn.execute(statement, rows)
     return len(rows)
@@ -199,7 +196,6 @@ def default_start(engine, code: str) -> date:
         ).scalar_one_or_none()
     if last is None:
         return date(2018, 1, 1)
-    # Re-fetch a short overlap so revisions / the latest incomplete day are idempotently refreshed.
     return max(date(2018, 1, 1), last - timedelta(days=10))
 
 
@@ -217,16 +213,12 @@ def ingest(start: date | None = None, end: date | None = None) -> dict[str, Any]
             counts["vix"] += upsert_rows(engine, _normalise_vix(fetch_vix(client, chunk_start, chunk_end)))
 
     with engine.connect() as conn:
-        health = conn.execute(
-            text(
-                """
-                select benchmark_code,count(*) rows,min(trade_date) min_date,max(trade_date) max_date
-                from module_e_benchmark_bars
-                where benchmark_code in ('NIFTYMIDSMALLCAP400','INDIAVIX')
-                group by benchmark_code order by benchmark_code
-                """
-            )
-        ).mappings().all()
+        health = conn.execute(text("""
+            select benchmark_code,count(*) rows,min(trade_date) min_date,max(trade_date) max_date
+            from module_e_benchmark_bars
+            where benchmark_code in ('NIFTYMIDSMALLCAP400','INDIAVIX')
+            group by benchmark_code order by benchmark_code
+        """)).mappings().all()
     return {"written": counts, "coverage": [dict(row) for row in health]}
 
 
