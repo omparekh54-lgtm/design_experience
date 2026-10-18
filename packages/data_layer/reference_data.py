@@ -217,7 +217,7 @@ class ReferenceDataQueries:
                 ),
                 {"id": pk, "d": on_date, "known_at": known_at},
             ).scalars().all()
-            return any(d in target for d in rows)
+            return any(on_date<=d<=max(target) for d in rows)
 
     def corporate_actions_between(self, instrument_id: str, start: date, end: date) -> list[CorporateAction]:
         with self.engine.connect() as conn:

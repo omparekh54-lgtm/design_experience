@@ -1,0 +1,83 @@
+{
+  "date": "2026-10-18",
+  "full_test_suite": {
+    "passed": 166,
+    "failed": 0,
+    "skipped": 1,
+    "skip_reason": "Optional direct PostgreSQL test requires PMS_TEST_DATABASE_URL; equivalent actual persistence SQL separately passed through the connected database API."
+  },
+  "stored_module_a_gate_replay": {
+    "as_of": "2026-10-18",
+    "strategy_version": "PMS_v1.1.0_module_a:MODULE_B_v1.1",
+    "evaluated": 2302,
+    "module_a_eligible": 0,
+    "technical_eligible": 0,
+    "signals": 0,
+    "watchlist": 0,
+    "rejection_counts": {
+      "module_a_ineligible": 2302
+    },
+    "persisted": false,
+    "validation_mode": "Replay of 2302 stored real Module A decisions at 2026-10-18T18:53:41.392200+05:30; not a fresh upstream scan."
+  },
+  "real_stock_diagnostic": {
+    "instrument_id": "NSE:VGUARD",
+    "as_of": "2026-10-18",
+    "eligible_universe": false,
+    "rejected_reasons": [
+      "price_history_stale",
+      "price_history_missing_sessions",
+      "adr"
+    ],
+    "signal": null,
+    "watchlist": null,
+    "research_only": true,
+    "module_a_reasons": [],
+    "diagnostics": {},
+    "validation_mode": "Read-only real price/action/calendar diagnostic; index and earnings reference checks stubbed false. Not a production eligibility decision.",
+    "price_rows_after_session_dedup": 664,
+    "latest_price_date": "2026-10-01",
+    "latest_historical_setup1_signal": {
+      "rally_start": "2026-07-29",
+      "rally_high_date": "2026-08-18",
+      "rally_pct": 19.6172,
+      "velocity": 1.3078,
+      "rally_duration_sessions": 15,
+      "volume_ratio": 17.3645,
+      "baseline_volume_50d": 233610.48,
+      "state": "SIGNAL_CREATED",
+      "signal_date": "2026-09-08",
+      "signal_high": 332.649993896484,
+      "signal_low": 327.299987792969,
+      "setup": "SETUP_1",
+      "entry_window_days": 3
+    },
+    "current_watchlist": null
+  },
+  "postgres_persistence_validation": {
+    "passed": true,
+    "rolled_back": true,
+    "checks": [
+      "identical timestamp decision upsert",
+      "signal upsert",
+      "consumed signal never resurrected",
+      "end-of-third-session expiry",
+      "expired signal never resurrected"
+    ]
+  },
+  "official_calendar": {
+    "provider": "NSE",
+    "year": 2026,
+    "holiday_dates": 20,
+    "snapshot_id": 1,
+    "unverified_special_sessions": [
+      "2026-11-08"
+    ]
+  },
+  "limitations": [
+    "No production eligible stock: Module A policies and underlying fundamental/reference data remain incomplete.",
+    "Successful end-to-end production signal execution is not certified by blocked-universe replay or synthetic fixtures.",
+    "Historical point-in-time price vintages and complete special-session calendars require separate backtest/data audits.",
+    "Setup 2 is research/backtest-only."
+  ]
+}

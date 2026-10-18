@@ -296,10 +296,10 @@ class ModuleCPipeline:
                 continue
             a_pass += 1
             try:
-                b_result = self.b.evaluate(instrument_key, d, require_module_a=False)
+                b_result = self.b.evaluate(instrument_key, d, require_module_a=True)
             except Exception:
                 continue
-            if not b_result.eligible_universe or not b_result.signal:
+            if getattr(b_result,'research_only',False) or not b_result.eligible_universe or not b_result.signal:
                 continue
 
             stats = self._market_stats(int(item["id"]), d)

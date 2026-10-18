@@ -34,6 +34,11 @@ fundamental:
     - pat
 
 technical:
+  implementation_version: MODULE_B_v1.1
+  max_price_age_days: 7
+  # Explicitly identify already-adjusted feeds before applying corporate actions.
+  # yfinance is intentionally unverified until its import settings are confirmed.
+  adjusted_price_sources: []
   min_price: 30
   min_avg_volume_20d: 100000
   min_worst_day_volume_20d: 75000
@@ -48,6 +53,9 @@ technical:
   rally_max_days: 30
   rally_min_volume_ratio: 1.5
   entry_window_days: 3
+  setup2_reaction_volume_ratio: 2.0
+  setup2_qualification_sessions: 30
+  setup2_expiry_sessions: 60
 
 risk:
   risk_per_trade_pct: 0.5

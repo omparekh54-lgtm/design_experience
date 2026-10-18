@@ -32,6 +32,7 @@ class Candle:
     volume: int
     source: str
     adjusted: bool = False
+    turnover: Decimal | None = None
 
 
 @dataclass(frozen=True)

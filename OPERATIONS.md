@@ -266,3 +266,13 @@ both measures have official legacy rows, recent open snapshots and no inverted
 intervals. Other errors remain open and are printed with their IDs and details.
 API health and acceptance checks count unresolved errors rather than all past
 error records. Full GSM historical reconstruction remains a separate audit.
+
+### Module B scanner
+
+Run `python scripts/evaluate_module_b.py --all --refresh-calendar` for the
+production-gated technical scan and a current official NSE holiday snapshot.
+Then use `--all --persist` to save decisions and Setup-1 signals, or add
+`--details` for every rejection. Module A is mandatory in production. Single-stock
+`--research-only` diagnostics and `--setup 2` cannot persist production signals.
+See [Module B rules and validation](docs/module_b.md) for calendar conventions,
+price-source checks, signal expiry and current upstream data blockers.

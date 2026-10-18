@@ -21,6 +21,8 @@ def candles_to_frame(candles: list[Candle]) -> pd.DataFrame:
             "low": float(candle.low),
             "close": float(candle.close),
             "volume": candle.volume,
+            "turnover": (float(candle.turnover) if candle.turnover is not None
+                         else float(candle.close) * candle.volume),
         }
         for candle in sorted(candles, key=lambda c: c.timestamp)
     ]
@@ -59,7 +61,8 @@ def compute_features(candles: list[Candle]) -> FeatureFrame:
     df["avg_volume50"] = df["volume"].rolling(50, min_periods=50).mean()
     df["worst_volume20"] = df["volume"].rolling(20, min_periods=20).min()
 
-    df["turnover"] = df["close"] * df["volume"]
+    # Prefer reported rupee turnover; close x volume is an explicit fallback
+    # for feeds which do not supply the traded value.
     df["avg_turnover20"] = df["turnover"].rolling(20, min_periods=20).mean()
     df["high_52w"] = df["high"].rolling(252, min_periods=1).max()
     df["low_52w"] = df["low"].rolling(252, min_periods=1).min()

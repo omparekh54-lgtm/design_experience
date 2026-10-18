@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from dataclasses import asdict
 from datetime import date, datetime, time
 from functools import lru_cache
 from uuid import UUID
@@ -182,10 +183,14 @@ def module_a_from_database(instrument_id: str, as_of: date) -> dict:
 
 @app.get("/v1/module-b/{instrument_id}")
 def module_b_from_database(instrument_id: str, as_of: date, require_module_a: bool = True) -> dict:
+    if not require_module_a:
+        raise HTTPException(
+            status_code=400,
+            detail='Module A cannot be bypassed in the production API; use the research CLI.',
+        )
     try:
-        result = ModuleBPipeline(db_engine()).evaluate(instrument_id.upper(), as_of, require_module_a=require_module_a)
-        return {"instrument_id": result.instrument_id, "as_of": result.as_of, "eligible_universe": result.eligible_universe,
-                "rejected_reasons": list(result.rejected_reasons), "signal": result.signal}
+        result = ModuleBPipeline(db_engine()).evaluate(instrument_id.upper(), as_of, require_module_a=True)
+        return asdict(result)
     except (KeyError, ValueError) as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
