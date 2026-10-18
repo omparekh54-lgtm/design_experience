@@ -604,3 +604,53 @@ def test_pending_quote_cannot_understate_reserved_stop_risk():
     )
     s, _ = account({**snapshot(), "positions": []}, [t], [order])
     assert "pending_order_trade_mismatch" in s.blockers
+
+
+def test_orchestrator_persists_upstream_a_b_and_c(pipeline, monkeypatch):
+    calls = []
+    original = pipeline.a.scan
+
+    def scan(stamp, *, persist):
+        calls.append(("A", persist))
+        return {**original(stamp, persist=persist), "configuration_ready": True}
+
+    monkeypatch.setattr(pipeline.a, "scan", scan)
+    monkeypatch.setattr(
+        pipeline.b,
+        "persist_results",
+        lambda rows, stamp: calls.append(("B", len(rows))),
+    )
+    monkeypatch.setattr(
+        pipeline, "_persist", lambda report, stamp: calls.append(("C", report.selected))
+    )
+    report = pipeline.generate(D, persist=True, persist_upstream=True)
+    assert calls == [("A", True), ("B", 1), ("C", 1)]
+    assert report.upstream["a_persisted"] and report.upstream["b_evaluated"] == 1
+
+
+def test_orchestrator_configuration_blocker_prevents_selected_proposals(
+    pipeline, monkeypatch
+):
+    monkeypatch.setattr(pipeline.b, "persist_results", lambda *args: None)
+    monkeypatch.setattr(pipeline, "_persist", lambda *args: None)
+    report = pipeline.generate(D, persist=True, persist_upstream=True)
+    assert report.selected == 0
+    assert "module_a_configuration_not_ready" in report.blockers
+
+
+def test_read_only_c_cannot_request_upstream_writes(pipeline):
+    with pytest.raises(ValueError, match="Upstream persistence"):
+        pipeline.generate(D, persist=False, persist_upstream=True)
+
+
+def test_orchestrator_empty_a_universe_blocks_daily_allocation(pipeline, monkeypatch):
+    monkeypatch.setattr(
+        pipeline.a,
+        "scan",
+        lambda *a, **kw: dict(eligible=0, results=[], configuration_ready=True),
+    )
+    monkeypatch.setattr(pipeline.b, "persist_results", lambda *a: None)
+    monkeypatch.setattr(pipeline, "_persist", lambda *a: None)
+    report = pipeline.generate(D, persist=True, persist_upstream=True)
+    assert report.universe_size == 0 and report.selected == 0
+    assert "module_a_universe_unavailable" in report.blockers

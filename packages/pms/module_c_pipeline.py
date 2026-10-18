@@ -49,6 +49,7 @@ class ModuleCGenerationResult:
     projected_heat_pct: float = 0.0
     remaining_cash: float = 0.0
     rejection_counts: dict[str, int] = field(default_factory=dict)
+    upstream: dict = field(default_factory=dict)
 
 
 def _clamp100(value):
@@ -201,7 +202,9 @@ class ModuleCPipeline:
             self.cfg,
         )
 
-    def generate(self, d: date, *, persist=True):
+    def generate(self, d: date, *, persist=True, persist_upstream=False):
+        if persist_upstream and not persist:
+            raise ValueError("Upstream persistence requires persisted Module C output")
         if d > datetime.now(IST).date():
             raise ValueError("as_of must not be in the future")
         stamp = self._as_of_end(d)
@@ -229,7 +232,12 @@ class ModuleCPipeline:
         except ValueError as exc:
             benchmark = {}
             blockers.append(str(exc))
-        a_scan = self.a.scan(stamp, persist=False)
+        a_scan = self.a.scan(stamp, persist=persist_upstream)
+        if persist_upstream and not a_scan.get("configuration_ready", False):
+            blockers.append("module_a_configuration_not_ready")
+        if persist_upstream and not a_scan["results"]:
+            blockers.append("module_a_universe_unavailable")
+        b_results = []
         sectors = {}
         identities = {}
         records = {}
@@ -264,6 +272,7 @@ class ModuleCPipeline:
                 continue
             try:
                 b = self.b.evaluate(instrument, d, require_module_a=True)
+                b_results.append(b)
                 if b.research_only:
                     raise ValueError("research_signal_not_production")
                 if not b.eligible_universe:
@@ -497,6 +506,19 @@ class ModuleCPipeline:
                 )
             ),
         )
+        report = replace(
+            report,
+            upstream={
+                "configuration_ready": a_scan.get("configuration_ready", False),
+                "a_evaluated": a_scan.get("evaluated", len(a_scan["results"])),
+                "a_persisted": bool(persist_upstream),
+                "a_rejection_counts": a_scan.get("rejection_counts", {}),
+                "b_evaluated": len(b_results),
+                "b_persisted": bool(persist_upstream),
+            },
+        )
+        if persist_upstream:
+            self.b.persist_results(b_results, stamp)
         if persist:
             self._persist(report, stamp)
         return report

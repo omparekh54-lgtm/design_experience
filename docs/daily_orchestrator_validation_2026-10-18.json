@@ -1,0 +1,92 @@
+{
+  "implementation": "DAILY_ORCHESTRATOR_v1.0",
+  "validation_date": "2026-10-18",
+  "actual_data_preflight": {
+    "method": "Canonical preflight replay against fresh connected PostgreSQL query exports; not a full persisted production run.",
+    "weekend": {
+      "trade_date": "2026-10-18",
+      "market_data_session": "2026-10-18",
+      "mode": "PAPER",
+      "implementation": "DAILY_ORCHESTRATOR_v1.0",
+      "config_hash": "fd48fb5335d14ca0bbec32b10a0a17f3e90ba5cd5c8d74be3e1c616025c077c7",
+      "run_key": "2026-10-18:PAPER:DAILY_ORCHESTRATOR_v1.0:fd48fb5335d14ca0bbec32b10a0a17f3e90ba5cd5c8d74be3e1c616025c077c7",
+      "broker_orders_submitted": 0,
+      "proposal_only": true,
+      "status": "SKIPPED",
+      "check_only": true,
+      "preflight": {
+        "status": "SKIPPED",
+        "reasons": [
+          "exchange_non_session"
+        ]
+      }
+    },
+    "last_session_readiness": {
+      "trade_date": "2026-10-16",
+      "market_data_session": "2026-10-16",
+      "mode": "PAPER",
+      "implementation": "DAILY_ORCHESTRATOR_v1.0",
+      "config_hash": "fd48fb5335d14ca0bbec32b10a0a17f3e90ba5cd5c8d74be3e1c616025c077c7",
+      "run_key": "2026-10-16:PAPER:DAILY_ORCHESTRATOR_v1.0:fd48fb5335d14ca0bbec32b10a0a17f3e90ba5cd5c8d74be3e1c616025c077c7",
+      "broker_orders_submitted": 0,
+      "proposal_only": true,
+      "status": "BLOCKED",
+      "check_only": true,
+      "preflight": {
+        "status": "BLOCKED",
+        "reasons": [
+          "execution_safety_locked_or_unavailable"
+        ],
+        "benchmark_session_rows": {
+          "NIFTY50": 1,
+          "INDIAVIX": 1,
+          "NIFTY500": 1,
+          "NIFTYMIDSMALLCAP400": 1
+        },
+        "equity_instruments_with_bars": 100,
+        "critical_dq_errors": 0,
+        "coverage_note": "Presence is not completeness; Module E and A/B verify usable histories."
+      }
+    }
+  },
+  "database_checks": {
+    "journal_upsert": true,
+    "blocked_status_and_stage_details": true,
+    "stale_paper_proposals_withdrawn": true,
+    "sandbox_proposals_preserved": true,
+    "synthetic_rows_rolled_back": true,
+    "session_advisory_lock_survives_commit": true,
+    "explicit_unlock": true,
+    "parallel_connector_check": "Inconclusive: requests were serialized; process concurrency remains covered by controlled unit fixtures."
+  },
+  "limitations": [
+    "No full production-qualified run: current reference-data safety lock and equity/fundamental gaps remain.",
+    "Data ingestion runs upstream; this command never fabricates missing data.",
+    "No broker order submission, fill processing or LIVE promotion; formal paper execution is the next phase.",
+    "GitHub requires PMS_DATABASE_URL; Celery requires a running worker/beat. Scheduler configuration is not proof of an active deployed worker.",
+    "Optional direct PostgreSQL suite still requires PMS_TEST_DATABASE_URL."
+  ],
+  "tests": {
+    "passed": 352,
+    "failed": 0,
+    "skipped": 1,
+    "skip_reason": "Existing optional PostgreSQL test requires PMS_TEST_DATABASE_URL.",
+    "coverage": [
+      "Ordered PAPER workflow and idempotent successful replay",
+      "Read-only preflight and no writes on contention",
+      "Failure at each stage and full safe retry",
+      "Blocked data, reconciliation mismatch and configuration gaps",
+      "Historical/future date and timezone guards",
+      "Holiday and explicitly ingested special weekend sessions",
+      "Session-lock release, initialization/cleanup failures and backend PID changes",
+      "A/B/C upstream persistence, empty A universe and configuration blockers",
+      "CLI exit statuses"
+    ]
+  },
+  "checks": {
+    "compileall": "passed",
+    "celery_worker_and_extended_tasks_import": "passed",
+    "github_workflow_yaml": "parsed; retry schedules and artifact step verified",
+    "git_diff_check": "passed"
+  }
+}

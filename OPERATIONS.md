@@ -304,3 +304,25 @@ regime/checkpoint and cancels or trims only formal PAPER pending buys to its
 capacity; it never calls a live broker. Incomplete breadth data yields an explicit
 UNAVAILABLE record with capacity zero. See [Module E contracts](docs/module_e.md)
 for the score transforms, cold-start/upgrade rules and current data blockers.
+
+## Daily orchestrator
+
+The local command and Celery `pms.market_close` now use one durable PAPER workflow:
+preflight → PAPER reconciliation → account snapshot → E → A/B/C → final report.
+It persists stage results under `worker_runs.job_name='daily_orchestrator'`, blocks
+overlapping runs, retries failed/blocked attempts, and withdraws stale same-day
+PAPER proposals before a new attempt. It submits no orders or fills.
+
+```powershell
+python scripts/run_market_close.py --check
+python scripts/run_market_close.py
+python scripts/run_market_close.py --rerun
+```
+
+Run after data ingestion. `--check` is read-only; normal runs use today's IST date
+only. Use direct PostgreSQL or the session pooler on 5432, not transaction pooling.
+GitHub/Celery schedules are 19:00, 19:15 and 19:30 IST with exchange-calendar guards.
+A configured schedule needs its secret/worker to be active. BLOCKED/FAILED exits
+are nonzero; a successful repeat returns its saved report. No locks are cleared
+or execution modes promoted. See [daily_orchestrator.md](docs/daily_orchestrator.md)
+for recovery, reporting, scheduler prerequisites and validation limitations.

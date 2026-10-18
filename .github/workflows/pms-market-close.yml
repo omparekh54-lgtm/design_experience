@@ -2,8 +2,9 @@ name: PMS Market Close (PAPER)
 
 on:
   schedule:
-    # 19:00 India time (13:30 UTC), Monday-Friday. Push paths below are only for safe pipeline verification.
-    - cron: '30 13 * * 1-5'
+    # 19:00, 19:15 and 19:30 IST. The sourced calendar decides sessions, including special weekends.
+    - cron: '30,45 13 * * *'
+    - cron: '0 14 * * *'
   workflow_dispatch:
   push:
     branches: [main]
@@ -12,6 +13,7 @@ on:
       - 'run_benchmark_ingest.py'
       - 'scripts/ingest_module_e_benchmarks.py'
       - 'scripts/run_market_close.py'
+      - 'packages/pms/daily_orchestrator.py'
 
 concurrency:
   group: pms-market-close-paper
@@ -59,4 +61,13 @@ jobs:
 
       - name: Run after-market-close PAPER pipeline
         if: steps.guard.outputs.skip != 'true'
-        run: python scripts/run_market_close.py
+        run: python scripts/run_market_close.py | tee daily-run.json
+
+      - name: Save daily run report
+        if: always() && steps.guard.outputs.skip != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: pms-daily-run-${{ github.run_id }}
+          path: daily-run.json
+          if-no-files-found: ignore
+          retention-days: 14

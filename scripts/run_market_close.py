@@ -1,134 +1,71 @@
+"""Daily PAPER decisions. Data ingestion must finish before this command."""
+
 from __future__ import annotations
 
+import argparse
 import json
 import os
-from datetime import date, datetime
-from zoneinfo import ZoneInfo
+from datetime import date
+from pathlib import Path
+import sys
 
-from sqlalchemy import create_engine, text
-
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+from dotenv import load_dotenv
+from sqlalchemy import create_engine
 from apps.api.main import _render_safe_database_url
-from packages.pms.module_c_pipeline import ModuleCPipeline
-from packages.pms.module_e_pipeline import ModuleEPipeline
-from packages.pms.portfolio_accounting import PortfolioAccountingService
-
-IST = ZoneInfo("Asia/Kolkata")
+from packages.pms.daily_orchestrator import DailyOrchestrator
 
 
 def engine_from_env():
+    load_dotenv(ROOT / ".env")
     raw = os.getenv("DATABASE_URL") or os.getenv("PMS_DATABASE_URL")
     if not raw:
-        raise RuntimeError("DATABASE_URL/PMS_DATABASE_URL is required")
-    return create_engine(_render_safe_database_url(raw), pool_pre_ping=True,
-                         connect_args={'options':'-c search_path=pms,public'})
+        raise RuntimeError("DATABASE_URL/PMS_DATABASE_URL is required in .env")
+    return create_engine(
+        _render_safe_database_url(raw),
+        pool_pre_ping=True,
+        connect_args={"options": "-c search_path=pms,public"},
+    )
 
 
-def latest_price_date(engine) -> date | None:
-    with engine.connect() as conn:
-        return conn.execute(text("select max(trade_date) from daily_prices")).scalar_one_or_none()
-
-
-def latest_benchmark_dates(engine) -> dict[str, date | None]:
-    with engine.connect() as conn:
-        rows = conn.execute(
-            text(
-                """
-                select benchmark_code,max(trade_date) latest
-                from module_e_benchmark_bars
-                where benchmark_code in ('NIFTYMIDSMALLCAP400','INDIAVIX')
-                group by benchmark_code
-                """
-            )
-        ).mappings().all()
-    out: dict[str, date | None] = {"NIFTYMIDSMALLCAP400": None, "INDIAVIX": None}
-    for row in rows:
-        out[str(row["benchmark_code"])] = row["latest"]
-    return out
-
-
-def unresolved_errors(engine) -> int:
-    with engine.connect() as conn:
-        return int(
-            conn.execute(
-                text("select count(*) from data_quality_issues where severity='ERROR' and resolved_at is null")
-            ).scalar_one()
-        )
-
-
-def run(trade_date: date | None = None) -> dict:
+def run(trade_date: date | None = None, *, check_only=False, rerun=False):
     engine = engine_from_env()
-    d = trade_date or datetime.now(IST).date()
-
-    if d.weekday() >= 5:
-        return {"status": "SKIPPED", "reason": "weekend", "trade_date": str(d)}
-
-    price_date = latest_price_date(engine)
-    if price_date != d:
-        return {
-            "status": "SKIPPED",
-            "reason": "market_prices_not_ready_or_holiday",
-            "trade_date": str(d),
-            "latest_price_date": str(price_date) if price_date else None,
-        }
-
-    benchmark_dates = latest_benchmark_dates(engine)
-    stale = {
-        code: value
-        for code, value in benchmark_dates.items()
-        if value is None or (d - value).days > 5
-    }
-    if stale:
-        return {
-            "status": "SKIPPED",
-            "reason": "module_e_benchmarks_not_ready",
-            "trade_date": str(d),
-            "benchmark_dates": {k: str(v) if v else None for k, v in benchmark_dates.items()},
-        }
-
-    errors = unresolved_errors(engine)
-    if errors:
-        return {
-            "status": "SKIPPED",
-            "reason": "unresolved_data_quality_errors",
-            "trade_date": str(d),
-            "errors": errors,
-        }
-
-    regime_pipeline=ModuleEPipeline(engine)
-    market_date=regime_pipeline.resolve_session(d)[2]
-    accounting = PortfolioAccountingService(engine)
-    snapshot = accounting.snapshot(market_date, "PAPER")
-    accounting.persist_snapshot(snapshot)
-    _, regime = regime_pipeline.evaluate(d, persist=True)
-    module_c = ModuleCPipeline(engine).generate(d)
-
-    return {
-        "status": "SUCCESS",
-        "trade_date": str(d),
-        "mode": "PAPER",
-        "regime": regime.band,
-        "capacity": regime.max_open_trades,
-        "regime_data_ready":regime.data_ready,
-        "regime_reason":regime.reason,
-        "market_data_session":str(market_date),
-        "module_c": {
-            "universe_size": module_c.universe_size,
-            "a_eligible": module_c.a_eligible,
-            "b_signals": module_c.b_signals,
-            "ranked": module_c.ranked,
-            "qualified": module_c.qualified,
-            "selected": module_c.selected,
-            "rejected": module_c.rejected,
-        },
-        "paper_nav": snapshot.nav,
-        "broker_orders_submitted": 0,
-    }
+    try:
+        return DailyOrchestrator(engine).run(
+            trade_date, check_only=check_only, rerun=rerun
+        )
+    finally:
+        engine.dispose()
 
 
-def main() -> None:
-    result = run()
-    print(json.dumps(result, default=str, indent=2))
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--as-of",
+        type=date.fromisoformat,
+        help="Persisted runs require today's IST date",
+    )
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help="Read-only calendar/data preflight; no run or module writes",
+    )
+    parser.add_argument(
+        "--rerun",
+        action="store_true",
+        help="Refresh a successful current-day run; blocked/failed runs retry automatically",
+    )
+    args = parser.parse_args(argv)
+    try:
+        result = run(args.as_of, check_only=args.check, rerun=args.rerun)
+    except ValueError as exc:
+        parser.error(str(exc))
+    print(json.dumps(result, default=str, indent=2, allow_nan=False))
+    # A blocked scheduled run must be visible as a non-successful job.
+    return {"FAILED": 1, "BLOCKED": 2, "BUSY": 3}.get(result["status"], 0)
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

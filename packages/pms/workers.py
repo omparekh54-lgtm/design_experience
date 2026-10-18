@@ -21,21 +21,22 @@ celery_app = Celery("pms_workers", broker=REDIS_URL, backend=REDIS_URL, include=
 celery_app.conf.timezone = "Asia/Kolkata"
 celery_app.conf.task_track_started = True
 celery_app.conf.beat_schedule = {
-    "market-close-pipeline": {"task": "pms.market_close", "schedule": crontab(hour=18, minute=15, day_of_week="1-5")},
-    "paper-reconciliation": {"task": "pms.reconcile", "schedule": crontab(hour=18, minute=30, day_of_week="1-5"), "args": ("PAPER",)},
+    "market-close-pipeline": {"task": "pms.market_close", "schedule": crontab(hour=19, minute=0)},
+    "market-close-retry-1": {"task": "pms.market_close", "schedule": crontab(hour=19, minute=15)},
+    "market-close-retry-2": {"task": "pms.market_close", "schedule": crontab(hour=19, minute=30)},
     "data-health-check": {"task": "pms.data_health", "schedule": crontab(hour=18, minute=40, day_of_week="1-5")},
     "surveillance-guard": {"task": "pms.surveillance_guard", "schedule": crontab(hour=18, minute=45, day_of_week="1-5")},
-    "research-snapshot": {"task": "pms.research_snapshot", "schedule": crontab(hour=18, minute=50, day_of_week="1-5")},
     "readiness-refresh": {"task": "pms.readiness_refresh", "schedule": crontab(hour=19, minute=0, day_of_week="1-5")},
     "weekly-paper-validation": {"task": "pms.paper_validation", "schedule": crontab(hour=19, minute=10, day_of_week="5"), "args": (60,)},
 }
 
 
 def _engine():
-    url = os.getenv("DATABASE_URL")
+    url = os.getenv("DATABASE_URL") or os.getenv("PMS_DATABASE_URL")
     if not url:
         raise RuntimeError("DATABASE_URL is required for workers")
-    return create_engine(_render_safe_database_url(url), pool_pre_ping=True)
+    return create_engine(_render_safe_database_url(url), pool_pre_ping=True,
+                         connect_args={"options": "-c search_path=pms,public"})
 
 
 def _record(worker: str, job: str):
@@ -66,46 +67,17 @@ def _finish(engine, run_id: str, status: str, details: dict):
 
 @celery_app.task(name="pms.market_close")
 def market_close_pipeline(trade_date: str | None = None):
-    """Run the PAPER after-market-close decision pipeline.
+    """Use the same durable PAPER decision workflow as the local CLI."""
+    from packages.pms.daily_orchestrator import DailyOrchestrator
 
-    Ordering is deliberate: Module E capacity must exist before Module C allocation.
-    No broker submission is performed here.
-    """
-    engine, run_id = _record("market_worker", "market_close_pipeline")
-    d = date.fromisoformat(trade_date) if trade_date else date.today()
+    engine = _engine()
     try:
-        regime_pipeline=ModuleEPipeline(engine)
-        market_date=regime_pipeline.resolve_session(d)[2]
-        accounting = PortfolioAccountingService(engine)
-        snap = accounting.snapshot(market_date, "PAPER")
-        accounting.persist_snapshot(snap)
-        _, regime = regime_pipeline.evaluate(d, persist=True)
-        module_c = ModuleCPipeline(engine).generate(d)
-
-        payload = {
-            "trade_date": str(d),
-            "regime": regime.band,
-            "capacity": regime.max_open_trades,
-            "regime_data_ready":regime.data_ready,
-            "regime_reason":regime.reason,
-            "market_data_session":str(market_date),
-            "module_c": {
-                "universe_size": module_c.universe_size,
-                "a_eligible": module_c.a_eligible,
-                "b_signals": module_c.b_signals,
-                "ranked": module_c.ranked,
-                "qualified": module_c.qualified,
-                "selected": module_c.selected,
-                "rejected": module_c.rejected,
-            },
-            "paper_nav": snap.nav,
-            "broker_orders_submitted": 0,
-        }
-        _finish(engine, run_id, "SUCCESS", payload)
-        return payload
-    except Exception as exc:
-        _finish(engine, run_id, "FAILED", {"error": str(exc)})
-        raise
+        result = DailyOrchestrator(engine).run(date.fromisoformat(trade_date) if trade_date else None)
+        if result["status"] in {"FAILED", "BLOCKED"}:
+            raise RuntimeError("Daily orchestrator " + result["status"] + "; inspect worker_runs for run " + result["run_id"])
+        return result
+    finally:
+        engine.dispose()
 
 
 @celery_app.task(name="pms.reconcile")
