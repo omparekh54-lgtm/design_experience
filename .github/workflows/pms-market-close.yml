@@ -52,7 +52,7 @@ jobs:
 
       - name: Refresh official Module E benchmarks
         if: steps.guard.outputs.skip != 'true'
-        run: python scripts/ingest_module_e_benchmarks.py
+        run: python run_benchmark_ingest.py
 
       - name: Run after-market-close PAPER pipeline
         if: steps.guard.outputs.skip != 'true'
