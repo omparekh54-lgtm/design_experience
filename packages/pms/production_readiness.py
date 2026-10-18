@@ -38,7 +38,7 @@ class ProductionReadinessController:
         with self.engine.connect() as conn:
             paper = conn.execute(text("select id,passed,created_at from paper_validation_runs order by created_at desc limit 1")).mappings().first()
             recon = conn.execute(text("select status,completed_at from reconciliation_runs order by started_at desc limit 1")).mappings().first()
-            dq_errors = int(conn.execute(text("select count(*) from data_quality_issues where severity='ERROR'")).scalar_one())
+            dq_errors = int(conn.execute(text("select count(*) from data_quality_issues where severity='ERROR' and resolved_at is null")).scalar_one())
             failed_workers = int(conn.execute(text("select count(*) from worker_runs where started_at >= now()-interval '7 days' and status='FAILED'")).scalar_one())
             live_session = conn.execute(text("select id,status,started_at,ended_at from live_validation_sessions order by created_at desc limit 1")).mappings().first()
             live_observations = 0

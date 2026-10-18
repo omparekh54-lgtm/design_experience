@@ -302,7 +302,7 @@ def data_health() -> dict:
         "latest_module_c_date": "select max(trade_date) from module_c_rankings",
         "price_rows": "select count(*) from daily_prices",
         "financial_filings": "select count(*) from financial_filings",
-        "unresolved_data_quality_errors": "select count(*) from data_quality_issues where severity='ERROR'",
+        "unresolved_data_quality_errors": "select count(*) from data_quality_issues where severity='ERROR' and resolved_at is null",
     }
     out = {}
     try:

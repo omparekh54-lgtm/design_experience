@@ -56,7 +56,7 @@ class PaperValidationService:
             worker_failures = int(conn.execute(text("""
                 select count(*) from worker_runs where started_at::date between :s and :e and status='FAILED'
             """), {"s": started_on, "e": ended_on}).scalar_one())
-            dq_errors = int(conn.execute(text("select count(*) from data_quality_issues where severity='ERROR'")).scalar_one())
+            dq_errors = int(conn.execute(text("select count(*) from data_quality_issues where severity='ERROR' and resolved_at is null")).scalar_one())
         max_dd = 0.0
         peak = None
         for row in snapshots:

@@ -239,3 +239,30 @@ Important execution/validation endpoints include:
 - `POST /v1/execution/live-validation/proposal/{id}/observation`
 
 No endpoint submits a live-validation proposal directly to the broker.
+
+### Phase-1 repair and verification
+
+`python scripts/local_phase1_backfill.py --audit-only` performs a read-only audit.
+After a previously completed GSM import, use
+`python scripts/local_phase1_backfill.py --skip-legacy-gsm` to repair sectors and
+benchmarks without re-reading the legacy circular archive. Without flags, the
+original four-job sequence still runs.
+
+Sector lookups discover active/suspended NSE series and require the detailed
+quote's symbol and ISIN to match. Two verified exchange aliases (MANBRO →
+KDGREEN and SILLYMONKS → CRESTO) are used for classification lookup only;
+original instrument identifiers are retained. Current sector observations are
+not backdated. Suspension provenance is retained and is not trading eligibility.
+
+Benchmark requests use calendar months, persist each successful window, reject
+invalid/out-of-window rows and compare dates against separately downloaded
+Nifty 50 sessions (`NIFTY50` in `module_e_benchmark_bars`). This avoids both
+false completion from min/max dates and false gaps caused by holiday candles
+in equity feeds. The measured coverage percentage covers sectors and benchmark
+sessions; GSM interval counts alone do not establish historical completeness.
+
+Only `ASM_GSM_HISTORY_MISSING` can be automatically resolved, and only after
+both measures have official legacy rows, recent open snapshots and no inverted
+intervals. Other errors remain open and are printed with their IDs and details.
+API health and acceptance checks count unresolved errors rather than all past
+error records. Full GSM historical reconstruction remains a separate audit.
