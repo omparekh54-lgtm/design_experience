@@ -24,6 +24,8 @@ HEADERS = {
     "Referer": "https://www.nseindia.com/",
 }
 SOURCE = "NSE_LEGACY_GSM_LOCAL"
+MAX_PDF_BYTES = 700_000
+MAX_PDF_PAGES = 3
 
 
 def _engine():
@@ -60,9 +62,11 @@ def _attachment_urls(obj) -> list[str]:
     urls: list[str] = []
     def walk(x):
         if isinstance(x, dict):
-            for v in x.values(): walk(v)
+            for v in x.values():
+                walk(v)
         elif isinstance(x, list):
-            for v in x: walk(v)
+            for v in x:
+                walk(v)
         elif isinstance(x, str) and x.startswith("http") and any(ext in x.lower() for ext in (".zip", ".xlsx", ".xls", ".pdf")):
             urls.append(x)
     walk(obj)
@@ -88,10 +92,25 @@ def _symbols_from_xlsx(data: bytes, known: set[str]) -> set[str]:
 
 
 def _symbols_from_pdf(data: bytes, known: set[str]) -> set[str]:
+    """Best-effort only. Old NSE PDFs can be malformed and hang text extraction.
+
+    Structured ZIP/XLSX attachments are authoritative and preferred. Large PDFs
+    and long PDFs are deliberately skipped so one bad circular cannot freeze
+    the entire multi-year backfill.
+    """
+    if len(data) > MAX_PDF_BYTES:
+        return set()
     out: set[str] = set()
     try:
-        reader = PdfReader(io.BytesIO(data))
-        text_all = "\n".join((p.extract_text() or "") for p in reader.pages)
+        reader = PdfReader(io.BytesIO(data), strict=False)
+        page_count = min(len(reader.pages), MAX_PDF_PAGES)
+        chunks: list[str] = []
+        for i in range(page_count):
+            try:
+                chunks.append(reader.pages[i].extract_text() or "")
+            except Exception:
+                continue
+        text_all = "\n".join(chunks)
     except Exception:
         return out
     tokens = set(re.findall(r"[A-Z0-9&.-]{2,25}", text_all.upper()))
@@ -106,13 +125,16 @@ def _extract_attachment(session: requests.Session, url: str, known: set[str]) ->
     if lower.endswith(".zip") or data[:2] == b"PK":
         out: set[str] = set()
         with zipfile.ZipFile(io.BytesIO(data)) as zf:
-            for name in zf.namelist():
-                nl = name.lower()
-                raw = zf.read(name)
-                if nl.endswith(".xlsx"):
-                    out |= _symbols_from_xlsx(raw, known)
-                elif nl.endswith(".pdf"):
-                    out |= _symbols_from_pdf(raw, known)
+            names = zf.namelist()
+            # Structured sheets first; most complete legacy GSM lists are here.
+            for name in names:
+                if name.lower().endswith(".xlsx"):
+                    out |= _symbols_from_xlsx(zf.read(name), known)
+            # PDF is only a fallback when the archive had no usable workbook.
+            if not out:
+                for name in names:
+                    if name.lower().endswith(".pdf"):
+                        out |= _symbols_from_pdf(zf.read(name), known)
         return out
     if lower.endswith(".xlsx"):
         return _symbols_from_xlsx(data, known)
@@ -173,11 +195,13 @@ def ingest(progress: Callable[[int, int, str], None] | None = None) -> dict:
     processed = 0
     circular_count = 0
     attachment_count = 0
+    skipped_or_failed = 0
     for start, end in chunks:
         try:
             rows = _fetch_circulars(session, start, end)
         except Exception:
             rows = []
+            skipped_or_failed += 1
         for row in rows:
             subject = _subject(row)
             if "GSM" not in subject.upper() and "GRADED SURVEILLANCE" not in subject.upper():
@@ -185,12 +209,17 @@ def ingest(progress: Callable[[int, int, str], None] | None = None) -> dict:
             cdate = _circular_date(row) or start
             urls = _attachment_urls(row)
             symbols: set[str] = set()
+            # Prefer ZIP/XLSX before direct PDFs.
+            urls = sorted(urls, key=lambda u: 0 if any(x in u.lower() for x in (".zip", ".xlsx")) else 1)
             for url in urls:
                 try:
-                    symbols |= _extract_attachment(session, url, known)
+                    found = _extract_attachment(session, url, known)
+                    symbols |= found
                     attachment_count += 1
+                    if found and any(x in url.lower() for x in (".zip", ".xlsx")):
+                        break
                 except Exception:
-                    pass
+                    skipped_or_failed += 1
             if not symbols:
                 continue
             circular_count += 1
@@ -201,7 +230,7 @@ def ingest(progress: Callable[[int, int, str], None] | None = None) -> dict:
         processed += 1
         if progress:
             progress(processed, len(chunks), f"{start}..{end}")
-        time.sleep(0.25)
+        time.sleep(0.15)
 
     intervals = []
     for symbol, evs in events.items():
@@ -224,7 +253,13 @@ def ingest(progress: Callable[[int, int, str], None] | None = None) -> dict:
                 on conflict do nothing
             """), {"instrument_id": instrument_id, "effective_from": start, "effective_to": end, "source": SOURCE})
 
-    return {"circulars_used": circular_count, "attachments_parsed": attachment_count, "symbols": len(events), "intervals_written": len(intervals)}
+    return {
+        "circulars_used": circular_count,
+        "attachments_parsed": attachment_count,
+        "attachment_or_chunk_failures": skipped_or_failed,
+        "symbols": len(events),
+        "intervals_written": len(intervals),
+    }
 
 
 if __name__ == "__main__":
