@@ -38,7 +38,7 @@ def _render_safe_database_url(raw: str) -> str:
         return raw
 
     host = (url.host or "").lower()
-    configured_ref = os.getenv("SUPABASE_PROJECT_REF", "").strip()
+    configured_ref = os.getenv("SUPABASE_PROJECT_REF", "cxrkicqggsuylirzohqw").strip() or "cxrkicqggsuylirzohqw"
 
     if host.startswith("db.") and host.endswith(".supabase.co"):
         parts = host.split(".")
@@ -51,12 +51,9 @@ def _render_safe_database_url(raw: str) -> str:
         return url.set(host=pooler_host, port=5432, username=pooler_user).render_as_string(hide_password=False)
 
     if host.endswith(".pooler.supabase.com"):
-        project_ref = configured_ref
-        if not project_ref:
-            return raw
         current_user = (url.username or "").strip()
         if current_user in {"", "postgres"}:
-            pooler_user = os.getenv("SUPABASE_POOLER_USER", f"postgres.{project_ref}").strip()
+            pooler_user = os.getenv("SUPABASE_POOLER_USER", f"postgres.{configured_ref}").strip()
             return url.set(username=pooler_user).render_as_string(hide_password=False)
 
     return raw
