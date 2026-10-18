@@ -10,11 +10,12 @@ REGION = os.getenv("SUPABASE_POOLER_REGION", "ap-south-1").strip()
 
 
 def _forced_pooler_url(raw: str) -> URL:
-    """Build the Supabase session-pooler URL from parsed secret parts.
+    """Build an explicit Supabase session-pooler URL.
 
-    We deliberately force the project-qualified pooler username instead of
-    relying on string rewriting. Password/database/query are preserved from
-    the GitHub secret and are never printed.
+    The secret supplies only the password/database source of truth. We force
+    the project-qualified pooler username and an IPv4-compatible pooler host.
+    Query parameters are intentionally not propagated because parameters such
+    as ``user`` can override the URL username at the DBAPI layer.
     """
     parsed = make_url(raw)
     host = parsed.host or f"aws-0-{REGION}.pooler.supabase.com"
@@ -28,7 +29,6 @@ def _forced_pooler_url(raw: str) -> URL:
         host=host,
         port=5432,
         database=parsed.database or "postgres",
-        query=dict(parsed.query),
     )
 
 
@@ -38,9 +38,8 @@ def main() -> None:
         raise RuntimeError("DATABASE_URL/PMS_DATABASE_URL is required")
 
     forced = _forced_pooler_url(raw)
+    print(f"DB target: user={forced.username} host={forced.host} port={forced.port} db={forced.database}")
 
-    # Import after parsing the secret, then replace the script's engine factory
-    # so it cannot fall back to an unqualified `postgres` pooler user.
     import scripts.ingest_module_e_benchmarks as ingest_module
 
     ingest_module._engine = lambda: create_engine(forced, pool_pre_ping=True)
