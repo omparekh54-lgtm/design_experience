@@ -2,7 +2,7 @@ name: PMS Market Close (PAPER)
 
 on:
   schedule:
-    # 19:00 India time (13:30 UTC), Monday-Friday.
+    # 19:00 India time (13:30 UTC), Monday-Friday. Push below is only for workflow self-tests.
     - cron: '30 13 * * 1-5'
   workflow_dispatch:
   push:
