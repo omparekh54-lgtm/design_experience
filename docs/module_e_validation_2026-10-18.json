@@ -1,0 +1,245 @@
+{
+  "date": "2026-10-18",
+  "implementation_version": "MODULE_E_v1.1",
+  "tests": {
+    "passed": 313,
+    "failed": 0,
+    "skipped": 1,
+    "skip_reason": "Existing optional direct PostgreSQL test requires PMS_TEST_DATABASE_URL."
+  },
+  "actual_data_evaluation": {
+    "requested_date": "2026-10-18",
+    "trade_date": "2026-10-16",
+    "strategy_version": "PMS_v1.1.0_module_a",
+    "implementation_version": "MODULE_E_v1.1",
+    "inputs": null,
+    "decision": {
+      "score": 0,
+      "raw_score": 0,
+      "band": "UNAVAILABLE",
+      "max_open_trades": 0,
+      "hard_override": false,
+      "components": {},
+      "data_ready": false,
+      "reasons": [
+        "breadth_liquidity_coverage_incomplete"
+      ],
+      "reason": "New entries blocked: breadth_liquidity_coverage_incomplete",
+      "trade_date": "2026-10-16"
+    },
+    "data_quality": {
+      "benchmarks": {
+        "data_ready": true,
+        "source": "NSE_HISTORICAL_OR",
+        "index_code": "NIFTYMIDSMALLCAP400",
+        "values": {
+          "midcap_close": 20270.65,
+          "midcap_dma50": 21100.647999999997,
+          "midcap_dma200": 20269.904,
+          "midcap_dma200_slope_pct": 0.029052729637135677,
+          "india_vix": 14.06,
+          "india_vix_5d_change_pct": -2.2253129346314293
+        }
+      },
+      "liquidity": {
+        "master_universe": 2302,
+        "liquid_universe": 69,
+        "verified_nonliquid": 26,
+        "immature_listings_excluded": 157,
+        "unclassified": 2050,
+        "exceptions": [
+          {
+            "instrument_id": "NSE:VGUARD",
+            "reason": "liquidity_20_session_coverage_unverified",
+            "observed_sessions": 10,
+            "latest": "2026-10-01"
+          },
+          {
+            "instrument_id": "NSE:VIDHIING",
+            "reason": "liquidity_20_session_coverage_unverified",
+            "observed_sessions": 10,
+            "latest": "2026-10-01"
+          },
+          {
+            "instrument_id": "NSE:ORIENTPPR",
+            "reason": "liquidity_20_session_coverage_unverified",
+            "observed_sessions": 10,
+            "latest": "2026-10-01"
+          },
+          {
+            "instrument_id": "NSE:DIFFNKG",
+            "reason": "liquidity_20_session_coverage_unverified",
+            "observed_sessions": 19,
+            "latest": "2026-10-15"
+          },
+          {
+            "instrument_id": "NSE:TEAMGTY",
+            "reason": "liquidity_20_session_coverage_unverified",
+            "observed_sessions": 10,
+            "latest": "2026-10-01"
+          },
+          {
+            "instrument_id": "NSE:MAYURUNIQ",
+            "reason": "liquidity_20_session_coverage_unverified",
+            "observed_sessions": 10,
+            "latest": "2026-10-01"
+          },
+          {
+            "instrument_id": "NSE:GHCL",
+            "reason": "liquidity_20_session_coverage_unverified",
+            "observed_sessions": 19,
+            "latest": "2026-10-15"
+          },
+          {
+            "instrument_id": "NSE:DIVGIITTS",
+            "reason": "liquidity_20_session_coverage_unverified",
+            "observed_sessions": 19,
+            "latest": "2026-10-15"
+          },
+          {
+            "instrument_id": "NSE:GHCLTEXTIL",
+            "reason": "liquidity_20_session_coverage_unverified",
+            "observed_sessions": 19,
+            "latest": "2026-10-15"
+          },
+          {
+            "instrument_id": "NSE:MBEL",
+            "reason": "liquidity_20_session_coverage_unverified",
+            "observed_sessions": 10,
+            "latest": "2026-10-01"
+          },
+          {
+            "instrument_id": "NSE:NSLNISP",
+            "reason": "liquidity_20_session_coverage_unverified",
+            "observed_sessions": 10,
+            "latest": "2026-10-01"
+          },
+          {
+            "instrument_id": "NSE:EDELWEISS",
+            "reason": "liquidity_20_session_coverage_unverified",
+            "observed_sessions": 19,
+            "latest": "2026-10-15"
+          },
+          {
+            "instrument_id": "NSE:DYCL",
+            "reason": "liquidity_20_session_coverage_unverified",
+            "observed_sessions": 19,
+            "latest": "2026-10-15"
+          },
+          {
+            "instrument_id": "NSE:EIDPARRY",
+            "reason": "liquidity_20_session_coverage_unverified",
+            "observed_sessions": 19,
+            "latest": "2026-10-15"
+          },
+          {
+            "instrument_id": "NSE:NTPCGREEN",
+            "reason": "liquidity_20_session_coverage_unverified",
+            "observed_sessions": 10,
+            "latest": "2026-10-01"
+          },
+          {
+            "instrument_id": "NSE:EIEL",
+            "reason": "liquidity_20_session_coverage_unverified",
+            "observed_sessions": 19,
+            "latest": "2026-10-15"
+          },
+          {
+            "instrument_id": "NSE:NAM-INDIA",
+            "reason": "liquidity_20_session_coverage_unverified",
+            "observed_sessions": 10,
+            "latest": "2026-10-01"
+          },
+          {
+            "instrument_id": "NSE:MERCURYEV",
+            "reason": "liquidity_20_session_coverage_unverified",
+            "observed_sessions": 10,
+            "latest": "2026-10-01"
+          },
+          {
+            "instrument_id": "NSE:NATIONALUM",
+            "reason": "liquidity_20_session_coverage_unverified",
+            "observed_sessions": 10,
+            "latest": "2026-10-01"
+          },
+          {
+            "instrument_id": "NSE:MARALOVER",
+            "reason": "liquidity_20_session_coverage_unverified",
+            "observed_sessions": 10,
+            "latest": "2026-10-01"
+          },
+          {
+            "instrument_id": "NSE:NUVAMA",
+            "reason": "liquidity_20_session_coverage_unverified",
+            "observed_sessions": 10,
+            "latest": "2026-10-01"
+          },
+          {
+            "instrument_id": "NSE:NUVOCO",
+            "reason": "liquidity_20_session_coverage_unverified",
+            "observed_sessions": 10,
+            "latest": "2026-10-01"
+          },
+          {
+            "instrument_id": "NSE:VIRINCHI",
+            "reason": "liquidity_20_session_coverage_unverified",
+            "observed_sessions": 10,
+            "latest": "2026-10-01"
+          },
+          {
+            "instrument_id": "NSE:DODLA",
+            "reason": "liquidity_20_session_coverage_unverified",
+            "observed_sessions": 19,
+            "latest": "2026-10-15"
+          },
+          {
+            "instrument_id": "NSE:DREDGECORP",
+            "reason": "liquidity_20_session_coverage_unverified",
+            "observed_sessions": 19,
+            "latest": "2026-10-15"
+          }
+        ],
+        "turnover_threshold_rupees": 10000000.0,
+        "independent_of_module_a": true,
+        "exception_count": 2050
+      },
+      "feedback": {
+        "closed_trades": 0,
+        "expectancy_r": null,
+        "reasons": [],
+        "neutral_until_ten_trades": true,
+        "sample_limit": 15,
+        "pnl_basis": "realized_pnl less recorded PAPER fill fees"
+      }
+    },
+    "tracker_source": "not_loaded_for_invalid_data",
+    "persisted": true,
+    "broker_orders_submitted": 0,
+    "paper_pending_controls": {
+      "keep": [],
+      "cancel": [],
+      "reason": "regime_capacity",
+      "capacity": 0,
+      "open_positions": null
+    },
+    "validation_mode": "Pipeline evaluated against fresh read-only database exports from this implementation session; computed UNAVAILABLE record subsequently persisted via the connected database API."
+  },
+  "postgres_validation": {
+    "passed": true,
+    "all_synthetic_rows_rolled_back": true,
+    "checks": [
+      "Ranked pending entries trimmed to open-plus-pending capacity",
+      "Zero capacity cancels remaining PAPER buys",
+      "Partially/fully filled holdings preserved",
+      "SELL protective orders preserved",
+      "LIVE and PAPER_SANDBOX orders untouched",
+      "Repeated regime upsert remains one row per session"
+    ]
+  },
+  "limitations": [
+    "No usable market score while mature-stock liquidity coverage remains incomplete.",
+    "Scoring normalizations are explicit initial research formulas, not a profitability claim.",
+    "No live broker orders/cancellations were sent.",
+    "Historical survivorship, price/action vintages, fees and account event reconstruction still require the planned audits."
+  ]
+}

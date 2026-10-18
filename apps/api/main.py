@@ -199,10 +199,23 @@ def module_b_from_database(instrument_id: str, as_of: date, require_module_a: bo
 @app.get("/v1/module-e/{trade_date}")
 def module_e_from_database(trade_date: date) -> dict:
     with db_engine().connect() as conn:
-        row = conn.execute(text("select * from market_regime_history where trade_date=:d"), {"d": trade_date}).mappings().first()
+        row = conn.execute(text("""select * from pms.market_regime_history
+            where trade_date=(select max(trade_date) from pms.module_e_benchmark_bars
+              where benchmark_code='NIFTY50' and source='NSE_HISTORICAL_OR' and trade_date<=:d)"""), {"d": trade_date}).mappings().first()
     if not row:
         raise HTTPException(status_code=404, detail="regime snapshot not found")
-    return dict(row)
+    result=dict(row)
+    metadata=result.get('inputs') or {}
+    result['requested_date']=trade_date
+    result['data_ready']=bool((metadata.get('_data_quality') or {}).get('data_ready'))
+    result['reason']=metadata.get('_reason','Regime implementation/data coverage is unverified.')
+    cfg=load_strategy_config()
+    if result.get('strategy_version')!=cfg['version'] or metadata.get('_module_e_version')!=cfg['regime'].get('implementation_version','MODULE_E_v1.1'):
+        result['data_ready']=False;result['reason']='Regime version is unverified.'
+    if (trade_date-result['trade_date']).days>7:
+        result['data_ready']=False;result['reason']='Official market calendar is stale.'
+    if not result['data_ready']:result['max_open_trades']=0;result['band']='UNAVAILABLE'
+    return result
 
 
 @app.get("/v1/module-c")

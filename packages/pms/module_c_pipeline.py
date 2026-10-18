@@ -131,7 +131,7 @@ class ModuleCPipeline:
             row = (
                 conn.execute(
                     text(
-                        "select max_open_trades,hard_override,strategy_version from market_regime_history where trade_date=:d"
+                        "select max_open_trades,hard_override,strategy_version,inputs from market_regime_history where trade_date=:d"
                     ),
                     {"d": expected},
                 )
@@ -142,6 +142,13 @@ class ModuleCPipeline:
             return 0, ("market_regime_unavailable",)
         if row["strategy_version"] != self.cfg["version"]:
             return 0, ("market_regime_version_mismatch",)
+        metadata = row.get("inputs") or {}
+        if metadata.get("_module_e_version") != self.cfg["regime"].get(
+            "implementation_version", "MODULE_E_v1.1"
+        ):
+            return 0, ("market_regime_implementation_unverified",)
+        if not (metadata.get("_data_quality") or {}).get("data_ready"):
+            return 0, ("market_regime_data_unavailable",)
         value = int(row["max_open_trades"])
         if value < 0 or value > int(self.cfg["risk"]["max_open_trades"]):
             return 0, ("market_regime_invalid",)

@@ -295,3 +295,12 @@ order sheet, watchlist, rejection counts and missing account/regime/data gates.
 history used for three/six-month relative strength. See
 [Module C scoring and account contracts](docs/module_c.md). The plan submits no
 broker orders and must be revalidated at execution time.
+
+### Module E market regime
+
+`python scripts/evaluate_module_e.py` evaluates the latest completed session
+without writes. `--details` prints all coverage failures. `--persist` saves the
+regime/checkpoint and cancels or trims only formal PAPER pending buys to its
+capacity; it never calls a live broker. Incomplete breadth data yields an explicit
+UNAVAILABLE record with capacity zero. See [Module E contracts](docs/module_e.md)
+for the score transforms, cold-start/upgrade rules and current data blockers.

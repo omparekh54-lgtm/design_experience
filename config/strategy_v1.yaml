@@ -82,6 +82,9 @@ ranking:
   sector_strength_points: 10
 
 regime:
+  implementation_version: MODULE_E_v1.1
+  breadth_min_turnover_cr: 1
+  healthy_capacity: 6
   defensive_below: 35
   weak_below: 50
   neutral_below: 65

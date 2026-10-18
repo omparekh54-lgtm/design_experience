@@ -94,10 +94,12 @@ def run(trade_date: date | None = None) -> dict:
             "errors": errors,
         }
 
-    _, regime = ModuleEPipeline(engine).evaluate(d, persist=True)
+    regime_pipeline=ModuleEPipeline(engine)
+    market_date=regime_pipeline.resolve_session(d)[2]
     accounting = PortfolioAccountingService(engine)
-    snapshot = accounting.snapshot(d, "PAPER")
+    snapshot = accounting.snapshot(market_date, "PAPER")
     accounting.persist_snapshot(snapshot)
+    _, regime = regime_pipeline.evaluate(d, persist=True)
     module_c = ModuleCPipeline(engine).generate(d)
 
     return {
@@ -106,6 +108,9 @@ def run(trade_date: date | None = None) -> dict:
         "mode": "PAPER",
         "regime": regime.band,
         "capacity": regime.max_open_trades,
+        "regime_data_ready":regime.data_ready,
+        "regime_reason":regime.reason,
+        "market_data_session":str(market_date),
         "module_c": {
             "universe_size": module_c.universe_size,
             "a_eligible": module_c.a_eligible,

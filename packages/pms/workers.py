@@ -74,17 +74,21 @@ def market_close_pipeline(trade_date: str | None = None):
     engine, run_id = _record("market_worker", "market_close_pipeline")
     d = date.fromisoformat(trade_date) if trade_date else date.today()
     try:
-        _, regime = ModuleEPipeline(engine).evaluate(d, persist=True)
-        module_c = ModuleCPipeline(engine).generate(d)
-
+        regime_pipeline=ModuleEPipeline(engine)
+        market_date=regime_pipeline.resolve_session(d)[2]
         accounting = PortfolioAccountingService(engine)
-        snap = accounting.snapshot(d, "PAPER")
+        snap = accounting.snapshot(market_date, "PAPER")
         accounting.persist_snapshot(snap)
+        _, regime = regime_pipeline.evaluate(d, persist=True)
+        module_c = ModuleCPipeline(engine).generate(d)
 
         payload = {
             "trade_date": str(d),
             "regime": regime.band,
             "capacity": regime.max_open_trades,
+            "regime_data_ready":regime.data_ready,
+            "regime_reason":regime.reason,
+            "market_data_session":str(market_date),
             "module_c": {
                 "universe_size": module_c.universe_size,
                 "a_eligible": module_c.a_eligible,
