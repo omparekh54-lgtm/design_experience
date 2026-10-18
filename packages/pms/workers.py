@@ -8,6 +8,8 @@ from celery import Celery
 from celery.schedules import crontab
 from sqlalchemy import create_engine, text
 
+from apps.api.main import _render_safe_database_url
+from packages.pms.module_c_pipeline import ModuleCPipeline
 from packages.pms.module_e_pipeline import ModuleEPipeline
 from packages.pms.portfolio_accounting import PortfolioAccountingService
 from packages.pms.brokers import PaperBroker, AngelOneBroker
@@ -31,35 +33,75 @@ celery_app.conf.beat_schedule = {
 
 def _engine():
     url = os.getenv("DATABASE_URL")
-    if not url: raise RuntimeError("DATABASE_URL is required for workers")
-    return create_engine(url, pool_pre_ping=True)
+    if not url:
+        raise RuntimeError("DATABASE_URL is required for workers")
+    return create_engine(_render_safe_database_url(url), pool_pre_ping=True)
 
 
 def _record(worker: str, job: str):
-    engine = _engine(); run_id = str(uuid4())
+    engine = _engine()
+    run_id = str(uuid4())
     with engine.begin() as conn:
-        conn.execute(text("insert into worker_runs(id,worker_name,job_name,status) values (:id,:w,:j,'RUNNING')"), {"id":run_id,"w":worker,"j":job})
+        conn.execute(
+            text("insert into worker_runs(id,worker_name,job_name,status) values (:id,:w,:j,'RUNNING')"),
+            {"id": run_id, "w": worker, "j": job},
+        )
     return engine, run_id
 
 
 def _finish(engine, run_id: str, status: str, details: dict):
     import json
+
     with engine.begin() as conn:
-        conn.execute(text("update worker_runs set status=:s,finished_at=:t,details=cast(:d as jsonb) where id=:id"), {"s":status,"t":datetime.now(timezone.utc),"d":json.dumps(details,default=str),"id":run_id})
+        conn.execute(
+            text("update worker_runs set status=:s,finished_at=:t,details=cast(:d as jsonb) where id=:id"),
+            {
+                "s": status,
+                "t": datetime.now(timezone.utc),
+                "d": json.dumps(details, default=str),
+                "id": run_id,
+            },
+        )
 
 
 @celery_app.task(name="pms.market_close")
 def market_close_pipeline(trade_date: str | None = None):
+    """Run the PAPER after-market-close decision pipeline.
+
+    Ordering is deliberate: Module E capacity must exist before Module C allocation.
+    No broker submission is performed here.
+    """
     engine, run_id = _record("market_worker", "market_close_pipeline")
     d = date.fromisoformat(trade_date) if trade_date else date.today()
     try:
         _, regime = ModuleEPipeline(engine).evaluate(d, persist=True)
+        module_c = ModuleCPipeline(engine).generate(d)
+
         accounting = PortfolioAccountingService(engine)
-        snap = accounting.snapshot(d, "PAPER"); accounting.persist_snapshot(snap)
-        payload={"trade_date":str(d),"regime":regime.band,"capacity":regime.max_open_trades,"paper_nav":snap.nav}
-        _finish(engine,run_id,"SUCCESS",payload); return payload
+        snap = accounting.snapshot(d, "PAPER")
+        accounting.persist_snapshot(snap)
+
+        payload = {
+            "trade_date": str(d),
+            "regime": regime.band,
+            "capacity": regime.max_open_trades,
+            "module_c": {
+                "universe_size": module_c.universe_size,
+                "a_eligible": module_c.a_eligible,
+                "b_signals": module_c.b_signals,
+                "ranked": module_c.ranked,
+                "qualified": module_c.qualified,
+                "selected": module_c.selected,
+                "rejected": module_c.rejected,
+            },
+            "paper_nav": snap.nav,
+            "broker_orders_submitted": 0,
+        }
+        _finish(engine, run_id, "SUCCESS", payload)
+        return payload
     except Exception as exc:
-        _finish(engine,run_id,"FAILED",{"error":str(exc)}); raise
+        _finish(engine, run_id, "FAILED", {"error": str(exc)})
+        raise
 
 
 @celery_app.task(name="pms.reconcile")
@@ -68,11 +110,17 @@ def reconcile(account_mode: str = "PAPER"):
     try:
         broker = PaperBroker(engine) if account_mode == "PAPER" else AngelOneBroker(engine)
         result = ReconciliationService(engine, broker).run(account_mode)
-        payload={"reconciliation_id":result.run_id,"ok":result.ok,"discrepancies":list(result.discrepancies)}
-        _finish(engine,run_id,"SUCCESS" if result.ok else "MISMATCH",payload); return payload
+        payload = {
+            "reconciliation_id": result.run_id,
+            "ok": result.ok,
+            "discrepancies": list(result.discrepancies),
+        }
+        _finish(engine, run_id, "SUCCESS" if result.ok else "MISMATCH", payload)
+        return payload
     except Exception as exc:
         SafetyController(engine).lock(f"reconciliation_error:{type(exc).__name__}")
-        _finish(engine,run_id,"FAILED",{"error":str(exc)}); raise
+        _finish(engine, run_id, "FAILED", {"error": str(exc)})
+        raise
 
 
 @celery_app.task(name="pms.data_health")
@@ -80,13 +128,19 @@ def data_health_check():
     engine, run_id = _record("market_worker", "data_health")
     try:
         with engine.connect() as conn:
-            latest_price=conn.execute(text("select max(trade_date) from daily_prices")).scalar_one_or_none()
-            errors=int(conn.execute(text("select count(*) from data_quality_issues where severity='ERROR'")).scalar_one())
-        stale = latest_price is None or (date.today()-latest_price).days > 5
+            latest_price = conn.execute(text("select max(trade_date) from daily_prices")).scalar_one_or_none()
+            errors = int(
+                conn.execute(
+                    text("select count(*) from data_quality_issues where severity='ERROR' and resolved_at is null")
+                ).scalar_one()
+            )
+        stale = latest_price is None or (date.today() - latest_price).days > 5
         if stale or errors:
             SafetyController(engine).lock("data_health_failed")
-        payload={"latest_price":str(latest_price) if latest_price else None,"errors":errors,"stale":stale}
-        _finish(engine,run_id,"SUCCESS" if not stale and not errors else "DEGRADED",payload); return payload
+        payload = {"latest_price": str(latest_price) if latest_price else None, "errors": errors, "stale": stale}
+        _finish(engine, run_id, "SUCCESS" if not stale and not errors else "DEGRADED", payload)
+        return payload
     except Exception as exc:
         SafetyController(engine).lock("data_health_exception")
-        _finish(engine,run_id,"FAILED",{"error":str(exc)}); raise
+        _finish(engine, run_id, "FAILED", {"error": str(exc)})
+        raise
