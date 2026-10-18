@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime
+import math
 
 
 @dataclass(frozen=True)
@@ -29,6 +31,17 @@ class FundamentalSnapshot:
     turnaround: bool = False
     triggers: tuple[str, ...] = field(default_factory=tuple)
     flags: tuple[str, ...] = field(default_factory=tuple)
+    sector: str | None = None
+    industry: str | None = None
+    filing_timestamp: datetime | None = None
+    eligible_until: datetime | None = None
+    data_failures: tuple[str, ...] = field(default_factory=tuple)
+    quality_failures: tuple[str, ...] = field(default_factory=tuple)
+    pbt_yoy_pct: float | None = None
+    core_pbt_yoy_pct: float | None = None
+    cyclical: bool = False
+    valuation_pe: float | None = None
+    reference_context: dict = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -39,6 +52,10 @@ class FundamentalDecision:
     flags: tuple[str, ...]
     triggers: tuple[str, ...] = field(default_factory=tuple)
     components: dict[str, float] = field(default_factory=dict)
+    reason: str = ''
+    filing_timestamp: datetime | None = None
+    eligible_until: datetime | None = None
+    earnings_breakout: bool = False
 
 
 def _clamp(value: float, lo: float = 0.0, hi: float = 100.0) -> float:
@@ -46,7 +63,7 @@ def _clamp(value: float, lo: float = 0.0, hi: float = 100.0) -> float:
 
 
 def _passes_min(value: float | None, threshold: float) -> bool:
-    return value is not None and value >= threshold
+    return value is not None and math.isfinite(value) and value >= threshold
 
 
 def _growth_component(snapshot: FundamentalSnapshot, f: dict) -> float:
@@ -58,7 +75,7 @@ def _growth_component(snapshot: FundamentalSnapshot, f: dict) -> float:
     )
     scores: list[float] = []
     for value, threshold in pairs:
-        if value is None:
+        if value is None or not math.isfinite(value):
             scores.append(0.0)
         else:
             scores.append(min(max(value, 0.0) / max(float(threshold), 1.0), 1.5) / 1.5)
@@ -72,7 +89,22 @@ def evaluate_fundamentals(snapshot: FundamentalSnapshot, cfg: dict) -> Fundament
     contribute to score/confidence but do not independently make a stock eligible.
     """
     f = cfg["fundamental"]
-    failed: list[str] = []
+    failed: list[str] = list(snapshot.data_failures) + list(snapshot.quality_failures)
+    # Reject NaN/infinity/negative physical quantities before comparisons/scoring.
+    for name in ('market_cap_cr','avg_traded_value_cr','promoter_pledge_pct',
+                 'quarterly_sales_cr','pat_cr','sales_yoy_pct','operating_profit_yoy_pct',
+                 'pat_yoy_pct','eps_yoy_pct','ocf_to_pat','growth_acceleration_pp',
+                 'margin_expansion_bps','debt_to_equity','interest_coverage'):
+        value = getattr(snapshot, name)
+        if value is not None and not math.isfinite(value):
+            failed.append('non_finite_' + name)
+    if not 0 <= snapshot.promoter_pledge_pct <= 100:
+        failed.append('promoter_pledge_invalid')
+    if not 0 <= snapshot.positive_growth_quarters_last_4 <= 4:
+        failed.append('growth_consistency_invalid')
+    if (snapshot.sector or '').strip().casefold() in {
+        'financial services', 'financials', 'banks', 'banking', 'nbfc', 'insurance'}:
+        failed.append('financial_sector_excluded')
 
     hard_checks = (
         (snapshot.market_cap_cr > f["min_market_cap_cr"], "market_cap"),
@@ -114,7 +146,7 @@ def evaluate_fundamentals(snapshot: FundamentalSnapshot, cfg: dict) -> Fundament
 
     # Scoring follows the rule document's 30/25/15/15/15 structure.
     acceleration = 0.0
-    if snapshot.growth_acceleration_pp is not None:
+    if snapshot.growth_acceleration_pp is not None and math.isfinite(snapshot.growth_acceleration_pp):
         acceleration = min(max(snapshot.growth_acceleration_pp, 0.0) / 10.0, 1.0) * 30.0
     if snapshot.record_sales_8q or snapshot.record_pat_8q:
         acceleration = max(acceleration, 22.5)
@@ -124,11 +156,11 @@ def evaluate_fundamentals(snapshot: FundamentalSnapshot, cfg: dict) -> Fundament
     growth = _growth_component(snapshot, f)
 
     margin = 0.0
-    if snapshot.margin_expansion_bps is not None:
+    if snapshot.margin_expansion_bps is not None and math.isfinite(snapshot.margin_expansion_bps):
         margin = min(max(snapshot.margin_expansion_bps, 0.0) / 200.0, 1.0) * 15.0
 
     quality = 0.0
-    if snapshot.quality_pass and snapshot.ocf_to_pat is not None:
+    if snapshot.quality_pass and not snapshot.quality_failures and snapshot.ocf_to_pat is not None and math.isfinite(snapshot.ocf_to_pat):
         quality = min(max(snapshot.ocf_to_pat, 0.0) / max(float(f["min_ocf_to_pat"]), 0.01), 1.0) * 15.0
 
     consistency = min(max(snapshot.positive_growth_quarters_last_4, 0) / 4.0, 1.0) * 15.0
@@ -141,6 +173,17 @@ def evaluate_fundamentals(snapshot: FundamentalSnapshot, cfg: dict) -> Fundament
     }
     score = round(_clamp(sum(components.values())), 2)
 
+    flags = list(snapshot.flags)
+    valuation_limit = f.get('cyclical_high_pe_threshold')
+    if snapshot.cyclical:
+        flags.append('cyclical')
+        if snapshot.valuation_pe is None:
+            flags.append('valuation_unavailable')
+        elif valuation_limit is None:
+            flags.append('valuation_policy_unconfigured')
+        elif snapshot.valuation_pe > valuation_limit:
+            flags.append('high_valuation')
+            score = max(0.0, score - float(f.get('cyclical_valuation_penalty_points', 5)))
     triggers = list(snapshot.triggers)
     if snapshot.growth_acceleration_pp is not None and snapshot.growth_acceleration_pp >= 10:
         triggers.append("growth_acceleration_10pp")
@@ -153,11 +196,17 @@ def evaluate_fundamentals(snapshot: FundamentalSnapshot, cfg: dict) -> Fundament
     if snapshot.turnaround:
         triggers.append("turnaround")
 
+    if any(name.startswith('non_finite_') for name in failed):
+        score = 0.0
     return FundamentalDecision(
         eligible=not failed,
         score=score,
         failed_rules=tuple(dict.fromkeys(failed)),
-        flags=tuple(dict.fromkeys(snapshot.flags)),
+        flags=tuple(dict.fromkeys(flags)),
+        reason=('Eligible: Stages 1, 2 and 4 passed' if not failed else 'Ineligible: ' + ', '.join(dict.fromkeys(failed))),
+        filing_timestamp=snapshot.filing_timestamp,
+        eligible_until=snapshot.eligible_until,
+        earnings_breakout=not failed and bool(triggers),
         triggers=tuple(dict.fromkeys(triggers)),
         components=components,
     )

@@ -6,7 +6,7 @@ from functools import lru_cache
 from uuid import UUID
 
 from fastapi import FastAPI, HTTPException, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import make_url
 
@@ -75,10 +75,13 @@ def db_engine():
 
 
 def _as_of_end(d: date) -> datetime:
-    return datetime.combine(d, time(23, 59, 59))
+    from packages.pms.module_a_context import end_of_day, IST
+    stamp = end_of_day(d)
+    return min(stamp, datetime.now(IST))
 
 
 class FundamentalRequest(BaseModel):
+    model_config = ConfigDict(allow_inf_nan=False)
     market_cap_cr: float
     avg_traded_value_cr: float
     asm_gsm: bool = False
@@ -132,7 +135,9 @@ def module_a_calculation(payload: FundamentalRequest) -> dict:
         flags=tuple(payload.flags), triggers=tuple(payload.triggers),
     )
     decision = evaluate_fundamentals(snapshot, cfg)
-    return {"eligible": decision.eligible, "score": decision.score, "score_components": decision.components,
+    return {"eligible": False, "calculated_eligible": decision.eligible, "calculation_only": True,
+            "reason": "Database-backed Module A validation is required for eligibility",
+            "score": decision.score, "score_components": decision.components,
             "failed_rules": decision.failed_rules, "triggers": decision.triggers, "flags": decision.flags}
 
 
@@ -157,6 +162,11 @@ def module_e_calculation(payload: RegimeRequest) -> dict:
 def universe(as_of: date, exchange: str = "NSE") -> dict:
     symbols = ReferenceDataQueries(db_engine()).universe_as_of(as_of, exchange.upper())
     return {"as_of": as_of, "exchange": exchange.upper(), "count": len(symbols), "instruments": symbols}
+
+
+@app.get("/v1/module-a/eligible-list")
+def module_a_eligible_list(as_of: date) -> dict:
+    return ModuleAPipeline(db_engine()).eligible_list(_as_of_end(as_of))
 
 
 @app.get("/v1/module-a/{instrument_id}")

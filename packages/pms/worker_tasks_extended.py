@@ -14,7 +14,8 @@ from packages.pms.workers import _engine, _record, _finish
 
 
 def _day_end(d: date) -> datetime:
-    return datetime.combine(d, time(23, 59, 59))
+    from packages.pms.module_a_context import end_of_day, IST
+    return min(end_of_day(d), datetime.now(IST))
 
 
 @shared_task(name="pms.financial_refresh")
@@ -25,7 +26,7 @@ def financial_refresh(symbols: list[str], trade_date: str | None = None):
     try:
         for instrument_id in symbols:
             try:
-                snapshot, decision = pipeline.evaluate(instrument_id, _day_end(d))
+                snapshot, decision = pipeline.evaluate(instrument_id, _day_end(d), persist=True)
                 results.append({"instrument_id": instrument_id, "eligible": decision.eligible, "score": decision.score})
             except Exception as exc:
                 results.append({"instrument_id": instrument_id, "error": str(exc)})

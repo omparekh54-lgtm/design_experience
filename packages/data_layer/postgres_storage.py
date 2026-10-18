@@ -116,7 +116,7 @@ class PostgresStorage:
                 )
         return len(rows)
 
-    def append_filings(self, filings: Iterable[FinancialFiling]) -> int:
+    def append_filings(self, filings: Iterable[FinancialFiling], *, refresh_module_a: bool = True) -> int:
         rows = list(filings)
         with self.engine.begin() as conn:
             cache: dict[str, int] = {}
@@ -211,6 +211,15 @@ class PostgresStorage:
                                 "unit": "INR/share" if fact_name == "diluted_eps" else "INR crore",
                             },
                         )
+        # Financial rows must be committed before the as-of reader can see them.
+        # Replays are idempotent on (instrument, event timestamp, strategy version).
+        if rows and refresh_module_a:
+            from packages.pms.module_a_pipeline import ModuleAPipeline
+            pipeline = ModuleAPipeline(self.engine)
+            from packages.pms.module_a_context import as_ist
+            events = sorted({(f.instrument_id, as_ist(f.filed_at)) for f in rows if f.instrument_id.startswith('NSE:')}, key=lambda event:event[1])
+            for instrument_id, filed_at in events:
+                pipeline.evaluate(instrument_id, filed_at, persist=True)
         return len(rows)
 
     def record_surveillance(self, states: Iterable[SurveillanceState]) -> int:

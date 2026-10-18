@@ -1,4 +1,4 @@
-version: PMS_v1.0.0
+version: PMS_v1.1.0_module_a
 
 fundamental:
   min_market_cap_cr: 1000
@@ -12,6 +12,23 @@ fundamental:
   min_eps_yoy_pct: 20
   min_positive_quarters_last_4: 3
   min_ocf_to_pat: 0.7
+  max_result_age_days: 100
+  liquidity_sessions: 63
+  max_price_age_days: 7
+  max_shareholding_age_days: 200
+  max_cash_flow_age_days: 550
+  max_surveillance_age_days: 7
+  # The rule document requires sector-adjusted ratios but supplies no cutoffs.
+  # Null means BLOCK eligibility until an explicit policy is configured.
+  leverage_limits:
+    default:
+      max_debt_to_equity: null
+      min_interest_coverage: null
+    sectors: {}
+  # No valuation cutoff was supplied; a missing cutoff is disclosed as a flag.
+  cyclical_high_pe_threshold: null
+  cyclical_valuation_penalty_points: 5
+  legacy_surveillance_verified: false
   consistency_growth_metrics:
     - sales
     - pat

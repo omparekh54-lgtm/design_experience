@@ -24,13 +24,13 @@ class PointInTimeQueries:
             text(
                 """
                 select id from instruments
-                where exchange=:exchange and trading_symbol=:trading_symbol
-                  and active=true
+                where exchange=:exchange and (trading_symbol=:trading_symbol or nse_symbol=:symbol
+                  or metadata->'sector_classification'->>'quote_symbol'=:symbol) and active=true
                 order by valid_from desc
                 limit 1
                 """
             ),
-            {"exchange": exchange, "trading_symbol": trading_symbol},
+            {"exchange": exchange, "trading_symbol": trading_symbol, "symbol": instrument_id.split(":",1)[1]},
         ).scalar_one_or_none()
         if value is None:
             raise KeyError(f"instrument not found: {instrument_id}")
@@ -113,6 +113,7 @@ class PointInTimeQueries:
                       from financial_filings ff
                       where ff.instrument_id=:instrument_id
                         and ff.filing_timestamp <= :as_of
+                        and ff.period_end <= cast(:as_of as date)
                     )
                     select id, period_end, filing_timestamp, source,
                            consolidated, revision_number, submission_type,
@@ -135,6 +136,33 @@ class PointInTimeQueries:
                 },
             ).mappings().all()
             return [self._filing_to_dict(conn, instrument_id, row) for row in rows]
+
+    def financial_histories_as_of(self, as_of: datetime, *, limit_periods: int = 24) -> dict[str, list[dict]]:
+        """Bulk equivalent of financial_history_as_of for universe scans."""
+        with self.engine.connect() as conn:
+            rows = conn.execute(text("""
+                with ranked as (
+                  select ff.*,row_number() over(partition by instrument_id,period_end,filing_kind
+                    order by consolidated desc nulls last,filing_timestamp desc,revision_number desc,
+                    case when source='NSE' then 0 when source='BSE' then 1 else 2 end,id desc) choice
+                  from financial_filings ff where filing_timestamp<=:as_of and period_end<=cast(:as_of as date)
+                ), limited as (
+                  select *,row_number() over(partition by instrument_id order by period_end desc,
+                    case when filing_kind='annual' then 1 else 0 end,filing_timestamp desc) period_rank
+                  from ranked where choice=1
+                )
+                select i.exchange||':'||i.nse_symbol instrument_id,ff.period_end,ff.filing_timestamp filed_at,
+                       ff.source,ff.consolidated,ff.revision_number,ff.filing_kind,
+                       coalesce((select jsonb_object_agg(f.fact_name,f.value) from financial_facts f
+                                 where f.filing_id=ff.id and f.value is not null),'{}'::jsonb) facts
+                from limited ff join instruments i on i.id=ff.instrument_id
+                where ff.period_rank<=:limit_periods and i.exchange='NSE' and i.active
+                order by i.nse_symbol,ff.period_rank
+            """),{'as_of':as_of,'limit_periods':limit_periods}).mappings().all()
+        result = {}
+        for row in rows:
+            result.setdefault(row['instrument_id'],[]).append(dict(row))
+        return result
 
     def daily_prices(
         self,
