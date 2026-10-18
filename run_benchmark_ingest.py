@@ -40,6 +40,7 @@ def main() -> None:
     forced = _forced_pooler_url(raw)
     print(f"DB target: user={forced.username} host={forced.host} port={forced.port} db={forced.database}")
 
+    # This script is also a safe GitHub Actions trigger path for credential/backfill verification.
     import scripts.ingest_module_e_benchmarks as ingest_module
 
     ingest_module._engine = lambda: create_engine(forced, pool_pre_ping=True)
