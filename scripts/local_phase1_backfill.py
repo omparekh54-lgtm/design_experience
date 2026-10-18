@@ -13,6 +13,9 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 load_dotenv(ROOT / ".env")
+# All PMS-local reference tables live in the isolated pms schema.  Setting
+# PGOPTIONS keeps older unqualified SQL in existing ingestion scripts safe.
+os.environ.setdefault("PGOPTIONS", "-c search_path=pms,public")
 
 BAR = 34
 
@@ -68,10 +71,8 @@ def percentages(s: dict) -> dict[str, float]:
     sector = 100.0 * s["sector"] / max(1, s["total"])
     mid = date_coverage(s["bench"].get("NIFTYMIDSMALLCAP400"))
     vix = date_coverage(s["bench"].get("INDIAVIX"))
-    # Historical GSM is circular/event based rather than one row per day. Once
-    # at least one reconstructed interval exists in every year, final audit is
-    # what decides whether it is complete. Until then the live meter advances
-    # conservatively by interval volume, capped below 100.
+    # Historical GSM is event based rather than one row per day. The live
+    # meter is deliberately conservative; the final audit decides completion.
     gsm = min(99.0, s["gsm"] / 12.0) if s["gsm"] else 0.0
     return {"Sectors": sector, "MidSmallcap 400": mid, "India VIX": vix, "Pre-2024 GSM": gsm}
 
