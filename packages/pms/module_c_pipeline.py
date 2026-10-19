@@ -203,8 +203,16 @@ class ModuleCPipeline:
         )
 
     def generate(
-        self, d: date, *, persist=True, persist_upstream=False, reentry_signals=None
+        self,
+        d: date,
+        *,
+        persist=True,
+        persist_upstream=False,
+        reentry_signals=None,
+        selection_priority=None,
     ):
+        if selection_priority is not None and (persist or persist_upstream):
+            raise ValueError("Alternate ordering is research-only")
         if persist_upstream and not persist:
             raise ValueError("Upstream persistence requires persisted Module C output")
         if d > datetime.now(IST).date():
@@ -297,7 +305,7 @@ class ModuleCPipeline:
                     raise ValueError("unsupported_or_inactive_signal")
                 if b.signal and date.fromisoformat(signal["signal_date"]) > d:
                     raise ValueError("future_signal")
-                frame = compute_features(self.b._candles(instrument, d)).data
+                frame = self.b.features(self.b._candles(instrument, d)).data
                 if frame.empty or frame.index[-1].date() != expected:
                     raise ValueError("ranking_price_history_stale")
                 signal_date = (
@@ -457,7 +465,9 @@ class ModuleCPipeline:
             except (ValueError, KeyError) as exc:
                 row["qualified"] = False
                 row["rejected_reasons"] = [str(exc)]
-        allocation = allocate_candidates(candidates, state, capacity, self.cfg)
+        allocation = allocate_candidates(
+            candidates, state, capacity, self.cfg, priority=selection_priority
+        )
         selected = {c.instrument_id for c in allocation.selected}
         for candidate in candidates:
             row = records[candidate.instrument_id]

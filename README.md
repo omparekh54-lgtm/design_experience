@@ -88,7 +88,7 @@ The trade engine preserves the Leg-2 EMA21 exit-signal candle and can create the
 
 `packages/pms/backtest.py` processes daily market-open, bar, signal, fill, state-change, re-entry and market-close events. Entries begin only after a close-generated signal. EMA exits execute at the following open. Stops remain intraday. Gap fills, same-day stop ambiguity, cash limits, dynamic Module E capacity and daily marked-to-market equity are modeled.
 
-`DatabaseBacktestStrategy` reuses production Module A/B/C/E, corporate-action-adjusted candles and the shared trade engine. There is no separate simplified backtest strategy.
+`DatabaseBacktestStrategy` is a legacy diagnostic adapter that reads saved C/E decisions; it is not a complete historical portfolio replay. Use the isolated backtesting matrix for historical component comparisons through the shared A/B/C/E and trade code.
 
 Run a database-backed test with:
 
@@ -251,3 +251,14 @@ formal PAPER activity, regime, research, backtests, data health and operations.
 Manual sandbox activity has a separate account and route.
 See [frontend setup](apps/web/README.md) and [UI completion](docs/ui_completion.md)
 for operator authorization, verification and acceptance limits.
+
+## Backtesting matrix
+
+The predeclared 128-cell research matrix covers strategy/re-entry comparisons,
+annual and stress windows, ADR window/cap sensitivity, exit arming, seeded C
+random controls and doubled trading friction. It uses isolated simulated accounts,
+read-only consistent input snapshots and resumable, checksummed reports.
+2025 onward remains reserved for out-of-sample validation.
+See [matrix documentation](docs/backtesting_matrix.md) and the
+[deferred consolidated local setup](docs/local_setup_after_all_phases.md).
+No historical performance pass or completed local run is implied by implementation.

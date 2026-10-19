@@ -122,7 +122,9 @@ def candidate_rejections(c: Candidate, cfg: dict) -> list[str]:
     return list(dict.fromkeys(reasons))
 
 
-def allocate_candidates(candidates, state, max_open_trades_from_regime, cfg):
+def allocate_candidates(
+    candidates, state, max_open_trades_from_regime, cfg, *, priority=None
+):
     """Reserve pending slots, cash including costs, sector slots and exact NAV heat."""
     from collections import Counter
 
@@ -159,7 +161,7 @@ def allocate_candidates(candidates, state, max_open_trades_from_regime, cfg):
             eligible.append((c, rank_candidate(c.ranking, cfg)))
     eligible.sort(
         key=lambda item: (
-            -item[1].score,
+            priority(item[0]) if priority is not None else -item[1].score,
             item[0].stop_risk_pct,
             -item[0].adtv,
             item[0].instrument_id,

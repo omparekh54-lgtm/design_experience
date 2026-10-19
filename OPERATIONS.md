@@ -358,3 +358,13 @@ Formal PAPER activity and manual PAPER_SANDBOX orders have separate pages.
 Each mutation requires an operator-entered API key; server-held keys are not
 forwarded for visitors. GET navigation never creates orders, fills or readiness
 records. See [UI completion](docs/ui_completion.md) and the frontend README.
+
+## Backtesting matrix
+
+Use the new matrix runner for historical portfolio comparisons rather than the
+legacy saved-ranking adapter. Plan mode needs no database; preflight is read-only;
+run mode stores only research records and local JSON/CSV/journals. It never
+changes PAPER/live state or safety permissions.
+The user is deferring local commands until the final consolidated setup. See
+[backtesting_matrix.md](docs/backtesting_matrix.md) and
+[local_setup_after_all_phases.md](docs/local_setup_after_all_phases.md).
