@@ -1,5 +1,7 @@
 # Consolidated local setup — accumulating checklist
 
+**Superseded operating model:** the user now requires unattended cloud operation with no daily laptop use. Follow [cloud deployment readiness](deployment_readiness.md) and its phased consolidated deployment sequence. The checklist below is retained as a manual/local fallback only; it is not a requirement to keep the laptop running or execute daily jobs locally.
+
 The user has not run the intermediate module commands since backfill and will run the accumulated setup at the end. No command in a phase-completion message should be treated as already executed locally.
 
 This checklist is being maintained while implementation continues. Final ordered commands will be supplied after the remaining phases and local environment requirements are checked. The exact database/migration state must be inspected before running migrations; do not blindly rebuild or replace the existing backfill database.

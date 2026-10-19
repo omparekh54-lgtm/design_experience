@@ -259,3 +259,7 @@ The read-only audit checks schema, 39 automated source-integrity rules and five 
 ### Step 13 — Security/reliability
 
 Authenticated mutations, transactional safety guards, bounded online connections/workers, sanitized errors, runtime posture and isolated restore-rehearsal tooling are implemented. See [safeguards and recovery runbook](docs/security_reliability.md). Deployment verification and an actual backup restore remain deferred; real broker execution remains disabled.
+
+### Unattended cloud deployment — Phase 1
+
+The operating target is cloud scheduling with the laptop switched off. The [readiness assessment and deployment plan](docs/deployment_readiness.md) inventories migration/build inputs, validates cloud configuration and optionally inspects schema/safety/DQ in a read-only transaction. It preserves blockers and does not start the campaign. Full cloud ingestion is the next phase.
