@@ -1,16 +1,60 @@
 import Link from "next/link";
-import type {ReactNode} from "react";
-import {display,formatNumber,href,timeIST,todayIST} from "@/lib/api";
-import type {Run} from "@/lib/console-types";
-export function Badge({value}:{value:unknown}){const label=display(value);const good=['SUCCESS','MATCHED','PASS','FILLED','READY','STRONG','HEALTHY','ELIGIBLE'];const bad=['BLOCKED','FAILED','UNAVAILABLE','ERROR','CANCELLED','REJECTED','LOCKED','DEFENSIVE'];const tone=good.includes(label.toUpperCase())?'good':bad.includes(label.toUpperCase())?'bad':'warn';return <span className={`badge ${tone}`}>{label.replaceAll('_',' ')}</span>;}
-export function Header({eyebrow,title,description,children}:{eyebrow?:string;title:string;description:string;children?:ReactNode}){return <div className="page-title"><div>{eyebrow?<div className="eyebrow">{eyebrow}</div>:null}<h1>{title}</h1><p className="subtle">{description}</p></div><div className="toolbar">{children}</div></div>;}
-export function Metric({label,value,foot,tone}:{label:string;value:ReactNode;foot?:ReactNode;tone?:string}){return <div className="card metric"><div className="metric-label">{label}</div><div className={`metric-value ${tone||''}`}>{value}</div>{foot?<div className="metric-foot">{foot}</div>:null}</div>;}
-export function Panel({title,children,action}:{title:string;children:ReactNode;action?:ReactNode}){return <section className="card"><div className="section-head"><h2>{title}</h2>{action}</div>{children}</section>;}
-export function Empty({title,detail,action}:{title:string;detail?:string;action?:ReactNode}){return <div className="empty"><span className="empty-mark" aria-hidden="true">◇</span><strong>{title}</strong>{detail?<p>{detail}</p>:null}{action}</div>;}
-export function Errors({items}:{items:(string|null|undefined)[]}){const unique=[...new Set(items.filter(Boolean))];return unique.length?<div role="alert" className="error"><strong>Some data could not be loaded</strong>{unique.map(x=><p key={x}>{x}</p>)}<span>Saved values are shown only where available. Refresh to retry.</span></div>:null;}
-export function Notice({title,children,tone='warn'}:{title:string;children:ReactNode;tone?:'warn'|'bad'|'neutral'}){return <div className={`notice ${tone}`}><strong>{title}</strong><div>{children}</div></div>;}
-export function DateFilter({date,extra}:{date:string;extra?:ReactNode}){return <form className="filters"><label>Market view<input type="date" name="date" defaultValue={date} max={todayIST()} required/></label>{extra}<button type="submit" className="link-button">Apply</button></form>;}
-export function Pager({path,page,total,limit,values={}}:{path:string;page:number;total:number;limit:number;values?:Record<string,string|number|undefined>}){const pages=Math.max(1,Math.ceil(total/limit));return <div className="pagination"><span className="subtle">{total?`${(page-1)*limit+1}–${Math.min(page*limit,total)} of ${total.toLocaleString('en-IN')}`:'0 results'} · Page {page} of {pages}</span><div className="toolbar">{page>1?<Link className="link-button secondary" href={href(path,{...values,page:page-1})}>Previous</Link>:null}{page<pages?<Link className="link-button secondary" href={href(path,{...values,page:page+1})}>Next</Link>:null}</div></div>;}
-export function KeyValue({label,value}:{label:string;value:ReactNode}){return <div className="kv"><span>{label}</span><strong>{value}</strong></div>;}
-export function Score({value,max=100}:{value:unknown;max?:number}){const n=typeof value==='number'&&Number.isFinite(value)?Math.max(0,Math.min(max,value)):null;return <div className="score"><strong>{formatNumber(value,1)}</strong>{n!==null?<progress value={n} max={max} aria-label={`Score ${formatNumber(value,1)} of ${max}`}/>:null}</div>;}
-export function RunStages({run}:{run:Run|null|undefined}){if(!run)return <Empty title="No daily run recorded" detail="Stages appear here after the scheduled workflow records an attempt."/>;const stages=Object.entries(run.details?.stages||{});return <><div className="toolbar spread"><span className="subtle">{run.details?.trade_date||'Latest attempt'} · {timeIST(run.started_at)}</span><Badge value={run.status}/></div>{stages.length?<ol className="stages">{stages.map(([name,stage])=><li key={name}><span className={`stage-marker ${stage.status==='SUCCESS'?'good':stage.status==='FAILED'?'bad':'warn'}`}/><div><strong>{name.replaceAll('_',' ')}</strong><small>{stage.error_type|| (stage.finished_at?`Finished ${timeIST(stage.finished_at)}`:'Started; completion not yet recorded')}</small></div><Badge value={stage.status}/></li>)}</ol>:<Empty title="No stage details recorded"/>}{(run.details?.reasons||[]).length?<div className="reason-list">{run.details.reasons?.map(x=><span key={x}>{x.replaceAll('_',' ')}</span>)}</div>:null}{run.details?.paper_admission?<KeyValue label="Paper admission" value={<Badge value={run.details.paper_admission.status}/>}/>:null}</>;}
+import type { ReactNode } from "react";
+import { display, formatNumber, href, timeIST, todayIST } from "@/lib/api";
+import type { Run } from "@/lib/console-types";
+export function Badge({ value }: {
+    value: unknown;
+}) { const label = display(value); const good = ['SUCCESS', 'MATCHED', 'PASS', 'FILLED', 'READY', 'STRONG', 'HEALTHY', 'ELIGIBLE']; const bad = ['BLOCKED', 'FAILED', 'UNAVAILABLE', 'ERROR', 'CANCELLED', 'REJECTED', 'LOCKED', 'DEFENSIVE']; const tone = good.includes(label.toUpperCase()) ? 'good' : bad.includes(label.toUpperCase()) ? 'bad' : 'warn'; return <span className={`badge ${tone}`}>{label.replaceAll('_', ' ')}</span>; }
+export function Header({ eyebrow, title, description, children }: {
+    eyebrow?: string;
+    title: string;
+    description: string;
+    children?: ReactNode;
+}) { return <div className="page-title"><div>{eyebrow ? <div className="eyebrow">{eyebrow}</div> : null}<h1>{title}</h1><p className="subtle">{description}</p></div><div className="toolbar">{children}</div></div>; }
+export function Metric({ label, value, foot, tone }: {
+    label: string;
+    value: ReactNode;
+    foot?: ReactNode;
+    tone?: string;
+}) { return <div className="card metric"><div className="metric-label">{label}</div><div className={`metric-value ${tone || ''}`}>{value}</div>{foot ? <div className="metric-foot">{foot}</div> : null}</div>; }
+export function Panel({ title, children, action }: {
+    title: string;
+    children: ReactNode;
+    action?: ReactNode;
+}) { return <section className="card"><div className="section-head"><h2>{title}</h2>{action}</div>{children}</section>; }
+export function Empty({ title, detail, action }: {
+    title: string;
+    detail?: string;
+    action?: ReactNode;
+}) { return <div className="empty"><span className="empty-mark" aria-hidden="true">◇</span><strong>{title}</strong>{detail ? <p>{detail}</p> : null}{action}</div>; }
+export function Errors({ items }: {
+    items: (string | null | undefined)[];
+}) { const unique = [...new Set(items.filter(Boolean))]; return unique.length ? <div role="alert" className="error"><strong>Some data could not be loaded</strong>{unique.map(x => <p key={x}>{x}</p>)}<span>Saved values are shown only where available. Refresh to retry.</span></div> : null; }
+export function Notice({ title, children, tone = 'warn' }: {
+    title: string;
+    children: ReactNode;
+    tone?: 'warn' | 'bad' | 'neutral';
+}) { return <div className={`notice ${tone}`}><strong>{title}</strong><div>{children}</div></div>; }
+export function DateFilter({ date, extra }: {
+    date: string;
+    extra?: ReactNode;
+}) { return <form className="filters"><label>Market view<input type="date" name="date" defaultValue={date} max={todayIST()} required/></label>{extra}<button type="submit" className="link-button">Apply</button></form>; }
+export function Pager({ path, page, total, limit, values = {} }: {
+    path: string;
+    page: number;
+    total: number;
+    limit: number;
+    values?: Record<string, string | number | undefined>;
+}) { const pages = Math.max(1, Math.ceil(total / limit)); return <div className="pagination"><span className="subtle">{total ? `${(page - 1) * limit + 1}–${Math.min(page * limit, total)} of ${total.toLocaleString('en-IN')}` : '0 results'} · Page {page} of {pages}</span><div className="toolbar">{page > 1 ? <Link className="link-button secondary" href={href(path, { ...values, page: page - 1 })}>Previous</Link> : null}{page < pages ? <Link className="link-button secondary" href={href(path, { ...values, page: page + 1 })}>Next</Link> : null}</div></div>; }
+export function KeyValue({ label, value }: {
+    label: string;
+    value: ReactNode;
+}) { return <div className="kv"><span>{label}</span><strong>{value}</strong></div>; }
+export function Score({ value, max = 100 }: {
+    value: unknown;
+    max?: number;
+}) { const n = typeof value === 'number' && Number.isFinite(value) ? Math.max(0, Math.min(max, value)) : null; return <div className="score"><strong>{formatNumber(value, 1)}</strong>{n !== null ? <progress value={n} max={max} aria-label={`Score ${formatNumber(value, 1)} of ${max}`}/> : null}</div>; }
+export function RunStages({ run }: {
+    run: Run | null | undefined;
+}) { if (!run)
+    return <Empty title="No daily run recorded" detail="Stages appear here after the scheduled workflow records an attempt."/>; const stages = Object.entries(run.details?.stages || {}); return <><div className="toolbar spread"><span className="subtle">{run.details?.trade_date || 'Latest attempt'} · {timeIST(run.started_at)}</span><Badge value={run.status}/></div>{stages.length ? <ol className="stages">{stages.map(([name, stage]) => <li key={name}><span className={`stage-marker ${stage.status === 'SUCCESS' ? 'good' : stage.status === 'FAILED' ? 'bad' : 'warn'}`}/><div><strong>{name.replaceAll('_', ' ')}</strong><small>{stage.error_type || (stage.finished_at ? `Finished ${timeIST(stage.finished_at)}` : 'Started; completion not yet recorded')}</small></div><Badge value={stage.status}/></li>)}</ol> : <Empty title="No stage details recorded"/>}{(run.details?.reasons || []).length ? <div className="reason-list">{run.details.reasons?.map(x => <span key={x}>{x.replaceAll('_', ' ')}</span>)}</div> : null}{run.details?.paper_admission ? <KeyValue label="Paper admission" value={<Badge value={run.details.paper_admission.status}/>}/> : null}</>; }

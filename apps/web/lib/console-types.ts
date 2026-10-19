@@ -1,17 +1,229 @@
 export type Json = Record<string, unknown>;
-export type Safety = { execution_mode: string; new_orders_enabled: boolean; emergency_stop: boolean; locked_reason: string | null; updated_at?: string };
-export type Snapshot = { snapshot_date: string; nav: number; cash: number; market_value: number; realized_pnl: number; unrealized_pnl: number; open_risk: number; portfolio_heat_pct: number; positions: Json[] };
-export type Stage = { status: string; started_at?: string; finished_at?: string; result?: Json; error_type?: string };
-export type Run = { id: string; job_name?: string; status: string; started_at: string; finished_at?: string; details: { trade_date?: string; reasons?: string[]; stages?: Record<string, Stage>; paper_execution_status?: string; paper_admission?: { status: string; reason?: string; paper_orders_created?: number }; error_type?: string; capacity?: number; selected?: number; attempt?: number; previous_run_id?: string } };
-export type Regime = { trade_date: string; band: string; max_open_trades: number; score: number; raw_score: number; hard_override: boolean; data_ready: boolean; reason: string; components: Record<string, number>; data_quality: Json; implementation?: string };
-export type Overview = { requested_date: string; market_session: string | null; decision_date: string | null; strategy_version: string; account_mode: "PAPER"; nav_history: {snapshot_date:string;nav:number}[]; portfolio: Snapshot | null; safety: Safety | null; regime: Regime | null; daily_run: Run | null; settlement: Run | null; signals: { total: number; qualified: number; selected: number } };
-export type Signal = { instrument_id: string; score: number; qualified: boolean; selected: boolean; components: Record<string, number>; rejected_reasons: string[]; details: { kind?: string; sector?: string; buy_stop?: number; stop?: number; shares?: number; rupee_risk?: number; days_left?: number; expires_on?: string; next_entry_session?: string; reason?: string; rank?: number; global_blockers?: string[]; signal?: Json } | null };
-export type Signals = { requested_date: string; decision_date: string | null; page: number; limit: number; total: number; counts: Record<string, number>; rows: Signal[]; proposal_only: boolean };
-export type Universe = { as_of: string; page: number; limit: number; total: number; rows: { instrument_id: string; sector: string | null; eligible: boolean | null; score: number | null; failed_rules: string[] | null; as_of: string | null }[] };
-export type Trade = { id: string; instrument: string; signal_date: string; state: string; entry: number | null; stop: number | null; shares: number; remaining_shares: number; realized_pnl: number; exit_reason: string | null; created_at?: string; updated_at: string };
-export type PaperOrder = { id: string; strategy_trade_id: string | null; instrument: string; side: string; order_type: string; quantity: number; filled_quantity: number; trigger_price: number | null; limit_price: number | null; status: string; created_at: string };
-export type Fill = { id?: string; instrument?: string; strategy_trade_id?: string; fill_time: string; price: number; quantity: number; fees: number; side: string; implementation?: string };
-export type Paper = { mode: "PAPER"; market_session: string | null; snapshot: Snapshot | null; trades: Trade[]; orders: PaperOrder[]; fills: Fill[]; limit: number };
-export type TradeDetail = { mode: "PAPER"; trade: Trade; fills: Fill[]; events: { id: number; event_time: string; state: string; event_type: string; payload: Json }[] };
-export type DataStatus = { market_session: string | null; metrics: { active_stocks: number; classified_stocks: number; stocks_with_session_bar: number; financial_filings: number; critical_errors: number }; issues: { dataset: string; severity: string; code: string; message: string; observed_at: string }[]; benchmarks: { benchmark_code: string; rows: number; first_date: string; latest: string }[]; regime_data_quality: Json | null; coverage_note: string };
-export type Sandbox = { account_mode: string; starting_cash: number; cash: number; realized_pnl: number; fills: number; latest_market_date: string | null; orders: PaperOrder[]; positions: { exchange: string; symbol: string; quantity: number; avg_price: number }[] };
+export type Safety = {
+    execution_mode: string;
+    new_orders_enabled: boolean;
+    emergency_stop: boolean;
+    locked_reason: string | null;
+    updated_at?: string;
+};
+export type Snapshot = {
+    snapshot_date: string;
+    nav: number;
+    cash: number;
+    market_value: number;
+    realized_pnl: number;
+    unrealized_pnl: number;
+    open_risk: number;
+    portfolio_heat_pct: number;
+    positions: Json[];
+};
+export type Stage = {
+    status: string;
+    started_at?: string;
+    finished_at?: string;
+    result?: Json;
+    error_type?: string;
+};
+export type Run = {
+    id: string;
+    job_name?: string;
+    status: string;
+    started_at: string;
+    finished_at?: string;
+    details: {
+        trade_date?: string;
+        reasons?: string[];
+        stages?: Record<string, Stage>;
+        paper_execution_status?: string;
+        paper_admission?: {
+            status: string;
+            reason?: string;
+            paper_orders_created?: number;
+        };
+        error_type?: string;
+        capacity?: number;
+        selected?: number;
+        attempt?: number;
+        previous_run_id?: string;
+    };
+};
+export type Regime = {
+    trade_date: string;
+    band: string;
+    max_open_trades: number;
+    score: number;
+    raw_score: number;
+    hard_override: boolean;
+    data_ready: boolean;
+    reason: string;
+    components: Record<string, number>;
+    data_quality: Json;
+    implementation?: string;
+};
+export type Overview = {
+    requested_date: string;
+    market_session: string | null;
+    decision_date: string | null;
+    strategy_version: string;
+    account_mode: "PAPER";
+    nav_history: {
+        snapshot_date: string;
+        nav: number;
+    }[];
+    portfolio: Snapshot | null;
+    safety: Safety | null;
+    regime: Regime | null;
+    daily_run: Run | null;
+    settlement: Run | null;
+    signals: {
+        total: number;
+        qualified: number;
+        selected: number;
+    };
+};
+export type Signal = {
+    instrument_id: string;
+    score: number;
+    qualified: boolean;
+    selected: boolean;
+    components: Record<string, number>;
+    rejected_reasons: string[];
+    details: {
+        kind?: string;
+        sector?: string;
+        buy_stop?: number;
+        stop?: number;
+        shares?: number;
+        rupee_risk?: number;
+        days_left?: number;
+        expires_on?: string;
+        next_entry_session?: string;
+        reason?: string;
+        rank?: number;
+        global_blockers?: string[];
+        signal?: Json;
+    } | null;
+};
+export type Signals = {
+    requested_date: string;
+    decision_date: string | null;
+    page: number;
+    limit: number;
+    total: number;
+    counts: Record<string, number>;
+    rows: Signal[];
+    proposal_only: boolean;
+};
+export type Universe = {
+    as_of: string;
+    page: number;
+    limit: number;
+    total: number;
+    rows: {
+        instrument_id: string;
+        sector: string | null;
+        eligible: boolean | null;
+        score: number | null;
+        failed_rules: string[] | null;
+        as_of: string | null;
+    }[];
+};
+export type Trade = {
+    id: string;
+    instrument: string;
+    signal_date: string;
+    state: string;
+    entry: number | null;
+    stop: number | null;
+    shares: number;
+    remaining_shares: number;
+    realized_pnl: number;
+    exit_reason: string | null;
+    created_at?: string;
+    updated_at: string;
+};
+export type PaperOrder = {
+    id: string;
+    strategy_trade_id: string | null;
+    instrument: string;
+    side: string;
+    order_type: string;
+    quantity: number;
+    filled_quantity: number;
+    trigger_price: number | null;
+    limit_price: number | null;
+    status: string;
+    created_at: string;
+};
+export type Fill = {
+    id?: string;
+    instrument?: string;
+    strategy_trade_id?: string;
+    fill_time: string;
+    price: number;
+    quantity: number;
+    fees: number;
+    side: string;
+    implementation?: string;
+};
+export type Paper = {
+    mode: "PAPER";
+    market_session: string | null;
+    snapshot: Snapshot | null;
+    trades: Trade[];
+    orders: PaperOrder[];
+    fills: Fill[];
+    limit: number;
+};
+export type TradeDetail = {
+    mode: "PAPER";
+    trade: Trade;
+    fills: Fill[];
+    events: {
+        id: number;
+        event_time: string;
+        state: string;
+        event_type: string;
+        payload: Json;
+    }[];
+};
+export type DataStatus = {
+    market_session: string | null;
+    metrics: {
+        active_stocks: number;
+        classified_stocks: number;
+        stocks_with_session_bar: number;
+        financial_filings: number;
+        critical_errors: number;
+    };
+    issues: {
+        dataset: string;
+        severity: string;
+        code: string;
+        message: string;
+        observed_at: string;
+    }[];
+    benchmarks: {
+        benchmark_code: string;
+        rows: number;
+        first_date: string;
+        latest: string;
+    }[];
+    regime_data_quality: Json | null;
+    coverage_note: string;
+};
+export type Sandbox = {
+    account_mode: string;
+    starting_cash: number;
+    cash: number;
+    realized_pnl: number;
+    fills: number;
+    latest_market_date: string | null;
+    orders: PaperOrder[];
+    positions: {
+        exchange: string;
+        symbol: string;
+        quantity: number;
+        avg_price: number;
+    }[];
+};
