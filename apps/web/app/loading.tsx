@@ -1,0 +1,1 @@
+export default function Loading(){return <div role="status" aria-label="Loading saved portfolio data"><div className="skeleton"/><div className="skeleton big"/><p className="subtle">Loading saved data…</p></div>;}

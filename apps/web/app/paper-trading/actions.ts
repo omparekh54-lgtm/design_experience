@@ -1,56 +1,10 @@
 "use server";
-
-import { revalidatePath } from "next/cache";
-
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || process.env.PMS_API_BASE_URL || "http://127.0.0.1:8000";
-
-async function post(path: string, body: unknown) {
-  const key = process.env.OPS_API_KEY || "";
-  if (!key) throw new Error("OPS_API_KEY is not configured on the dashboard service");
-  const response = await fetch(`${API_BASE}${path}`, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      "x-ops-key": key,
-    },
-    body: JSON.stringify(body),
-    cache: "no-store",
-  });
-  if (!response.ok) {
-    const detail = await response.text();
-    throw new Error(detail || `${response.status} ${response.statusText}`);
-  }
-  return response.json();
-}
-
-export async function placePaperOrder(formData: FormData) {
-  const symbol = String(formData.get("symbol") || "").trim().toUpperCase();
-  const side = String(formData.get("side") || "BUY").toUpperCase();
-  const quantity = Number(formData.get("quantity") || 0);
-  const orderType = String(formData.get("order_type") || "MARKET").toUpperCase();
-  const rawLimit = String(formData.get("limit_price") || "").trim();
-  const rawTrigger = String(formData.get("trigger_price") || "").trim();
-  if (!symbol) throw new Error("Symbol is required");
-  if (!Number.isInteger(quantity) || quantity <= 0) throw new Error("Quantity must be a positive whole number");
-  await post("/v1/execution/paper-sandbox/orders", {
-    instrument_id: symbol.includes(":") ? symbol : `NSE:${symbol}`,
-    side,
-    quantity,
-    order_type: orderType,
-    limit_price: rawLimit ? Number(rawLimit) : null,
-    trigger_price: rawTrigger ? Number(rawTrigger) : null,
-  });
-  revalidatePath("/paper-trading");
-}
-
-export async function processPaperOrders() {
-  await post("/v1/execution/paper-sandbox/process", {});
-  revalidatePath("/paper-trading");
-}
-
-export async function cancelPaperOrder(formData: FormData) {
-  const orderId = String(formData.get("order_id") || "").trim();
-  if (!orderId) throw new Error("Order ID is required");
-  await post(`/v1/execution/paper-sandbox/orders/${encodeURIComponent(orderId)}/cancel`, {});
-  revalidatePath("/paper-trading");
-}
+import {revalidatePath} from "next/cache";
+import type {ActionState} from "@/lib/action-state";
+const API_BASE=(process.env.PMS_API_BASE_URL||process.env.NEXT_PUBLIC_API_BASE_URL||'http://127.0.0.1:8000').replace(/\/$/,'');
+async function post(path:string,body:unknown,form:FormData):Promise<{ok:boolean;message:string;data?:Record<string,unknown>}>{const key=String(form.get('operator_key')||'');if(!key||key.length>256)return{ok:false,message:'Enter your operator key to authorize this action.'};try{const response=await fetch(`${API_BASE}${path}`,{method:'POST',headers:{'content-type':'application/json','x-ops-key':key},body:JSON.stringify(body),cache:'no-store',signal:AbortSignal.timeout(15000)});if(!response.ok)return{ok:false,message:response.status===401?'The operator key was not accepted. No action was authorized.':response.status<500?'The request was rejected. Check the values and account state.':'The service could not complete the request. Review the account before retrying.'};return{ok:true,message:'Action completed.',data:await response.json() as Record<string,unknown>};}catch{return{ok:false,message:'The request could not be confirmed. Refresh the account before retrying.'};}}
+export async function placePaperOrder(_previous:ActionState,form:FormData):Promise<ActionState>{const symbol=String(form.get('symbol')||'').trim().toUpperCase();const side=String(form.get('side')||'BUY');const quantity=Number(form.get('quantity'));const type=String(form.get('order_type')||'MARKET');const limit=String(form.get('limit_price')||'').trim();const trigger=String(form.get('trigger_price')||'').trim();const id=String(form.get('request_id')||'');if(!/^(?:NSE:)?[A-Z0-9&._-]{1,30}$/.test(symbol))return{ok:false,message:'Enter a valid NSE symbol, such as RELIANCE.'};if(!Number.isInteger(quantity)||quantity<1||quantity>10000000||!['BUY','SELL'].includes(side)||!['MARKET','LIMIT','STOP_MARKET'].includes(type))return{ok:false,message:'Check the side, order type and positive whole-share quantity.'};if((type==='LIMIT'&&(!limit||!Number.isFinite(Number(limit))||Number(limit)<=0))||(type==='STOP_MARKET'&&(!trigger||!Number.isFinite(Number(trigger))||Number(trigger)<=0)))return{ok:false,message:'A positive price is required for the selected order type.'};if(!/^[0-9a-f-]{36}$/i.test(id))return{ok:false,message:'Refresh this form before placing an order.'};const result=await post('/v1/execution/paper-sandbox/orders',{instrument_id:symbol.startsWith('NSE:')?symbol:`NSE:${symbol}`,side,quantity,order_type:type,limit_price:type==='LIMIT'?Number(limit):null,trigger_price:type==='STOP_MARKET'?Number(trigger):null,idempotency_key:`ui-sandbox:${id}`},form);if(result.ok){revalidatePath('/paper-trading/sandbox');return{ok:true,message:'Sandbox order recorded. It can fill only against a later session’s observed bar.'};}return result;}
+export async function processPaperOrders(_previous:ActionState,form:FormData):Promise<ActionState>{const result=await post('/v1/execution/paper-sandbox/process',{},form);if(result.ok){revalidatePath('/paper-trading/sandbox');return{ok:true,message:`Processed the latest saved market bar. ${Number(result.data?.fill_count||0)} sandbox fill(s) recorded. Newly created orders wait for a later session.`};}return result;}
+export async function cancelPaperOrder(_previous:ActionState,form:FormData):Promise<ActionState>{const id=String(form.get('order_id')||'');if(!/^[0-9a-f-]{36}$/i.test(id))return{ok:false,message:'Invalid sandbox order.'};const result=await post(`/v1/execution/paper-sandbox/orders/${encodeURIComponent(id)}/cancel`,{},form);if(result.ok){revalidatePath('/paper-trading/sandbox');return{ok:true,message:result.data?.changed?'Sandbox order canceled.':'This order is no longer cancellable. Refresh to see its current state.'};}return result;}
+export async function disablePaperOrders(_previous:ActionState,form:FormData):Promise<ActionState>{const result=await post('/v1/execution/disable-orders',{},form);if(result.ok){revalidatePath('/operations');revalidatePath('/');return{ok:true,message:'New orders disabled. Existing protective management remains active.'};}return result;}
+export async function emergencyStop(_previous:ActionState,form:FormData):Promise<ActionState>{const reason=String(form.get('reason')||'').trim();if(form.get('confirm')!=='yes'||reason.length<3||reason.length>200)return{ok:false,message:'Enter a reason and confirm the emergency stop.'};const result=await post('/v1/execution/emergency-stop',{reason},form);if(result.ok){revalidatePath('/operations');revalidatePath('/');return{ok:true,message:'Emergency stop recorded. New entries are blocked; protective exits remain managed.'};}return result;}

@@ -11,6 +11,7 @@ from fastapi.responses import JSONResponse
 from apps.api.main import app
 from apps.api.execution_routes import router as execution_router
 from apps.api.data_gap_routes import router as data_gap_router
+from apps.api.console_routes import router as console_router
 
 
 @app.middleware("http")
@@ -65,3 +66,5 @@ def maybe_run_reference_gap_backfill() -> None:
 
 app.include_router(execution_router)
 app.include_router(data_gap_router)
+
+app.include_router(console_router)

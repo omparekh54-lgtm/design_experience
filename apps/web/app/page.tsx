@@ -1,61 +1,6 @@
 import Link from "next/link";
-import { api, formatMoney, formatNumber } from "@/lib/api";
-
-export const dynamic = "force-dynamic";
-
-export default async function DashboardPage() {
-  const today = new Date().toISOString().slice(0, 10);
-  const [portfolio, positions, regime, selected, orders] = await Promise.all([
-    api.portfolio(), api.positions(), api.moduleE(today), api.moduleC(today, true), api.orders(),
-  ]);
-  const p = portfolio.data || {};
-  const r = regime.data || {};
-  const rows = selected.data?.rankings || [];
-  const pos = positions.data?.positions || [];
-  const pending = orders.data?.order_candidates || [];
-
-  return (
-    <>
-      <div className="page-title">
-        <div><h2>Portfolio Dashboard</h2><div className="subtle">Point-in-time view for {today}. Strategy actions are research/paper only.</div></div>
-        <span className="pill">Regime: <strong className={r.hard_override ? "bad" : "good"}>{r.band || "Unavailable"}</strong></span>
-      </div>
-      {portfolio.error && <div className="error">Portfolio API: {portfolio.error}</div>}
-      <div className="grid grid-4">
-        <div className="card"><div className="metric-label">Open positions</div><div className="metric-value">{p.open_positions ?? pos.length}</div><div className="metric-foot">Regime capacity {r.max_open_trades ?? "—"}</div></div>
-        <div className="card"><div className="metric-label">Realised P&amp;L</div><div className="metric-value">{formatMoney(p.realized_pnl)}</div><div className="metric-foot">Persisted trade ledger</div></div>
-        <div className="card"><div className="metric-label">Gross open value</div><div className="metric-value">{formatMoney(p.gross_open_value)}</div><div className="metric-foot">Current persisted positions</div></div>
-        <div className="card"><div className="metric-label">Market regime score</div><div className="metric-value">{formatNumber(r.smoothed_score ?? r.score, 1)}</div><div className="metric-foot">Raw {formatNumber(r.raw_score, 1)} · capacity {r.max_open_trades ?? "—"}</div></div>
-      </div>
-
-      <div className="section grid grid-2">
-        <div className="card">
-          <div className="section-head"><h3>Regime components</h3><Link className="link-button" href="/research">Research</Link></div>
-          {Object.entries(r.components || {}).map(([key, value]) => <div className="kv" key={key}><span>{key.replaceAll("_", " ")}</span><strong>{formatNumber(value, 1)}</strong></div>)}
-          {!r.components && <div className="empty">No regime snapshot for today.</div>}
-        </div>
-        <div className="card">
-          <div className="section-head"><h3>Pending order candidates</h3><span className="badge warn">Execution disabled</span></div>
-          {pending.slice(0, 6).map((o: any, i: number) => <div className="kv" key={o.id || i}><span className="mono">{o.exchange && o.symbol ? `${o.exchange}:${o.symbol}` : o.symbol || "—"}</span><strong>{o.state || "PENDING"}</strong></div>)}
-          {pending.length === 0 && <div className="empty">No pending entries.</div>}
-        </div>
-      </div>
-
-      <section className="section">
-        <div className="section-head"><h3>On Deck — Module C selections</h3><span className="subtle">Ranked candidates selected under portfolio constraints</span></div>
-        <div className="table-wrap"><table className="table"><thead><tr><th>Instrument</th><th>Score</th><th>Selected</th><th>Reasons</th><th></th></tr></thead><tbody>
-          {rows.map((row: any) => { const instrument = `${row.exchange || "NSE"}:${row.symbol}`; return <tr key={instrument}><td className="mono">{instrument}</td><td>{formatNumber(row.score,1)}</td><td><span className={`badge ${row.selected ? "good" : "warn"}`}>{row.selected ? "Selected" : "Qualified"}</span></td><td className="subtle">{(row.rejected_reasons || []).join(", ") || "—"}</td><td><Link className="link-button" href={`/research/${encodeURIComponent(instrument)}`}>Open</Link></td></tr>; })}
-          {rows.length === 0 && <tr><td colSpan={5}><div className="empty">No Module C selections available for {today}.</div></td></tr>}
-        </tbody></table></div>
-      </section>
-
-      <section className="section">
-        <div className="section-head"><h3>Open positions</h3><Link className="link-button" href="/signals">View signals</Link></div>
-        <div className="table-wrap"><table className="table"><thead><tr><th>Instrument</th><th>State</th><th>Entry</th><th>Stop</th><th>Shares</th><th>Realised P&amp;L</th></tr></thead><tbody>
-          {pos.map((row: any) => <tr key={row.id}><td className="mono">{row.exchange}:{row.symbol}</td><td>{row.state}</td><td>{formatNumber(row.entry)}</td><td>{formatNumber(row.stop)}</td><td>{row.remaining_shares ?? row.shares}</td><td>{formatMoney(row.realized_pnl)}</td></tr>)}
-          {pos.length === 0 && <tr><td colSpan={6}><div className="empty">No open positions.</div></td></tr>}
-        </tbody></table></div>
-      </section>
-    </>
-  );
-}
+import {api,formatMoney,formatNumber,validDate,timeIST,record} from "@/lib/api";
+import {Header,Metric,Panel,Notice,Errors,DateFilter,Empty,Badge,RunStages,KeyValue} from "@/components/ui";
+import {NavChart} from "@/components/nav-chart";
+export const dynamic="force-dynamic";
+export default async function Dashboard({searchParams}:{searchParams:Promise<{date?:string}>}){const params=await searchParams;const date=validDate(params.date);const [overview,signals]=await Promise.all([api.overview(date),api.signals(date,'','selected')]);const o=overview.data;const p=o?.portfolio;const r=o?.regime;return <><Header eyebrow="Your portfolio, in context" title="Portfolio overview" description="Recorded account value, market conditions and the latest daily decision workflow."><span className="badge neutral">Formal PAPER</span></Header><DateFilter date={date}/><Errors items={[overview.error,signals.error]}/>{o?.safety?.locked_reason?<Notice title="New entries are locked" tone="bad">{o.safety.locked_reason.replaceAll('_',' ')}. <Link href="/data-health">Review data health</Link>; existing positions retain their normal protective rules.</Notice>:!r?.data_ready?<Notice title="Market data is not yet verified">{r?.reason||'A verified market-regime snapshot is required before new entries can be allocated.'} <Link href="/regime">View market regime</Link></Notice>:null}<div className="stat-line"><span>Market session <strong>{o?.market_session||'Not recorded'}</strong></span><span>Decision snapshot <strong>{o?.decision_date||'Not recorded'}</strong></span><span>Account snapshot <strong>{p?.snapshot_date||'Not recorded'}</strong></span></div><div className="grid grid-4"><Metric label="Net asset value" value={formatMoney(p?.nav)} foot="Recorded formal PAPER account"/><Metric label="Available cash" value={formatMoney(p?.cash)} foot="Pending-order reservations are checked at allocation"/><Metric label="Net realized P&L" value={formatMoney(p?.realized_pnl)} foot="Ledger accounting including allocated costs" tone={p?(p.realized_pnl>=0?'good':'bad'):undefined}/><Metric label="Portfolio heat" value={p?`${formatNumber(p.portfolio_heat_pct)}%`:'—'} foot="Configured portfolio risk limit: 3.5%"/></div><div className="section grid grid-2"><Panel title="PAPER NAV history" action={<Link className="link" href="/paper-trading">View account →</Link>}><NavChart rows={o?.nav_history||[]}/></Panel><Panel title="Market regime" action={<Link className="link" href="/regime">Full breakdown →</Link>}><div className="toolbar spread"><Badge value={r?.band||'UNAVAILABLE'}/><span className="subtle">{r?.trade_date||'No snapshot'}</span></div><div className="regime-metric"><strong>{r?.data_ready?formatNumber(r.score,1):'—'}</strong><span>/ 100 smoothed score</span></div><KeyValue label="Maximum open trades" value={r?.max_open_trades??'—'}/><KeyValue label="Hard override" value={r?(r.hard_override?'Active':'Not active'):'—'}/><p className="subtle">{r?.reason||'No market-regime evidence is available.'}</p></Panel></div><div className="section grid grid-2"><Panel title="Daily workflow" action={<Link className="link" href="/operations">Operations →</Link>}><RunStages run={o?.daily_run}/></Panel><Panel title="Selected order sheet" action={<Link className="link" href="/signals?view=selected">All signals →</Link>}>{signals.data?.rows.length?<div className="table-wrap"><table className="table compact"><thead><tr><th>Instrument</th><th>Score</th><th>Buy stop</th><th>Shares</th></tr></thead><tbody>{signals.data.rows.slice(0,6).map(row=><tr key={row.instrument_id}><td><Link className="symbol" href={`/research/${encodeURIComponent(row.instrument_id)}?date=${date}`}>{row.instrument_id}</Link></td><td>{formatNumber(row.score,1)}</td><td>{formatMoney(row.details?.buy_stop)}</td><td>{row.details?.shares??'—'}</td></tr>)}</tbody></table></div>:<Empty title={signals.error?'Order sheet unavailable':'No selected proposals'} detail="Candidates appear only after A/B eligibility, ranking, market capacity and portfolio checks all pass." action={<Link className="link" href="/signals">Inspect rejections →</Link>}/>}<div className="stat-line"><span>Ranked <strong>{o?.signals.total??'—'}</strong></span><span>Selected <strong>{o?.signals.selected??'—'}</strong></span></div><p className="subtle">Proposals are separate from admitted PAPER orders. Admission: {o?.daily_run?.details?.paper_execution_status||'Not recorded'}.</p></Panel></div></>;}

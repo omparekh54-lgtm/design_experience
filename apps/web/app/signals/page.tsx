@@ -1,40 +1,5 @@
 import Link from "next/link";
-import { api, formatNumber } from "@/lib/api";
-
-export const dynamic = "force-dynamic";
-
-export default async function SignalsPage() {
-  const today = new Date().toISOString().slice(0, 10);
-  const [rankings, orders] = await Promise.all([api.moduleC(today, false), api.orders()]);
-  const rows = rankings.data?.rankings || [];
-  const pending = orders.data?.order_candidates || [];
-
-  return (
-    <>
-      <div className="page-title"><div><h2>Signals &amp; On Deck</h2><div className="subtle">Module C rankings, pending entries and rejection reasons for {today}.</div></div><span className="badge warn">No broker execution</span></div>
-      {(rankings.error || orders.error) && <div className="error">{rankings.error || orders.error}</div>}
-
-      <div className="grid grid-3">
-        <div className="card"><div className="metric-label">Ranked candidates</div><div className="metric-value">{rows.length}</div></div>
-        <div className="card"><div className="metric-label">Selected</div><div className="metric-value">{rows.filter((x:any)=>x.selected).length}</div></div>
-        <div className="card"><div className="metric-label">Pending entries</div><div className="metric-value">{pending.length}</div></div>
-      </div>
-
-      <section className="section">
-        <div className="section-head"><h3>Module C ranking board</h3><span className="subtle">Score ≥60 qualifies before portfolio constraints.</span></div>
-        <div className="table-wrap"><table className="table"><thead><tr><th>Instrument</th><th>Score</th><th>Qualified</th><th>Selected</th><th>Rejected reasons</th><th></th></tr></thead><tbody>
-          {rows.map((row:any)=>{ const instrument=`${row.exchange || "NSE"}:${row.symbol}`; return <tr key={instrument}><td className="mono">{instrument}</td><td>{formatNumber(row.score,1)}</td><td><span className={`badge ${row.qualified?"good":"bad"}`}>{row.qualified?"Yes":"No"}</span></td><td>{row.selected?"Yes":"No"}</td><td className="subtle">{(row.rejected_reasons||[]).join(", ")||"—"}</td><td><Link className="link-button" href={`/research/${encodeURIComponent(instrument)}`}>Research</Link></td></tr>})}
-          {rows.length===0 && <tr><td colSpan={6}><div className="empty">No ranking snapshot is available for today.</div></td></tr>}
-        </tbody></table></div>
-      </section>
-
-      <section className="section">
-        <div className="section-head"><h3>Pending entry candidates</h3><span className="subtle">Strategy state only; not broker orders.</span></div>
-        <div className="table-wrap"><table className="table"><thead><tr><th>Instrument</th><th>Signal date</th><th>State</th><th>Entry</th><th>Stop</th><th>Shares</th></tr></thead><tbody>
-          {pending.map((row:any)=><tr key={row.id}><td className="mono">{row.exchange}:{row.symbol}</td><td>{String(row.signal_date)}</td><td>{row.state}</td><td>{formatNumber(row.entry)}</td><td>{formatNumber(row.stop)}</td><td>{row.shares}</td></tr>)}
-          {pending.length===0 && <tr><td colSpan={6}><div className="empty">No active pending entries.</div></td></tr>}
-        </tbody></table></div>
-      </section>
-    </>
-  );
-}
+import {api,formatMoney,formatNumber,positivePage,validDate,href} from "@/lib/api";
+import {Header,Metric,Errors,Empty,Score,Badge,DateFilter,Pager} from "@/components/ui";
+export const dynamic="force-dynamic";
+export default async function SignalsPage({searchParams}:{searchParams:Promise<{date?:string;q?:string;view?:string;page?:string}>}){const p=await searchParams;const date=validDate(p.date),q=(p.q||'').slice(0,80),page=positivePage(p.page),view=['all','selected','watchlist','rejected'].includes(p.view||'')?p.view!:'all';const result=await api.signals(date,q,view,page);const d=result.data;return <><Header eyebrow="A → B → C" title="Signals & order sheet" description="Production candidates, portfolio allocation and the reasons behind every rejection."><span className="badge neutral">Proposals only</span></Header><DateFilter date={date} extra={<><label>Search symbol<input type="search" name="q" defaultValue={q} placeholder="e.g. RELIANCE" maxLength={80}/></label><input type="hidden" name="view" value={view}/></>}/><Errors items={[result.error]}/><div className="stat-line"><span>Requested <strong>{date}</strong></span><span>Saved decision date <strong>{d?.decision_date||'Not recorded'}</strong></span></div><div className="grid grid-4">{[['All candidates','all'],['Selected','selected'],['On-deck watchlist','watchlist'],['Rejected / not allocated','rejected']].map(([label,key])=><Metric key={key} label={label} value={d?.counts[key]??'—'}/>)}</div><nav className="tabs" aria-label="Signal views">{[['All','all'],['Order sheet','selected'],['Watchlist','watchlist'],['Rejected','rejected']].map(([label,key])=><Link className="tab" aria-current={view===key?'page':undefined} key={key} href={href('/signals',{date,q,view:key})}>{label}</Link>)}</nav><div className="table-wrap"><table className="table"><caption className="sr-only">Module C {view} candidates</caption><thead><tr><th>Instrument / sector</th><th>Score</th><th>Decision</th><th>Entry / stop</th><th>Shares / risk</th><th>Entry window</th><th>Evidence & reasons</th></tr></thead><tbody>{d?.rows.map(row=><tr key={row.instrument_id}><td><Link className="symbol" href={`/research/${encodeURIComponent(row.instrument_id)}?date=${date}`}>{row.instrument_id}</Link><small>{row.details?.sector||'Sector unavailable'}</small></td><td><Score value={row.score}/></td><td><Badge value={row.selected?'SELECTED':row.details?.kind==='WATCHLIST'?'WATCHLIST':row.qualified?'QUALIFIED':'REJECTED'}/></td><td>{formatMoney(row.details?.buy_stop)}<small>Stop {formatMoney(row.details?.stop)}</small></td><td>{row.details?.shares??'—'}<small>Risk {formatMoney(row.details?.rupee_risk)}</small></td><td>{row.details?.days_left!=null?`${row.details.days_left} sessions left`:'—'}<small>{row.details?.expires_on?`Expires ${row.details.expires_on}`:'No live entry window'}</small></td><td className="reason">{row.details?.reason||(row.rejected_reasons||[]).join('; ')||'No reason recorded'}<details><summary>Score components</summary>{Object.entries(row.components||{}).map(([key,value])=><div className="kv" key={key}><span>{key.replaceAll('_',' ')}</span><strong>{formatNumber(value,1)}</strong></div>)}{row.details?.global_blockers?.length?<p>{row.details.global_blockers.join('; ')}</p>:null}</details></td></tr>)}{!d?.rows.length?<tr><td colSpan={7}><Empty title={result.error?'Signals unavailable':q?'No symbols match this search':'No decisions in this view'} detail={d?.decision_date?'Try a different view or search. A zero-selection run can still contain recorded rejection reasons.':'A persisted Module C run is required; this page does not run a strategy scan.'}/></td></tr>:null}</tbody></table></div>{d?<Pager path="/signals" page={page} total={d.total} limit={d.limit} values={{date,q,view}}/>:null}</>;}
