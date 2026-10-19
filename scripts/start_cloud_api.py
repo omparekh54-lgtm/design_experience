@@ -6,9 +6,12 @@ import json
 import os
 from pathlib import Path
 import sys
-from urllib.parse import parse_qs, urlsplit
+from sqlalchemy.engine import make_url
+from sqlalchemy.exc import ArgumentError
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+from packages.pms.connection_config import placeholder_password, tls_connect_options
 
 
 def configuration_errors(env):
@@ -27,20 +30,23 @@ def configuration_errors(env):
     if not 32 <= len(key) <= 256 or key.isspace():
         errors.append("OPS_API_KEY")
     try:
-        u = urlsplit(env.get("DATABASE_URL", ""))
-        query = parse_qs(u.query)
+        u = make_url(env.get("DATABASE_URL", ""))
+        query = u.query
+        if any(not isinstance(value, str) for value in query.values()):
+            raise ValueError("Ambiguous connection settings")
+        tls = tls_connect_options(query, env)
         if (
-            u.scheme not in {"postgres", "postgresql", "postgresql+psycopg", "postgresql+psycopg2"}
-            or not u.hostname
-            or u.hostname.lower() in {"localhost", "127.0.0.1", "::1"}
+            u.drivername not in {"postgresql", "postgresql+psycopg", "postgresql+psycopg2"}
+            or not u.host
+            or u.host.lower() in {"localhost", "127.0.0.1", "::1"}
             or not u.username
             or not u.password
-            or u.path in {"", "/"}
-            or query.get("sslmode") != ["verify-full"]
-            or u.fragment
+            or placeholder_password(u.password)
+            or not u.database
+            or tls["sslmode"] != "verify-full"
         ):
             errors.append("DATABASE_URL")
-    except ValueError:
+    except (ValueError, ArgumentError):
         errors.append("DATABASE_URL")
     try:
         port = env.get("PORT", "10000")

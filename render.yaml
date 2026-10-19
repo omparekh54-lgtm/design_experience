@@ -26,6 +26,8 @@ services:
         value: '0'
       - key: PMS_CLOUD_COLLECTION_REQUIRED
         value: '1'
+      - key: PMS_DATABASE_VERIFY_FULL
+        value: '1'
       - key: DATABASE_URL
         sync: false
       - key: OPS_API_KEY

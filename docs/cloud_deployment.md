@@ -1,6 +1,6 @@
 # Phase 3 — Cloud deployment
 
-Status: existing API and SSR dashboard discovered and reachable; database readiness is blocked. Cloud deployment is not complete. No campaign has started.
+Status: API database connection restored and verified; quota, backup, migration and private archival remain blocked. Cloud deployment is not complete. No campaign has started.
 
 ## Prepared configuration
 
@@ -18,17 +18,17 @@ Supabase project `cxrkicqggsuylirzohqw` is ACTIVE_HEALTHY in ap-south-1. Preserv
 | API | `srv-db9r6b6q1p3s739a40e0` | https://pms-status-api.onrender.com |
 | SSR dashboard | `srv-db9r6g6q1p3s739a4fo0` | https://pms-status-dashboard.onrender.com |
 
-The API `/health` and dashboard `/` returned HTTP 200. API `/ready` and `/v1/execution/reliability` returned HTTP 503; application logs report `OperationalError`. This is a database connection failure, not a successful application-data deployment. Its specific cause is not yet established. No private database credentials or Render administrative token are present in this execution environment; the Render connector can merge environment updates but cannot read the existing database URL or change service commands. Secure connection verification needs an administrative route or dashboard handoff. Do not guess a pooler hostname, rotate the database password or print connection strings.
+The API `/health` and dashboard `/` returned HTTP 200. The initial API `/ready` and `/v1/execution/reliability` returned HTTP 503. Browser inspection found the literal `[YOUR-PASSWORD]` in Render DATABASE_URL. The user replaced the connection privately and deployed `dep-dbb4bvs9v7es73a5lj1g`. Both endpoints then returned HTTP 200. Operator key configuration and strength passed the runtime posture; worker evidence remains absent. No credential values were recorded. No private database credentials or Render administrative token are present in this execution environment; the Render connector can merge environment updates but cannot read the existing database URL or change service commands. Browser sign-in and the credential handoff are complete. Do not guess a pooler hostname, rotate the database password or print connection strings. The URL does not declare sslmode; `PMS_DATABASE_VERIFY_FULL=1` strengthens runtime connections to verify-full with the system CA store unless a reviewed CA path is supplied. Deployment checks and startup use the same policy; placeholders are rejected before connection attempts. Successful `/ready` after activating the policy is required as TLS rollout evidence.
 
 Merged API environment updates preserve existing credentials and set PAPER mode, live trading false, startup backfill off, private HTTP exception off and collection-required=1. The dashboard origin is set to the API HTTPS URL. Each environment update triggered a deployment automatically; do not trigger duplicates. The guarded startup command and `/ready` platform health check remain proposed until valid TLS credentials and the private operator key can be confirmed.
 
 The free Supabase organization has a measured database size of 681,962,643 bytes and user relations of 669,442,048 bytes. The official database-size guide documents a 500 MB free database quota (https://supabase.com/docs/guides/platform/database-size). Measured database and user-relation sizes exceed it. Default transaction read-only is currently off; this does not waive the quota or certify future writes. Verify provider quota/usage and preservation options before collection writes; do not delete or compress away backfill to make room without a reviewed recoverable plan. There are currently no Storage buckets. Database safety remains PAPER with new orders disabled and `reference_data_incomplete` locked.
 
-The connected GitHub tools cannot set Actions secrets/variables. Do not put credentials in workflow files, logs or chat. Secure configuration requires an authorized supported administrative route or a dashboard handoff.
+The connected GitHub tools cannot set Actions secrets/variables. Browser inspection verified that repository secret `PMS_DATABASE_URL` already exists, but its validity has not been tested; no repository variables are set, so the collection workflow remains disabled. Do not put credentials in workflow files, logs or chat. Secure configuration requires an authorized supported administrative route or a dashboard handoff.
 
 ## Deployment sequence still to execute
 
-1. Verify database connection credentials, TLS CA and provider quota. Existing free services and workspace are identified. Verify spend limits and available workspace hours; a free compute plan alone does not prove zero overage charges.
+1. Complete verified TLS rollout and resolve provider quota. Existing free services and workspace are identified. Verify spend limits and available workspace hours; a free compute plan alone does not prove zero overage charges.
 2. Establish a recoverable backup including shared public-schema source dependencies; record its private location and hash. Review the current schema and application-role grants. Apply only migration `010_cloud_collection.sql` in a transaction with `search_path=pms,public`; do not replay migrations 001–009 or rebuild the backfill.
 3. Configure PostgreSQL credentials and trusted TLS CA privately. Configure the Render API with the complete execution entrypoint, then verify deployed `/health` and `/ready`, operator authentication and PAPER safety state. Review protection for read endpoints: the existing mutation key does not make GET dashboards private.
 4. Configure the frontend's HTTPS API origin and deploy SSR. Verify representative dashboard reads, errors and operator controls against the actual API. A local Next build alone does not prove deployed API/database connectivity.
@@ -41,3 +41,15 @@ Free Render services can sleep and lose local files; the API is not the daily sc
 ## Completion criteria
 
 Phase 3 is complete only after verified live API and SSR frontend deployment, reviewed migration and grants, secure scheduler configuration, private raw archival, full-universe catch-up and measured free-tier capacity. Until then do not mark this phase complete or begin the 2–3 month campaign. Historical validation, alerts/restore and consecutive-session rehearsal remain Phases 4–6.
+
+## Proposed free capacity route — not provisioned
+
+Current Supabase data exceeds its documented 500 MB free quota. Read-only table statistics do not demonstrate enough reclaimable space to solve this with routine vacuuming. No data or indexes were deleted.
+
+Neon's official pricing page (https://neon.com/pricing, checked 2026-10-19) currently lists **1 GB PostgreSQL storage**, **5 GB object storage**, **100 CU-hours/month/project**, and **5 GB public transfer/month** on Free with no card required. Its older FAQ still mentions 0.5 GB; verify the actual account entitlement before provisioning. This is a candidate, not a certified capacity solution or an automatic provider switch. Aiven Free currently lists 1 GB disk, so it offers less useful separation of raw archives and database data.
+
+If selected, create a separate free PMS project and copy only the complete dependency closure: the `pms` schema plus every public source table/view/function/extension it reads. Do not move or delete the shared Supabase source. Use a consistent source snapshot and preserve a private dump and hashes. Validate row counts, key/date coverage, view dependencies, constraints, identity sequences and PAPER safety before switching either the API or scheduler. Use a direct/session-compatible PostgreSQL connection because collection/orchestration use session advisory locks; transaction pooling cannot substitute for that guarantee. Test certificates, role grants and source connectivity on the actual runner.
+
+Keep raw source documents and backup dumps in private object storage with retention, checksums and a successful restore rehearsal. Do not put raw XML, database dumps or secrets in public repository files or public Actions artifacts. Object-storage functionality, regional availability and access controls must be verified against the actual account; the pricing allowance alone is not a working archive.
+
+A 682 MB database leaves only about 318 MB nominal headroom under a 1 GB limit. Initial catch-up, indexes, WAL/history accounting, daily growth, compute and network allowances need measurement. Stop below hard limits; do not enable a paid plan or card-backed overages. This candidate requires account/provider selection before any database or financial data is copied.

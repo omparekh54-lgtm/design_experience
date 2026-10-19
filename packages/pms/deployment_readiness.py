@@ -10,6 +10,7 @@ from urllib.parse import urlsplit
 from sqlalchemy import text
 
 from packages.pms.data_integrity import SCHEMA_SQL, schema_findings
+from packages.pms.connection_config import placeholder_password, tls_connect_options
 
 SAFETY_SQL = """select execution_mode,new_orders_enabled,emergency_stop,locked_reason
 from pms.safety_state where singleton=true"""
@@ -147,7 +148,8 @@ def environment_checks(env):
                 u.get_backend_name() == "postgresql"
                 and bool(u.host and u.database and u.username)
                 and u.host.lower() not in {"localhost", "127.0.0.1", "::1"}
-                and u.query.get("sslmode") == "verify-full"
+                and tls_connect_options(u.query, env)["sslmode"] == "verify-full"
+                and not placeholder_password(u.password)
                 and not any(
                     x in raw.upper()
                     for x in (
@@ -163,7 +165,7 @@ def environment_checks(env):
         check(
             "DATABASE_CONFIGURATION",
             "PASS" if database_ok else "BLOCKED",
-            "Cloud PostgreSQL URL with explicit sslmode=verify-full and trusted CA required; connection/password validity checked separately",
+            "Cloud PostgreSQL must use verify-full via URL or deployment policy, with trusted CA; connection/password validity checked separately",
         )
     )
     key = env.get("OPS_API_KEY", "")
