@@ -30,6 +30,9 @@ jobs:
       NEON_PMS_DATABASE_URL: ${{ secrets.NEON_PMS_DATABASE_URL }}
       PMS_NEON_ARCHIVE_JSON: ${{ secrets.PMS_NEON_ARCHIVE_JSON }}
       PMS_DATABASE_VERIFY_FULL: '1'
+      # Binary libpq/OpenSSL may use a different compiled-in CA location.
+      # sslrootcert=system honors this explicit Ubuntu trust bundle.
+      SSL_CERT_FILE: /etc/ssl/certs/ca-certificates.crt
       COPY_MODE: ${{ inputs.mode || 'check' }}
     steps:
       - uses: actions/checkout@v4
@@ -47,7 +50,9 @@ jobs:
           sudo apt-get install -y postgresql-client-17
           echo '/usr/lib/postgresql/17/bin' >> "$GITHUB_PATH"
       - name: Verify connections or perform explicit isolated copy
-        run: python scripts/copy_pms_to_neon.py --mode "$COPY_MODE" --output neon-copy-report.json
+        run: |
+          test -s "$SSL_CERT_FILE"
+          python scripts/copy_pms_to_neon.py --mode "$COPY_MODE" --output neon-copy-report.json
       - name: Save sanitized receipt only
         if: always()
         uses: actions/upload-artifact@v4
