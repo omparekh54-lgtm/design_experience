@@ -242,3 +242,40 @@ def test_sandbox_accepts_idempotency_token_without_crossing_account_mode(monkeyp
         and response.json()["account_mode"] == "PAPER_SANDBOX"
     )
     assert recorded[0].idempotency_key == "ui-test-request"
+
+
+@pytest.mark.parametrize(
+    "capacity,ready", [(8, True), (-1, True), (True, True), (7, "true")]
+)
+def test_invalid_regime_evidence_fails_closed(capacity, ready):
+    row = dict(
+        trade_date=DAY,
+        strategy_version=CFG["version"],
+        band="STRONG",
+        max_open_trades=capacity,
+        smoothed_score=84,
+        inputs={
+            "_module_e_version": CFG["regime"]["implementation_version"],
+            "_data_quality": {"data_ready": ready},
+        },
+    )
+    result = console.normalize_regime(row, DAY, DAY)
+    assert result["score"] == 84
+    assert not result["data_ready"] and result["max_open_trades"] == 0
+
+
+def test_regime_uses_persisted_smoothed_score():
+    row = dict(
+        trade_date=DAY,
+        strategy_version=CFG["version"],
+        band="STRONG",
+        max_open_trades=7,
+        smoothed_score=84,
+        raw_score=81,
+        inputs={
+            "_module_e_version": CFG["regime"]["implementation_version"],
+            "_data_quality": {"data_ready": True},
+        },
+    )
+    result = console.normalize_regime(row, DAY, DAY)
+    assert result["data_ready"] and result["score"] == 84 and result["raw_score"] == 81

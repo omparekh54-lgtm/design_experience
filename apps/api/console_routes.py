@@ -85,6 +85,7 @@ def normalize_regime(row, session, requested):
         and (requested - session).days <= 7
     )
     value.update(
+        score=value.get("smoothed_score"),
         data_ready=ready,
         reason=meta.get("_reason", "Regime coverage is unverified"),
         data_quality=meta.get("_data_quality") or {},
