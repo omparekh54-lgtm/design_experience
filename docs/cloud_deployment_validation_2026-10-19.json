@@ -1,10 +1,10 @@
 {
   "date": "2026-10-19",
   "phase": "3 cloud deployment",
-  "status": "NEON_TLS_VERIFIED_SOURCE_SECRET_PLACEHOLDER_COPY_BLOCKED",
+  "status": "DATABASES_TLS_VERIFIED_ARCHIVE_JSON_INVALID_COPY_BLOCKED",
   "checks": {
     "python_tests": {
-      "passed": 725,
+      "passed": 729,
       "skipped": 2
     },
     "ops_imports": "PASS",
@@ -16,9 +16,10 @@
     "render_public_json_schema": "PASS",
     "render_platform_cli_validation": "NOT_RUN_CLI_UNAVAILABLE",
     "connection_policy_regressions": 19,
-    "ci_run": 39307009777,
+    "ci_run": 39310602409,
     "ci_all_jobs": "PASS",
-    "neon_copy_postgres_rehearsal": "PASS"
+    "neon_copy_postgres_rehearsal": "PASS",
+    "neon_copy_postgres_rehearsal_tests": 18
   },
   "live_api_verified": true,
   "live_frontend_verified": true,
@@ -27,7 +28,7 @@
   "paper_activated": false,
   "campaign_started": false,
   "pending": [
-    "Replace source placeholder secret, configure private archive credential and execute reviewed one-time copy",
+    "Correct PMS_NEON_ARCHIVE_JSON JSON syntax and execute guarded isolated copy",
     "Guarded startup/platform readiness-check adoption",
     "Backup and reviewed migration/grants",
     "Private raw-source archive",
@@ -49,7 +50,7 @@
   "credential_placeholder_fixed_by_user": true,
   "verified_user_deploy": "dep-dbb4bvs9v7es73a5lj1g",
   "github_database_secret_exists": true,
-  "github_database_secret_connection_verified": false,
+  "github_database_secret_connection_verified": true,
   "github_activation_variables_present": false,
   "tls_verification_rollout_verified": true,
   "deployed_revision": "3363104ca0ae394f420fb3c2454c10c687e07998",
@@ -101,12 +102,20 @@
     "backup_created": false,
     "restore_verified": false,
     "destination_github_secret_verified": true,
-    "source_github_secret_error": "DATABASE_PASSWORD_PLACEHOLDER",
+    "source_github_secret_error": null,
     "preflight_run": 39307509790,
     "preflight_revision": "f920a0217719b16b39ffc1c04f5b67c2628cc89d",
-    "preflight_checked_at_utc": "2026-10-19T19:02:04Z",
+    "preflight_checked_at_utc": "2026-10-19T19:18:34Z",
     "copy_runner_implemented": true,
     "target_empty_verified": true,
-    "archive_github_credential_verified": false
+    "archive_github_credential_verified": false,
+    "source_github_secret_verified": true,
+    "copy_attempt_run": 39311170924,
+    "copy_attempt_revision": "5f5f2dd77b55122befeffb5aed18a8847c15ce62",
+    "copy_attempt_checked_at_utc": "2026-10-19T19:28:17Z",
+    "copy_attempt_stage": "archive_configuration",
+    "archive_github_credential_error": "ARCHIVE_CREDENTIAL_JSON_INVALID",
+    "copy_diagnostics_ci": "PASS",
+    "restore_attempted": false
   }
 }
