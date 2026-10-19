@@ -255,3 +255,7 @@ No historical performance pass or completed local run is implied by implementati
 ### Step 12 — Data integrity audit
 
 The read-only audit checks schema, 39 automated source-integrity rules and five independent review requirements, with dated fingerprints, bounded findings, JSON/CSV evidence and saved UI views. See [audit design and deferred usage](docs/data_integrity_audit.md). This does not certify the user’s unexecuted local data audit.
+
+### Step 13 — Security/reliability
+
+Authenticated mutations, transactional safety guards, bounded online connections/workers, sanitized errors, runtime posture and isolated restore-rehearsal tooling are implemented. See [safeguards and recovery runbook](docs/security_reliability.md). Deployment verification and an actual backup restore remain deferred; real broker execution remains disabled.

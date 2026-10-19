@@ -29,14 +29,14 @@ def backfill_shareholding(payload: ShareholdingBackfillRequest):
     try:
         return ReferenceGapIngestor(_engine()).ingest_shareholding(symbol=payload.symbol)
     except Exception as exc:  # admin operation should return an actionable error
-        raise HTTPException(status_code=500, detail=f"shareholding backfill failed: {exc}") from exc
+        raise HTTPException(status_code=500, detail="shareholding backfill failed; inspect source status") from exc
 
 
 @router.post("/surveillance/backfill")
 def backfill_surveillance(payload: SurveillanceBackfillRequest):
-    if (payload.end - payload.start).days > 92:
+    if not 0 <= (payload.end - payload.start).days <= 92:
         raise HTTPException(status_code=400, detail="backfill window must be 93 days or less per request")
     try:
         return ReferenceGapIngestor(_engine()).backfill_surveillance(payload.start, payload.end)
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"surveillance backfill failed: {exc}") from exc
+        raise HTTPException(status_code=500, detail="surveillance backfill failed; inspect source status") from exc

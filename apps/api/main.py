@@ -7,6 +7,10 @@ from functools import lru_cache
 from uuid import UUID
 
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.exceptions import RequestValidationError
+from starlette.exceptions import HTTPException as StarletteHTTPException
+from apps.api.security import APISecurityMiddleware, safe_validation_error, safe_http_error
+from packages.pms.database import online_engine
 from pydantic import BaseModel, Field, ConfigDict
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import make_url
@@ -25,6 +29,10 @@ app = FastAPI(
     version="0.3.0",
     description="Point-in-time research/backtest API. Live trading remains disabled.",
 )
+
+app.add_middleware(APISecurityMiddleware)
+app.add_exception_handler(RequestValidationError,safe_validation_error)
+app.add_exception_handler(StarletteHTTPException,safe_http_error)
 
 
 def _render_safe_database_url(raw: str) -> str:
@@ -66,7 +74,7 @@ def _db_engine():
     url = os.getenv("DATABASE_URL") or os.getenv("PMS_DATABASE_URL")
     if not url:
         raise RuntimeError("DATABASE_URL is not configured")
-    return create_engine(_render_safe_database_url(url), pool_pre_ping=True, connect_args={"options":"-c search_path=pms,public"})
+    return online_engine(_render_safe_database_url(url))
 
 
 def db_engine():
@@ -111,12 +119,14 @@ class FundamentalRequest(BaseModel):
 
 
 class PositionRequest(BaseModel):
-    capital: float
-    entry: float
-    signal_low: float
+    model_config = ConfigDict(allow_inf_nan=False)
+    capital: float = Field(gt=0)
+    entry: float = Field(gt=0)
+    signal_low: float = Field(gt=0)
 
 
 class RegimeRequest(BaseModel):
+    model_config = ConfigDict(allow_inf_nan=False)
     score: float
     nifty_midcap_400_above_200dma: bool
     breadth_above_50dma_pct: float
@@ -125,8 +135,18 @@ class RegimeRequest(BaseModel):
 @app.get("/health")
 def health() -> dict:
     cfg = load_strategy_config()
-    db_status = "configured" if os.getenv("DATABASE_URL") else "not_configured"
+    db_status = "configured" if (os.getenv("DATABASE_URL") or os.getenv("PMS_DATABASE_URL")) else "not_configured"
     return {"status": "ok", "strategy_version": cfg["version"], "live_trading": False, "database": db_status}
+
+
+@app.get("/ready")
+def ready():
+    try:
+        with db_engine().connect() as conn:
+            conn.execute(text("select 1")).scalar_one()
+    except Exception:
+        raise HTTPException(503,"Database unavailable") from None
+    return {"status":"ready","database":"reachable","execution_readiness":False}
 
 
 @app.post("/v1/module-a/evaluate")
@@ -353,5 +373,5 @@ def data_health() -> dict:
                 out[key] = conn.execute(text(sql)).scalar_one_or_none()
         out["status"] = "ok" if not out.get("unresolved_data_quality_errors") else "degraded"
     except Exception as exc:
-        raise HTTPException(status_code=503, detail=f"data health query failed: {exc}") from exc
+        raise HTTPException(status_code=503, detail="data health query unavailable") from exc
     return out

@@ -61,6 +61,7 @@ export const api = {
         count: number;
         runs: Json[];
     }>("/v1/research/walk-forward"),
+    reliability: () => request<Json>("/v1/execution/reliability"),
     executionSafety: () => request<Safety>("/v1/execution/safety"),
     executionReadiness: () => request<Json>("/v1/execution/readiness"),
     latestPaperValidation: () => request<Json>("/v1/execution/paper-validation/latest"),
