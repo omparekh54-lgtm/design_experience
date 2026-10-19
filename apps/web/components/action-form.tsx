@@ -26,6 +26,7 @@ export function ActionForm({ kind, orderId, requestId }: {
             setState(result);
             if (result.ok) {
                 form.reset();
+                setType('MARKET');
                 setToken(crypto.randomUUID());
                 router.refresh();
             }
