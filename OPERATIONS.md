@@ -368,3 +368,7 @@ changes PAPER/live state or safety permissions.
 The user is deferring local commands until the final consolidated setup. See
 [backtesting_matrix.md](docs/backtesting_matrix.md) and
 [local_setup_after_all_phases.md](docs/local_setup_after_all_phases.md).
+
+## Walk-forward research
+
+The V2 design, gates, frozen selection and resume procedure are described in [walk-forward testing](docs/walk_forward_testing.md). No intermediate command is assumed to have run on the user’s PC. Keep using the accumulating consolidated setup checklist. Saved V2 evidence is separate from legacy research-lab walk-forward records; no new migration or safety unlock is required.

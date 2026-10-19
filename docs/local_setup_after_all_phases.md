@@ -11,7 +11,7 @@ This checklist is being maintained while implementation continues. Final ordered
 5. Supply the owner's explicit strategy policies where the original specification did not give numerical defaults. Missing policies continue to block eligibility.
 6. Run read-only module/orchestrator checks, then the required historical calculations.
 7. Run the matrix plan and preflight, repair actual blockers, then run/resume the research matrix and inspect saved evidence.
-8. Run the separate walk-forward/out-of-sample and remaining audit phases when their implementation and data are ready.
+8. Freeze the walk-forward design, run its offline plan and read-only preflight, then run/resume retrospective folds. Review the separate 2025 final-holdout inclusion before consuming it; never retune settings against test results. Continue with integrity/security/acceptance audits.
 9. Start the complete API and frontend and verify connected local views.
 10. Begin the forward PAPER campaign only when its gates and explicit PAPER permissions are satisfied. Its 2–3 months are elapsed trading sessions, not an instant batch command.
 

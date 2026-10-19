@@ -1,0 +1,9 @@
+import {api,display,record,timeIST} from '@/lib/api';
+import {Header,Errors,Panel,Empty,Badge,Notice} from '@/components/ui';
+export const dynamic='force-dynamic';
+export default async function WalkStudies(){
+ const result=await api.walkStudies();
+ return <><Header eyebrow="Frozen training selections" title="Walk-forward testing" description="Independent chronological test periods, with parameters chosen using training evidence only."><a className="link-button secondary" href="/backtests">← All research</a></Header>
+ <Notice title="Development tests and final holdout are separate" tone="neutral">Pre-2025 tests are retrospective. The 2025 holdout requires explicit inclusion in the local runner. Completed computation does not certify performance or prove that a holdout was previously unseen.</Notice>
+ <Errors items={[result.error]}/><section className="section"><Panel title="Isolated walk-forward studies"><div className="table-wrap"><table className="table"><thead><tr><th>Created · IST</th><th>Period</th><th>Status</th><th>Computed folds</th><th>Final holdout included</th><th></th></tr></thead><tbody>{result.data?.runs.map(r=>{const s=record(r.summary);return <tr key={display(r.id)}><td>{timeIST(r.created_at)}</td><td>{display(r.start_date)} → {display(r.end_date)}</td><td><Badge value={s.status}/><small>{display(s.design_scope)}</small></td><td>{display(s.computed_folds)} / {display(s.folds)}</td><td>{s.final_holdout_included===true?'Yes':'No'}</td><td><a className="link" href={`/backtests/walk-forward/${encodeURIComponent(display(r.id))}`}>Inspect folds →</a></td></tr>;})}{!result.data?.runs.length?<tr><td colSpan={6}><Empty title={result.error?'Walk-forward evidence unavailable':'No isolated walk-forward studies yet'} detail="Studies appear after the consolidated local setup and research run. Legacy lab studies remain on the all-research page."/></td></tr>:null}</tbody></table></div></Panel></section></>;
+}
