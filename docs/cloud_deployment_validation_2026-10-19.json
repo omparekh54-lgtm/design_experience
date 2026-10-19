@@ -1,10 +1,10 @@
 {
   "date": "2026-10-19",
   "phase": "3 cloud deployment",
-  "status": "SERVICES_REACHABLE_DATABASE_NOT_READY",
+  "status": "DATABASE_CONNECTION_RESTORED_TLS_ROLLOUT_PENDING_CAPACITY_BLOCKED",
   "checks": {
     "python_tests": {
-      "passed": 693,
+      "passed": 702,
       "skipped": 1
     },
     "ops_imports": "PASS",
@@ -14,7 +14,8 @@
       "reported_vulnerabilities": 0
     },
     "render_public_json_schema": "PASS",
-    "render_platform_cli_validation": "NOT_RUN_CLI_UNAVAILABLE"
+    "render_platform_cli_validation": "NOT_RUN_CLI_UNAVAILABLE",
+    "connection_policy_regressions": 9
   },
   "live_api_verified": false,
   "live_frontend_verified": false,
@@ -23,23 +24,30 @@
   "paper_activated": false,
   "campaign_started": false,
   "pending": [
-    "Secure database connection/TLS diagnosis",
-    "Free-tier database capacity verification",
-    "Startup guard and platform readiness-check adoption",
+    "Verified TLS rollout",
+    "Free-tier database capacity decision and measured headroom",
+    "Guarded startup/platform readiness-check adoption",
     "Backup and reviewed migration/grants",
     "Private raw-source archive",
-    "GitHub Actions secret/activation configuration",
+    "Verify GitHub database secret and activate collection only after prerequisites",
     "Initial full-universe catch-up and capacity measurement"
   ],
   "workspace_confirmed": true,
   "api_url": "https://pms-status-api.onrender.com",
   "frontend_url": "https://pms-status-dashboard.onrender.com",
   "api_health_http": 200,
-  "api_ready_http": 503,
+  "api_ready_http": 200,
   "frontend_http": 200,
-  "api_database_error_type": "OperationalError",
+  "api_database_error_type": null,
   "supabase_plan": "free",
   "database_bytes": 681962643,
   "user_relation_bytes": 669442048,
-  "nonsecret_environment_updates_applied": true
+  "nonsecret_environment_updates_applied": true,
+  "api_reliability_http": 200,
+  "credential_placeholder_fixed_by_user": true,
+  "verified_user_deploy": "dep-dbb4bvs9v7es73a5lj1g",
+  "github_database_secret_exists": true,
+  "github_database_secret_connection_verified": false,
+  "github_activation_variables_present": false,
+  "tls_verification_rollout_verified": false
 }
