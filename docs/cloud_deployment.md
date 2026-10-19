@@ -114,3 +114,17 @@ retry over it, and never clears it automatically. A successful copy still needs
 role/privilege, quota, collection migration and application validation before
 cutover. The separate CI PostgreSQL17 rehearsal uses synthetic data and no
 production credentials; it does not certify that the real data has been copied.
+
+## Hosted transfer preflight result (2026-10-19 19:02 UTC)
+
+PR14 implemented the copy runner; PR15 separated connection checks and credential-free failure categories. Full local Python suite: 725 passed, 2 skipped. All five PR15 CI jobs passed, including the real PostgreSQL17 export/restore rehearsal. PR16 configured the actual Ubuntu CA bundle through SSL_CERT_FILE for binary libpq's system-root verification, without weakening TLS.
+
+Hosted check-only run `39307509790` at revision `f920a0217719b16b39ffc1c04f5b67c2628cc89d` verified the new `NEON_PMS_DATABASE_URL` with certificate and hostname verification and confirmed the isolated target is empty. It then stopped at `source_configuration` with `DATABASE_PASSWORD_PLACEHOLDER`: the existing GitHub `PMS_DATABASE_URL` has a placeholder password. No real backup or data copy occurred; no service or scheduler setting changed.
+
+Remaining one-time configuration in GitHub Actions secrets:
+
+1. Replace source `PMS_DATABASE_URL` with the actual existing Supabase project's **session pooler** connection (port5432), with the real database password properly included. Keep `NEON_PMS_DATABASE_URL` as the validated destination; never substitute Neon for the source.
+2. Set `PMS_NEON_ARCHIVE_JSON` to a JSON object with `access_key_id` and `secret_access_key`. Obtain these privately in Neon **pms-paper → Connect → Storage → Parameters only → Reveal credential**, using AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY respectively. Do not rotate existing credentials or put the API token in the S3 secret field. The current default storage credential has storage read/write scopes. A separately named scoped storage credential is also supported.
+3. Open repository Actions **PMS Neon one-time copy**, select **Run workflow**, branch main, mode **copy**. The existing authorization covers the isolated copy; the connection and private-backup guards run before restore. The connector cannot write Actions secrets or dispatch workflows, so these are one-time dashboard steps, not daily laptop commands. Never paste credentials into chat or public files.
+
+The hosted receipt contains only fixed status codes and connection verification flags. It is not evidence that data has been migrated or that the full cloud deployment/campaign is accepted.
