@@ -148,7 +148,7 @@ def environment_checks(env):
                 u.get_backend_name() == "postgresql"
                 and bool(u.host and u.database and u.username)
                 and u.host.lower() not in {"localhost", "127.0.0.1", "::1"}
-                and tls_connect_options(u.query, env)["sslmode"] == "verify-full"
+                and tls_connect_options(u.query, env, host=u.host or "")["sslmode"] == "verify-full"
                 and not placeholder_password(u.password)
                 and not any(
                     x in raw.upper()
