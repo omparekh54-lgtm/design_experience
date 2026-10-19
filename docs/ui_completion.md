@@ -12,7 +12,7 @@ Formal PAPER activity includes positions, orders, modeled fills, and individual 
 
 The new `/v1/console/*` routes only SELECT data. Overview and signals use persisted rankings; visiting them never starts a full strategy scan. Stock detail evaluates one instrument without persisting it. Readiness GET no longer writes an audit/readiness record. Formal trades exclude sandbox and mixed-account associations. Dates use IST and completed official sessions, while actual snapshot dates remain visible.
 
-Manual sandbox create/process/cancel and operations disable/stop controls require an operator-entered key for each action. No frontend environment credential is automatically forwarded. Create carries a form idempotency key. API authorization and safety checks remain authoritative. The UI cannot clear locks, enable trading, promote modes or submit real-money orders.
+Manual sandbox create/process/cancel and operations disable/stop controls require an operator-entered key for each action. No frontend environment credential is automatically forwarded. Create carries a form idempotency key. API authorization and safety checks remain authoritative. Mutation responses use a same-origin JSON route with origin validation and operator-supplied credentials. Success feedback provides an explicit refresh button to reload saved evidence. Page links use ordinary browser navigation. The UI cannot clear locks, enable trading, promote modes or submit real-money orders.
 
 ## Verification
 

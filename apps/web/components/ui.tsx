@@ -1,4 +1,3 @@
-import Link from "next/link";
 import type { ReactNode } from "react";
 import { display, formatNumber, href, timeIST, todayIST } from "@/lib/api";
 import type { Run } from "@/lib/console-types";
@@ -45,7 +44,7 @@ export function Pager({ path, page, total, limit, values = {} }: {
     total: number;
     limit: number;
     values?: Record<string, string | number | undefined>;
-}) { const pages = Math.max(1, Math.ceil(total / limit)); return <div className="pagination"><span className="subtle">{total ? `${(page - 1) * limit + 1}–${Math.min(page * limit, total)} of ${total.toLocaleString('en-IN')}` : '0 results'} · Page {page} of {pages}</span><div className="toolbar">{page > 1 ? <Link className="link-button secondary" href={href(path, { ...values, page: page - 1 })}>Previous</Link> : null}{page < pages ? <Link className="link-button secondary" href={href(path, { ...values, page: page + 1 })}>Next</Link> : null}</div></div>; }
+}) { const pages = Math.max(1, Math.ceil(total / limit)); return <div className="pagination"><span className="subtle">{total ? `${(page - 1) * limit + 1}–${Math.min(page * limit, total)} of ${total.toLocaleString('en-IN')}` : '0 results'} · Page {page} of {pages}</span><div className="toolbar">{page > 1 ? <a className="link-button secondary" href={href(path, { ...values, page: page - 1 })}>Previous</a> : null}{page < pages ? <a className="link-button secondary" href={href(path, { ...values, page: page + 1 })}>Next</a> : null}</div></div>; }
 export function KeyValue({ label, value }: {
     label: string;
     value: ReactNode;
