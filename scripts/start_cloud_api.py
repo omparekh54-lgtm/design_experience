@@ -34,7 +34,7 @@ def configuration_errors(env):
         query = u.query
         if any(not isinstance(value, str) for value in query.values()):
             raise ValueError("Ambiguous connection settings")
-        tls = tls_connect_options(query, env)
+        tls = tls_connect_options(query, env, host=u.host or "")
         if (
             u.drivername not in {"postgresql", "postgresql+psycopg", "postgresql+psycopg2"}
             or not u.host

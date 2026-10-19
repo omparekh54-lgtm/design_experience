@@ -1,6 +1,7 @@
 """Credential-free connection policy shared by deployment checks and runtime."""
 
 from urllib.parse import unquote
+from pathlib import Path
 
 
 def connection_failure_code(error):
@@ -31,15 +32,21 @@ def placeholder_password(password):
     }
 
 
-def tls_connect_options(query, env):
+def tls_connect_options(query, env, *, host=""):
     mode = query.get("sslmode", env.get("PGSSLMODE", "require"))
     if mode not in {"require", "verify-ca", "verify-full"}:
         raise ValueError("Remote database connections require TLS")
     if env.get("PMS_DATABASE_VERIFY_FULL") == "1":
+        host = host.lower().rstrip(".")
+        supabase = host.endswith(".pooler.supabase.com") or (
+            host.startswith("db.") and host.endswith(".supabase.co")
+        )
+        default_ca = str(Path(__file__).resolve().parent / "certificates" /
+                         "supabase-prod-ca-2021.crt") if supabase else "system"
         # Deployment policy may strengthen URL settings, never weaken them.
         return {
             "sslmode": "verify-full",
             "sslrootcert": query.get("sslrootcert")
-            or env.get("PGSSLROOTCERT") or "system",
+            or env.get("PGSSLROOTCERT") or default_ca,
         }
     return {"sslmode": mode}

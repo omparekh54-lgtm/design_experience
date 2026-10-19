@@ -17,7 +17,7 @@ def online_engine(url, *, worker=False):
         + " -c lock_timeout=5000 -c idle_in_transaction_session_timeout=300000",
     }
     if (parsed.host or "").lower() not in {"localhost", "127.0.0.1", "::1", ""}:
-        args.update(tls_connect_options(parsed.query, os.environ))
+        args.update(tls_connect_options(parsed.query, os.environ, host=parsed.host))
     return create_engine(
         url,
         pool_pre_ping=True,

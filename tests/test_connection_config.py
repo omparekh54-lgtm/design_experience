@@ -42,6 +42,25 @@ def test_cloud_policy_keeps_a_reviewed_custom_ca():
         tls_connect_options({"sslmode": "disable"}, {"PMS_DATABASE_VERIFY_FULL": "1"})
 
 
+@pytest.mark.parametrize("host", ["aws-0-ap-south-1.pooler.supabase.com", "db.example.supabase.co"])
+def test_supabase_uses_official_scoped_ca_and_retains_verification(host):
+    from pathlib import Path
+    import hashlib
+    import ssl
+    result = tls_connect_options({}, {"PMS_DATABASE_VERIFY_FULL": "1"}, host=host)
+    assert result["sslmode"] == "verify-full"
+    ca = Path(result["sslrootcert"])
+    assert ca.is_file() and ca.name == "supabase-prod-ca-2021.crt"
+    assert hashlib.sha256(ssl.PEM_cert_to_DER_cert(ca.read_text())).hexdigest() == \
+        "807025ad50d4ed219d2c9c7d299c004f824eb00cf7f65afef607d07b72e6cafa"
+    context = ssl.create_default_context(cafile=str(ca))
+    assert context.check_hostname and context.verify_mode == ssl.CERT_REQUIRED
+    assert tls_connect_options({}, {"PMS_DATABASE_VERIFY_FULL": "1"},
+                               host=host + ".attacker.example")["sslrootcert"] == "system"
+    assert tls_connect_options({"sslrootcert": "/custom/ca"},
+                               {"PMS_DATABASE_VERIFY_FULL": "1"}, host=host)["sslrootcert"] == "/custom/ca"
+
+
 def test_runtime_applies_cloud_certificate_policy_before_connecting(monkeypatch):
     from packages.pms import database
     seen = []
