@@ -73,3 +73,6 @@ app.include_router(matrix_router)
 
 from apps.api.walk_forward_routes import router as walk_forward_router
 app.include_router(walk_forward_router)
+
+from apps.api.integrity_routes import router as integrity_router
+app.include_router(integrity_router)

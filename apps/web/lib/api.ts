@@ -24,6 +24,8 @@ function query(values: Record<string, string | number | undefined>) { const p = 
 export const api = {
     walkStudies: () => request<{count:number;runs:Json[]}>("/v1/research/walk-forward/studies"),
     walkStudy: (id:string,page=1) => request<{run:Json;folds:Json[];total:number;page:number;limit:number;acceptance:string}>(`/v1/research/walk-forward/studies/${encodeURIComponent(id)}?${query({page})}`),
+    integrityAudits: () => request<{count:number;runs:Json[]}>("/v1/research/data-integrity"),
+    integrityAudit: (id:string,page=1,status="") => request<{run:Json;checks:Json[];total:number;page:number;limit:number;acceptance:string}>(`/v1/research/data-integrity/${encodeURIComponent(id)}?${query({page,status})}`),
     matrices: () => request<{count:number;runs:Json[]}>("/v1/research/matrix"),
     matrix: (id:string,page=1,status="",family="") => request<{run:Json;cells:Json[];total:number;page:number;limit:number;acceptance:string}>(`/v1/research/matrix/${encodeURIComponent(id)}?${query({page,status,family})}`),
     overview: (d?: string) => request<Overview>(`/v1/console/overview?${query({ as_of: d })}`),
