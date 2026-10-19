@@ -6,6 +6,36 @@ on:
   pull_request:
 
 jobs:
+  neon-copy-rehearsal:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    permissions:
+      contents: read
+    services:
+      postgres:
+        image: postgres:17.6
+        env:
+          POSTGRES_PASSWORD: local-test-password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      PMS_COPY_TEST_PG_URL: postgresql://postgres:local-test-password@127.0.0.1:5432/postgres
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install sqlalchemy==2.0.44 psycopg2-binary==2.9.11 pytest==8.4.2
+      - name: Install PostgreSQL17 clients
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-common ca-certificates
+          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
+          sudo apt-get install -y postgresql-client-17
+          echo '/usr/lib/postgresql/17/bin' >> "$GITHUB_PATH"
+      - run: pytest -q tests/test_neon_copy.py tests/test_neon_copy_postgres.py
   cloud-source-probe:
     runs-on: ubuntu-latest
     timeout-minutes: 8
