@@ -1,0 +1,52 @@
+{
+  "date": "2026-10-19",
+  "implementation": "PAPER_EXECUTION_v1.0",
+  "orchestrator": "DAILY_ORCHESTRATOR_v1.1",
+  "validation": {
+    "earlier_local_suite": {
+      "passed": 403,
+      "skipped": 1,
+      "note": "Before runtime restart; final commit is checked separately by repository CI."
+    },
+    "compileall": "passed after runtime restart",
+    "diff_check": "passed",
+    "postgresql_rollback_checks": {
+      "actual_persistence_sql_executed": true,
+      "synthetic_buy_stop_cycle": true,
+      "quantities_conserved": true,
+      "gross_pnl": -4480.0,
+      "total_costs": 511.11,
+      "net_realized_and_cash_delta": -4991.11,
+      "checkpoint_closed": true,
+      "original_risk_event_persisted": true,
+      "rolled_back": true
+    }
+  },
+  "actual_account": {
+    "orders": 0,
+    "trades": 0,
+    "mode": "PAPER",
+    "new_orders_enabled": false,
+    "locked_reason": "reference_data_incomplete"
+  },
+  "coverage": [
+    "Gap sizing, portfolio heat/cash/sector/liquidity/capacity controls",
+    "Signal-day exclusion and three sourced entry sessions",
+    "Conservative same-day entry/stop outcome",
+    "Protective exits despite A/E/new-order blocks or unavailable EMA history",
+    "Partial and next-open exits, fees and cash/P&L conservation",
+    "One-use Leg-2 re-entry through C allocation",
+    "Successful journal/configuration/eligibility admission gates",
+    "Duplicate admission/session replay and conflicting inputs",
+    "Moving-average basis across repeated trade cycles",
+    "Orchestrator settlement ordering, blocked data and admission recovery"
+  ],
+  "limitations": [
+    "No successful production-qualified forward run: data gaps and safety lock remain.",
+    "No external broker order or live-mode activation.",
+    "Daily-bar simulation is not intraday execution evidence.",
+    "Missed sessions, unavailable position bars and split/bonus reconciliation require review.",
+    "Paper campaign and final acceptance remain separate.",
+    "Optional direct PostgreSQL test requires PMS_TEST_DATABASE_URL."
+  ]
+}

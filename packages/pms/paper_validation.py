@@ -36,27 +36,64 @@ class PaperValidationService:
         self.engine = engine
         self.audit = AuditTrail(engine)
 
-    def evaluate(self, started_on: date, ended_on: date, *, criteria: PaperValidationCriteria | None = None, actor: str = "system", persist: bool = True) -> PaperValidationResult:
+    def evaluate(
+        self,
+        started_on: date,
+        ended_on: date,
+        *,
+        criteria: PaperValidationCriteria | None = None,
+        actor: str = "system",
+        persist: bool = True,
+    ) -> PaperValidationResult:
         criteria = criteria or PaperValidationCriteria()
         if ended_on < started_on:
             raise ValueError("ended_on must be on or after started_on")
         with self.engine.connect() as conn:
-            fills = int(conn.execute(text("""
+            fills = int(
+                conn.execute(
+                    text("""
                 select count(*) from broker_fills f join broker_orders o on o.id=f.order_id
-                where o.mode='PAPER' and f.fill_time::date between :s and :e
-            """), {"s": started_on, "e": ended_on}).scalar_one())
-            snapshots = [dict(r) for r in conn.execute(text("""
+                where o.mode='PAPER' and f.raw_response->>'implementation'='PAPER_EXECUTION_v1.0' and (f.fill_time at time zone 'Asia/Kolkata')::date between :s and :e
+            """),
+                    {"s": started_on, "e": ended_on},
+                ).scalar_one()
+            )
+            snapshots = [
+                dict(r)
+                for r in conn.execute(
+                    text("""
                 select snapshot_date,nav from portfolio_snapshots
                 where account_mode='PAPER' and snapshot_date between :s and :e order by snapshot_date
-            """), {"s": started_on, "e": ended_on}).mappings().all()]
-            recon_mismatch = int(conn.execute(text("""
+            """),
+                    {"s": started_on, "e": ended_on},
+                )
+                .mappings()
+                .all()
+            ]
+            recon_mismatch = int(
+                conn.execute(
+                    text("""
                 select count(*) from reconciliation_runs where account_mode='PAPER'
-                and started_at::date between :s and :e and status<>'SUCCESS'
-            """), {"s": started_on, "e": ended_on}).scalar_one())
-            worker_failures = int(conn.execute(text("""
-                select count(*) from worker_runs where started_at::date between :s and :e and status='FAILED'
-            """), {"s": started_on, "e": ended_on}).scalar_one())
-            dq_errors = int(conn.execute(text("select count(*) from data_quality_issues where severity='ERROR' and resolved_at is null")).scalar_one())
+                and (started_at at time zone 'Asia/Kolkata')::date between :s and :e and status not in ('SUCCESS','MATCHED')
+            """),
+                    {"s": started_on, "e": ended_on},
+                ).scalar_one()
+            )
+            worker_failures = int(
+                conn.execute(
+                    text("""
+                select count(*) from worker_runs where (started_at at time zone 'Asia/Kolkata')::date between :s and :e and status in ('FAILED','BLOCKED','INTERRUPTED')
+            """),
+                    {"s": started_on, "e": ended_on},
+                ).scalar_one()
+            )
+            dq_errors = int(
+                conn.execute(
+                    text(
+                        "select count(*) from data_quality_issues where severity='ERROR' and resolved_at is null"
+                    )
+                ).scalar_one()
+            )
         max_dd = 0.0
         peak = None
         for row in snapshots:
@@ -88,9 +125,29 @@ class PaperValidationService:
         run_id = str(uuid4())
         if persist:
             with self.engine.begin() as conn:
-                conn.execute(text("""
+                conn.execute(
+                    text("""
                     insert into paper_validation_runs(id,started_on,ended_on,criteria,metrics,gates,passed,created_by)
                     values (:id,:s,:e,cast(:criteria as jsonb),cast(:metrics as jsonb),cast(:gates as jsonb),:passed,:actor)
-                """), {"id":run_id,"s":started_on,"e":ended_on,"criteria":json.dumps(asdict(criteria)),"metrics":json.dumps(metrics),"gates":json.dumps(gates),"passed":passed,"actor":actor})
-            self.audit.record(AuditEvent("PAPER_VALIDATION_COMPLETED", actor, {"passed":passed,"metrics":metrics,"gates":gates}, entity_type="paper_validation", entity_id=run_id))
+                """),
+                    {
+                        "id": run_id,
+                        "s": started_on,
+                        "e": ended_on,
+                        "criteria": json.dumps(asdict(criteria)),
+                        "metrics": json.dumps(metrics),
+                        "gates": json.dumps(gates),
+                        "passed": passed,
+                        "actor": actor,
+                    },
+                )
+            self.audit.record(
+                AuditEvent(
+                    "PAPER_VALIDATION_COMPLETED",
+                    actor,
+                    {"passed": passed, "metrics": metrics, "gates": gates},
+                    entity_type="paper_validation",
+                    entity_id=run_id,
+                )
+            )
         return PaperValidationResult(run_id, passed, metrics, gates, criteria)

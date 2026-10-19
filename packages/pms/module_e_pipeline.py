@@ -306,6 +306,10 @@ class ModuleEPipeline:
         }
         with self.engine.begin() as conn:
             conn.execute(
+                text("select pg_advisory_xact_lock(hashtext(:account_lock))"),
+                {"account_lock": "pms_formal_paper_account"},
+            )
+            conn.execute(
                 text(
                     "select pg_advisory_xact_lock(hashtext('module_e_regime_and_paper_capacity'))"
                 )

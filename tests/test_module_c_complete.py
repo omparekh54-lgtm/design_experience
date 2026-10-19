@@ -654,3 +654,30 @@ def test_orchestrator_empty_a_universe_blocks_daily_allocation(pipeline, monkeyp
     report = pipeline.generate(D, persist=True, persist_upstream=True)
     assert report.universe_size == 0 and report.selected == 0
     assert "module_a_universe_unavailable" in report.blockers
+
+
+def test_formal_reentry_is_ranked_through_same_c_portfolio_limits(
+    pipeline, monkeypatch
+):
+    old = pipeline.b.evaluate
+    monkeypatch.setattr(
+        pipeline.b,
+        "evaluate",
+        lambda instrument, d, **kw: replace(
+            old(instrument, d, **kw), signal=None, watchlist=None
+        ),
+    )
+    reentry = {**pipeline.test_signal, "reentry_source_trade_id": "verified-parent"}
+    report = pipeline.generate(D, persist=False, reentry_signals={"NSE:S1": reentry})
+    assert (
+        report.selected == 1
+        and report.order_sheet[0]["signal"]["reentry_source_trade_id"]
+        == "verified-parent"
+    )
+    monkeypatch.setattr(pipeline, "_regime_capacity", lambda *a: (0, ()))
+    assert (
+        pipeline.generate(
+            D, persist=False, reentry_signals={"NSE:S1": reentry}
+        ).selected
+        == 0
+    )

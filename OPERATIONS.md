@@ -326,3 +326,25 @@ A configured schedule needs its secret/worker to be active. BLOCKED/FAILED exits
 are nonzero; a successful repeat returns its saved report. No locks are cleared
 or execution modes promoted. See [daily_orchestrator.md](docs/daily_orchestrator.md)
 for recovery, reporting, scheduler prerequisites and validation limitations.
+
+## Formal PAPER lifecycle
+
+Daily orchestration now settles prior PAPER orders/positions **before** data
+preflight and admits fresh C selections after a successful decision journal.
+Protective exits do not depend on new-order permission. There are no external
+broker calls. The interactive app retains `PAPER_SANDBOX`; its simple bar helper
+cannot bypass the formal trade lifecycle.
+
+```powershell
+python scripts/run_market_close.py --check
+python scripts/run_market_close.py
+python scripts/run_paper_execution.py settle
+python scripts/run_paper_execution.py admit
+```
+
+The last two commands mutate fake-money state and accept only today's completed
+exchange session. New entries still require the explicit existing PAPER safety
+permission and complete data; this change does not unlock/enable anything.
+Inspect `paper_execution_status`/`paper_admission` as well as decision status.
+See [paper_execution.md](docs/paper_execution.md) for lifecycle, retry, accounting,
+review-required cases and acceptance limitations.

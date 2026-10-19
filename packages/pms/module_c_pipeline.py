@@ -202,7 +202,9 @@ class ModuleCPipeline:
             self.cfg,
         )
 
-    def generate(self, d: date, *, persist=True, persist_upstream=False):
+    def generate(
+        self, d: date, *, persist=True, persist_upstream=False, reentry_signals=None
+    ):
         if persist_upstream and not persist:
             raise ValueError("Upstream persistence requires persisted Module C output")
         if d > datetime.now(IST).date():
@@ -278,6 +280,10 @@ class ModuleCPipeline:
                 if not b.eligible_universe:
                     row["rejected_reasons"] = list(b.rejected_reasons)
                     continue
+                if reentry_signals and instrument in reentry_signals:
+                    b = replace(
+                        b, signal=dict(reentry_signals[instrument]), watchlist=None
+                    )
                 if not b.signal and not b.watchlist:
                     row["rejected_reasons"] = ["no_live_setup"]
                     continue
@@ -542,6 +548,10 @@ class ModuleCPipeline:
             "lock": "module_c:" + str(report.trade_date) + ":" + self.version,
         }
         with self.engine.begin() as conn:
+            conn.execute(
+                text("select pg_advisory_xact_lock(hashtext(:account_lock))"),
+                {"account_lock": "pms_formal_paper_account"},
+            )
             conn.execute(text("select pg_advisory_xact_lock(hashtext(:lock))"), params)
             # A rerun must clear selections which disappeared from the universe.
             conn.execute(

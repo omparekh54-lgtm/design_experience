@@ -176,7 +176,14 @@ def cancel_if_fundamental_ineligible(position):
 
 
 def process_entry_bar(
-    position, bar_date, open_, high, cfg, *, fundamental_eligible=True
+    position,
+    bar_date,
+    open_,
+    high,
+    cfg,
+    *,
+    fundamental_eligible=True,
+    entry_share_limit=None,
 ):
     _positive(open=open_, high=high)
     if high < open_:
@@ -229,6 +236,16 @@ def process_entry_bar(
         return cancel_entry(position, "entry_window_expired", bar_date)
     if sizing is None:
         return position
+    if entry_share_limit is not None:
+        if (
+            not isinstance(entry_share_limit, int)
+            or isinstance(entry_share_limit, bool)
+            or entry_share_limit < 0
+        ):
+            raise ValueError("Invalid entry share limit")
+        from dataclasses import replace
+
+        sizing = replace(sizing, shares=min(sizing.shares, entry_share_limit))
     if sizing.shares < 1:
         return cancel_entry(position, "position_size_zero", bar_date)
     position.entry = max(open_, position.signal_high)
@@ -301,6 +318,32 @@ def process_next_open(position, bar_date, open_):
     return position
 
 
+def process_protective_stop(position, bar_date, open_, low):
+    """Price-only protection remains available when EMA history is incomplete."""
+    _positive(open=open_, low=low)
+    if low > open_:
+        raise ValueError("Low exceeds open")
+    if position.state not in OPEN_STATES:
+        return position
+    if position.entry is None or position.stop is None or position.filled_on is None:
+        raise ValueError("Filled trade lacks entry/stop/date")
+    if bar_date < position.filled_on:
+        raise ValueError("Stop bar predates fill")
+    if low <= position.stop:
+        # If entry triggers intraday, the earlier open cannot be used as a
+        # fictitious stop fill. Daily-bar ambiguity uses a conservative stop.
+        price = min(open_, position.stop)
+        if bar_date == position.filled_on and open_ < position.entry:
+            price = position.stop
+        return _close(
+            position,
+            bar_date,
+            price,
+            "breakeven_stop" if position.state == TradeState.LEG2_ACTIVE else "stop",
+        )
+    return position
+
+
 def process_position_bar(
     position, bar_date, open_, high, low, close, ema9, previous_ema9, previous_ema21
 ):
@@ -325,18 +368,9 @@ def process_position_bar(
         previous_ema21=previous_ema21,
     ):
         return position
-    if low <= position.stop:
-        # If entry triggers intraday, the earlier open cannot be used as a
-        # fictitious stop fill. Daily-bar ambiguity uses a conservative stop.
-        price = min(open_, position.stop)
-        if bar_date == position.filled_on and open_ < position.entry:
-            price = position.stop
-        return _close(
-            position,
-            bar_date,
-            price,
-            "breakeven_stop" if position.state == TradeState.LEG2_ACTIVE else "stop",
-        )
+    process_protective_stop(position, bar_date, open_, low)
+    if position.state == TradeState.CLOSED:
+        return position
     if position.state == TradeState.FILLED and close > ema9:
         position.leg1_armed = True
         position.state = TradeState.LEG1_ARMED
