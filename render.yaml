@@ -1,0 +1,48 @@
+# Existing free services. GitHub Actions owns collection; do not add a scheduler.
+# Reviewed desired configuration; apply only after credentials/TLS are verified.
+services:
+  - type: web
+    name: pms-status-api
+    runtime: python
+    plan: free
+    repo: https://github.com/omparekh54-lgtm/design_experience
+    branch: main
+    autoDeployTrigger: 'off'
+    buildCommand: pip install -r requirements-ops.txt
+    startCommand: python scripts/start_cloud_api.py
+    healthCheckPath: /ready
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.14
+      - key: APP_ENV
+        value: production
+      - key: EXECUTION_MODE
+        value: PAPER
+      - key: LIVE_TRADING_ENABLED
+        value: 'false'
+      - key: RUN_REFERENCE_GAP_BACKFILL
+        value: '0'
+      - key: PMS_ALLOW_PRIVATE_HTTP
+        value: '0'
+      - key: PMS_CLOUD_COLLECTION_REQUIRED
+        value: '1'
+      - key: DATABASE_URL
+        sync: false
+      - key: OPS_API_KEY
+        generateValue: true
+  - type: web
+    name: pms-status-dashboard
+    runtime: node
+    plan: free
+    repo: https://github.com/omparekh54-lgtm/design_experience
+    branch: main
+    autoDeployTrigger: 'off'
+    buildCommand: cd apps/web && npm ci --no-audit --no-fund && npm run build
+    startCommand: cd apps/web && npm run start -- --hostname 0.0.0.0 --port $PORT
+    envVars:
+      - key: NODE_VERSION
+        value: '22'
+      - key: NEXT_TELEMETRY_DISABLED
+        value: '1'
+      - key: PMS_API_BASE_URL
+        value: https://pms-status-api.onrender.com
