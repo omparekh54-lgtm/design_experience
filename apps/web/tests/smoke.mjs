@@ -37,7 +37,7 @@ await new Promise(r=>server.listen(8019,'127.0.0.1',r));
 const app=spawn(process.execPath,['node_modules/next/dist/bin/next','start','-p','3019'],{stdio:['ignore','pipe','pipe'],env:{...process.env,PMS_API_BASE_URL:'http://127.0.0.1:8019',OPS_API_KEY:'server-key-must-never-be-forwarded'}});let output='';app.stdout.on('data',c=>output+=c);app.stderr.on('data',c=>output+=c);
 let browser;
 try{for(let i=0;i<90;i++){try{await fetch('http://127.0.0.1:3019');break;}catch{if(i===89)throw new Error(output);await new Promise(r=>setTimeout(r,1000));}}
-browser=await chromium.launch({headless:true});const context=await browser.newContext();context.setDefaultTimeout(15000);context.setDefaultNavigationTimeout(15000);const page=await context.newPage();page.on('pageerror',e=>errors.push(e.message));page.on('response',r=>{if(r.request().method()==='POST')requests.push({at:Date.now(),browserPost:r.url(),status:r.status()});});
+browser=await chromium.launch({headless:true});const context=await browser.newContext();context.setDefaultTimeout(15000);context.setDefaultNavigationTimeout(15000);const page=await context.newPage();page.on('pageerror',e=>errors.push({url:page.url(),message:e.message}));page.on('response',r=>{if(r.request().method()==='POST')requests.push({at:Date.now(),browserPost:r.url(),status:r.status()});});
 async function visit(url){const response=await page.goto(url);await page.locator('main h1').waitFor();await page.waitForLoadState('networkidle');return response;}
 
 const routes=['/','/signals','/paper-trading','/regime','/research','/research/NSE%3ATESTONLY','/backtests','/data-health','/operations','/paper-trading/sandbox',`/paper-trading/${tradeId}`,`/backtests/${tradeId}`];
