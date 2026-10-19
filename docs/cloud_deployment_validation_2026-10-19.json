@@ -1,10 +1,10 @@
 {
   "date": "2026-10-19",
   "phase": "3 cloud deployment",
-  "status": "DATABASE_CONNECTION_RESTORED_TLS_ROLLOUT_PENDING_CAPACITY_BLOCKED",
+  "status": "VERIFIED_TLS_DEPLOYED_CAPACITY_BLOCKED",
   "checks": {
     "python_tests": {
-      "passed": 702,
+      "passed": 712,
       "skipped": 1
     },
     "ops_imports": "PASS",
@@ -15,16 +15,17 @@
     },
     "render_public_json_schema": "PASS",
     "render_platform_cli_validation": "NOT_RUN_CLI_UNAVAILABLE",
-    "connection_policy_regressions": 9
+    "connection_policy_regressions": 19,
+    "ci_run": 39302310843,
+    "ci_all_jobs": "PASS"
   },
-  "live_api_verified": false,
-  "live_frontend_verified": false,
+  "live_api_verified": true,
+  "live_frontend_verified": true,
   "migration_010_applied": false,
   "collection_activated": false,
   "paper_activated": false,
   "campaign_started": false,
   "pending": [
-    "Verified TLS rollout",
     "Free-tier database capacity decision and measured headroom",
     "Guarded startup/platform readiness-check adoption",
     "Backup and reviewed migration/grants",
@@ -49,5 +50,26 @@
   "github_database_secret_exists": true,
   "github_database_secret_connection_verified": false,
   "github_activation_variables_present": false,
-  "tls_verification_rollout_verified": false
+  "tls_verification_rollout_verified": true,
+  "deployed_revision": "3363104ca0ae394f420fb3c2454c10c687e07998",
+  "api_deploy": "dep-dbb622c9v7es73afps10",
+  "frontend_deploy": "dep-dbb622c9v7es73afpsag",
+  "verified_at_utc": "2026-10-19T18:29:20Z",
+  "verified_api_instance": "srv-db9r6b6q1p3s739a40e0-pwgkk",
+  "execution_readiness": false,
+  "worker_evidence": "NO_EVIDENCE",
+  "backup_restore_evidence": "NOT_VERIFIED",
+  "acceptance": "NOT_CERTIFIED",
+  "tls_rollout_history": [
+    {
+      "revision": "22699ce151e2774af06bce8d50c92e7db5ae8433",
+      "api_ready_http": 503,
+      "result": "SYSTEM_CA_ONLY_FAILED"
+    },
+    {
+      "revision": "3363104ca0ae394f420fb3c2454c10c687e07998",
+      "api_ready_http": 200,
+      "result": "OFFICIAL_SUPABASE_ROOT_VERIFIED_FULL"
+    }
+  ]
 }
