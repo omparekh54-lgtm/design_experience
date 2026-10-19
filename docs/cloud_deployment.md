@@ -174,3 +174,29 @@ codes and never echo their input. A `FORMAT_VALID` result confirms only syntax,
 pinned destination and connection options; it does not prove authentication or
 storage access. Correct only the specific secrets identified by the hosted
 receipt. Database URL values and storage JSON belong in different secrets.
+
+
+## Independent hosted configuration checks (2026-10-19 19:37 UTC)
+
+PR20 passed all five CI jobs (`39312281024`), including 21 tests in the real
+PostgreSQL copy-rehearsal job; local tests passed 732 with 2 integration skips.
+Check-only run `39312565267`, revision
+`5c33bc192775c61a1eba89a87dea1a62d485fc1a`, reported:
+
+| Secret | Current format result |
+| --- | --- |
+| NEON_PMS_DATABASE_URL | DESTINATION_URL_INVALID |
+| PMS_DATABASE_URL | FORMAT_VALID |
+| PMS_NEON_ARCHIVE_JSON | ARCHIVE_CREDENTIAL_JSON_INVALID |
+
+Both malformed secrets need correction. The destination secret must contain
+only the direct Postgres URI from Neon Connect (pms database, pms_owner role,
+pooling disabled). It must not contain JSON, a shell assignment or surrounding
+quotes. The archive secret must contain only a valid JSON object with the two
+Storage parameter strings described above, using ordinary double quotes and
+no Markdown fences or trailing comma. Keep the source database secret unchanged.
+Only formats were checked in this run: it stopped before database connections.
+The prior successful connection checks are historical evidence. A separate
+read-only Neon check after the retry still found 0 application objects and
+7,520,256 database bytes; database-copies/ contained no objects. No data copy,
+service cutover, migration or campaign has happened.
