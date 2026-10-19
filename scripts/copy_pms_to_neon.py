@@ -60,7 +60,9 @@ def connection_url(raw, *, destination=False):
     require(bool(raw), 'DESTINATION_URL_MISSING' if destination else 'SOURCE_URL_MISSING')
     u = make_url(raw)
     require(u.drivername in {'postgresql', 'postgresql+psycopg', 'postgresql+psycopg2'}, 'POSTGRES_URL_REQUIRED')
-    require(u.host and u.username and u.password and u.database and not placeholder_password(u.password), 'CONNECTION_CONFIGURATION')
+    for name, value in [('HOST', u.host), ('USERNAME', u.username), ('PASSWORD', u.password), ('DATABASE', u.database)]:
+        require(bool(value), 'DATABASE_' + name + '_MISSING')
+    require(not placeholder_password(u.password), 'DATABASE_PASSWORD_PLACEHOLDER')
     require(all(isinstance(v, str) for v in u.query.values()), 'AMBIGUOUS_CONNECTION_OPTIONS')
     # Never guess a Supabase pooler region or change credentials from the saved secret.
     if destination:
@@ -265,20 +267,24 @@ def copy(source, target, src, dst, report):
 
 
 def run(mode, report):
-    report['stage'] = 'source_configuration'
-    source = connection_url(os.environ.get('PMS_DATABASE_URL', ''))
     report['stage'] = 'destination_configuration'
     target = connection_url(os.environ.get('NEON_PMS_DATABASE_URL', ''), destination=True)
-    src, dst = online_engine(source, worker=True), online_engine(target, worker=True)
+    src, dst = None, online_engine(target, worker=True)
     try:
-        for label, engine in [('destination', dst), ('source', src)]:
-            report['stage'] = label + '_connection'
-            with engine.connect() as c:
-                version = int(c.execute(text("SELECT current_setting('server_version_num')")).scalar_one())
-                require(version // 10000 == 17, 'POSTGRES_MAJOR_VERSION_MISMATCH')
-                report[label + '_connection_verified_full'] = True
-                if label == 'destination':
-                    require(c.execute(text(OBJECTS_SQL)).scalar_one() == 0, 'DESTINATION_NOT_EMPTY')
+        report['stage'] = 'destination_connection'
+        with dst.connect() as c:
+            version = int(c.execute(text("SELECT current_setting('server_version_num')")).scalar_one())
+            require(version // 10000 == 17, 'POSTGRES_MAJOR_VERSION_MISMATCH')
+            require(c.execute(text(OBJECTS_SQL)).scalar_one() == 0, 'DESTINATION_NOT_EMPTY')
+            report['destination_connection_verified_full'] = True
+        report['stage'] = 'source_configuration'
+        source = connection_url(os.environ.get('PMS_DATABASE_URL', ''))
+        src = online_engine(source, worker=True)
+        report['stage'] = 'source_connection'
+        with src.connect() as c:
+            version = int(c.execute(text("SELECT current_setting('server_version_num')")).scalar_one())
+            require(version // 10000 == 17, 'POSTGRES_MAJOR_VERSION_MISMATCH')
+            report['source_connection_verified_full'] = True
         report['stage'] = 'source_dependencies'
         with src.connect().execution_options(isolation_level='REPEATABLE READ') as c:
             with c.begin():
@@ -295,7 +301,9 @@ def run(mode, report):
             report['stage'] = 'copy_complete'
         return report
     finally:
-        src.dispose(); dst.dispose()
+        if src is not None:
+            src.dispose()
+        dst.dispose()
 
 
 def main():
