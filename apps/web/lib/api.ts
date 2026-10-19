@@ -22,6 +22,8 @@ export const request = cache(async <T,>(path: string): Promise<ApiResult<T>> => 
 function query(values: Record<string, string | number | undefined>) { const p = new URLSearchParams(); Object.entries(values).forEach(([k, v]) => { if (v !== undefined && v !== "")
     p.set(k, String(v)); }); return p.toString(); }
 export const api = {
+    matrices: () => request<{count:number;runs:Json[]}>("/v1/research/matrix"),
+    matrix: (id:string,page=1,status="",family="") => request<{run:Json;cells:Json[];total:number;page:number;limit:number;acceptance:string}>(`/v1/research/matrix/${encodeURIComponent(id)}?${query({page,status,family})}`),
     overview: (d?: string) => request<Overview>(`/v1/console/overview?${query({ as_of: d })}`),
     signals: (d?: string, q?: string, view = "all", page = 1) => request<Signals>(`/v1/console/signals?${query({ as_of: d, q, view, page })}`),
     universe: (d?: string, q?: string, page = 1) => request<Universe>(`/v1/console/universe?${query({ as_of: d, q, page })}`),
@@ -46,7 +48,7 @@ export const api = {
     researchRuns: () => request<{
         count: number;
         runs: Json[];
-    }>("/v1/research/runs"),
+    }>("/v1/research/runs?exclude_matrix=true"),
     stress: () => request<{
         count: number;
         runs: Json[];

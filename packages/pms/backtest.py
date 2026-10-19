@@ -26,6 +26,7 @@ from packages.pms.trade_engine import (
 
 
 class EventType(str, Enum):
+    CORPORATE_ACTION = "CORPORATE_ACTION"
     MARKET_OPEN = "MARKET_OPEN"
     BAR = "BAR"
     SIGNAL = "SIGNAL"
@@ -129,6 +130,7 @@ class EventDrivenBacktester:
         self.open_marks = {}
         self.seen_signals = set()
         self._ran = False
+        self.entry_guard = None
 
     def _active_count(self):
         return sum(
@@ -247,12 +249,35 @@ class EventDrivenBacktester:
             else:
                 hi = mid - 1
         qty = lo
+        if self.entry_guard is not None and qty:
+            allowed = self.entry_guard(position, bar, qty)
+            if (
+                isinstance(allowed, bool)
+                or not isinstance(allowed, int)
+                or not 0 <= allowed <= qty
+            ):
+                raise ValueError("Invalid research entry guard quantity")
+            qty = allowed
         if qty < 1:
             position.state = TradeState.PENDING_ENTRY
             position.entry = position.stop = position.filled_on = None
             position.shares = position.remaining_shares = 0
             position.history.pop()  # no executed fill occurred
-            cancel_entry(position, "insufficient_cash", bar.trade_date)
+            reason = (
+                "research_portfolio_guard"
+                if lo > 0 and self.entry_guard is not None
+                else "insufficient_cash"
+            )
+            cancel_entry(position, reason, bar.trade_date)
+            if reason == "research_portfolio_guard":
+                self.events.append(
+                    BacktestEvent(
+                        EventType.POSITION_STATE,
+                        bar.trade_date,
+                        position.instrument_id,
+                        {"to": "CANCELLED", "reason": reason},
+                    )
+                )
             return
         position.shares = position.remaining_shares = qty
         position.history[-1]["shares"] = qty
@@ -264,6 +289,13 @@ class EventDrivenBacktester:
             qty=qty,
             reason="entry",
         )
+
+        self.events[-1].payload.update(
+            initial_stop=position.stop, initial_risk=(price - position.stop) * qty
+        )
+        if self.cfg["backtest"].get("research_leg1_always_armed", False):
+            position.leg1_armed = True
+            position.state = TradeState.LEG1_ARMED
 
     def _apply_bar(self, position, bar):
         before_state = position.state
@@ -311,6 +343,12 @@ class EventDrivenBacktester:
         trading_sessions=None,
         signal_eligibility_provider=None,
         close_capacity_provider=None,
+        bar_provider=None,
+        session_bounds=None,
+        on_session_open=None,
+        on_session_close=None,
+        entry_guard=None,
+        allow_live_signals=False,
     ):
         if self._ran:
             raise ValueError("Use a fresh backtester for each run")
@@ -339,13 +377,39 @@ class EventDrivenBacktester:
         )
         if not set(bars_by_date).issubset(self.sessions):
             raise ValueError("Market bar outside exchange calendar")
-        self._ran = True
-        for d in (
-            day
-            for day in self.sessions
-            if bars_by_date and min(bars_by_date) <= day <= max(bars_by_date)
+        self.entry_guard = entry_guard
+        if bar_provider is not None and (
+            not trading_sessions or session_bounds is None
         ):
+            raise ValueError("Lazy research bars require explicit sessions and bounds")
+        self._ran = True
+        run_days = (
+            [d for d in self.sessions if session_bounds[0] <= d <= session_bounds[1]]
+            if bar_provider
+            else (
+                day
+                for day in self.sessions
+                if bars_by_date and min(bars_by_date) <= day <= max(bars_by_date)
+            )
+        )
+        for d in run_days:
             daily = bars_by_date.get(d, {})
+            if bar_provider is not None:
+                daily = {}
+                for bar in bar_provider(d):
+                    validate_ohlc(bar.open, bar.high, bar.low, bar.close)
+                    if (
+                        bar.trade_date != d
+                        or bar.instrument_id in daily
+                        or any(
+                            not math.isfinite(float(v)) or v <= 0
+                            for v in (bar.ema9, bar.previous_ema9, bar.previous_ema21)
+                        )
+                    ):
+                        raise ValueError("Invalid lazy research bar")
+                    daily[bar.instrument_id] = bar
+            if on_session_open is not None:
+                on_session_open(d, self, daily)
             self.open_marks = {i: b.open for i, b in daily.items()}
             self.events.append(BacktestEvent(EventType.MARKET_OPEN, d))
             capacity = max(
@@ -385,6 +449,9 @@ class EventDrivenBacktester:
             for p in self.positions.values():
                 expire_entry_at_close(p, d, self.cfg)
             self.events.append(BacktestEvent(EventType.MARKET_CLOSE, d))
+            self.last_prices.update({i: b.close for i, b in daily.items()})
+            if on_session_close is not None:
+                on_session_close(d, self)
             close_capacity = max(
                 0,
                 min(
@@ -393,7 +460,17 @@ class EventDrivenBacktester:
                 ),
             )
             for signal in signal_provider(d):
-                if signal.signal_date != d:
+                if allow_live_signals and (
+                    signal.signal_date > d
+                    or d not in self.sessions
+                    or d
+                    > (
+                        self._entry_sessions(signal.signal_date)
+                        or (signal.signal_date,)
+                    )[-1]
+                ):
+                    raise ValueError("Future or expired live research signal")
+                if not allow_live_signals and signal.signal_date != d:
                     raise ValueError(
                         "Signal provider must emit newly formed close-date signals only"
                     )

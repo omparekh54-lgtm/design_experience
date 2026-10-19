@@ -314,9 +314,9 @@ def backtest_detail(run_id: UUID) -> dict:
 
 
 @app.get("/v1/research/runs")
-def research_runs(limit: int = Query(50, ge=1, le=500)) -> dict:
+def research_runs(limit: int = Query(50, ge=1, le=500), exclude_matrix: bool = False) -> dict:
     with db_engine().connect() as conn:
-        rows = conn.execute(text("select * from research_runs order by created_at desc limit :limit"), {"limit": limit}).mappings().all()
+        rows = conn.execute(text("select * from research_runs where (:exclude=false or run_type<>'BACKTEST_MATRIX') order by created_at desc limit :limit"), {"limit": limit, "exclude":exclude_matrix}).mappings().all()
     return {"count": len(rows), "runs": [dict(r) for r in rows]}
 
 

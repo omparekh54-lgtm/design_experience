@@ -164,6 +164,9 @@ class ModuleBPipeline:
             for idx, row in adjusted.iterrows()
         ]
 
+    def features(self, candles):
+        return compute_features(candles)
+
     @staticmethod
     def _source_priority(source):
         value = str(source).casefold()
@@ -325,7 +328,7 @@ class ModuleBPipeline:
         ):
             rejected.append("price_history_missing_sessions")
 
-        features = compute_features(candles).data
+        features = self.features(candles).data
         latest = features.iloc[-1]
         required = (
             "close",
