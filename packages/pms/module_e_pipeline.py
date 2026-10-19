@@ -39,9 +39,9 @@ class ModuleEPipeline:
             return [
                 dict(r)
                 for r in conn.execute(
-                    text("""select trade_date,close from module_e_benchmark_bars
-                where benchmark_code=:code and source='NSE_HISTORICAL_OR' and trade_date between :start and :end
-                order by trade_date"""),
+                    text("""select distinct on(trade_date) trade_date,close from module_e_benchmark_bars
+                where benchmark_code=:code and source in ('NSE_HISTORICAL_OR','NSE_DAILY_INDEX') and trade_date between :start and :end
+                order by trade_date,source desc"""),
                     {"code": code, "start": start, "end": expected},
                 )
                 .mappings()
@@ -212,7 +212,7 @@ class ModuleEPipeline:
             reasons.append(str(exc))
         quality["benchmarks"] = {
             "data_ready": bool(benchmark),
-            "source": "NSE_HISTORICAL_OR",
+            "source": "OFFICIAL_NSE_HISTORY_OR_DAILY_INDEX",
             "index_code": self.MIDSMALL_CODE,
             "values": benchmark,
         }

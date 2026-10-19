@@ -40,9 +40,9 @@ COMPONENTS = [
     },
     {
         "name": "data_collector",
-        "entrypoint": None,
-        "command": None,
-        "runtime": "Cloud source access and complete ingest chain unverified",
+        "entrypoint": "scripts/run_cloud_collection.py",
+        "command": "python scripts/run_cloud_collection.py --run",
+        "runtime": "Official bulk sources plus bounded incremental XML processing; full-universe deployment verification required",
         "storage": "Versioned source evidence and PostgreSQL",
     },
 ]
@@ -224,6 +224,8 @@ def environment_checks(env):
             "Cloud operator transport must use HTTPS",
         )
     )
+    result.append(check('CLOUD_ENTRY_GATE','PASS' if env.get('PMS_CLOUD_COLLECTION_REQUIRED')=='1' else 'BLOCKED',
+                        'Set PMS_CLOUD_COLLECTION_REQUIRED=1 on every cloud API/worker/daily runner; missing or partial source journals block new PAPER entries'))
     return result
 
 
@@ -354,8 +356,8 @@ def assess(root, cfg, env, *, plan=False, db_checks=None):
         ),
         check(
             "SCHEDULER_COVERAGE",
-            "BLOCKED",
-            "Existing 19:00/19:15/19:30 IST workflow refreshes benchmarks, not the full ingest chain. Secret availability, schedule delivery and missed-run detection are unverified. Select one scheduler owner; Celery is optional for scheduled batch architecture",
+            "REVIEW_REQUIRED",
+            "Cloud workflow implements the full collection chain with 19:07/19:27/19:47 IST attempts and separately enabled PAPER. Activation, secret availability, schedule delivery, initial backlog completion and missed-run monitoring remain unverified. Select one scheduler owner",
         ),
     ]
     return dict(

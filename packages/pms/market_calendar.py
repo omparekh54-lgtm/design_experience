@@ -58,7 +58,7 @@ class MarketCalendar:
             sessions = (
                 conn.execute(
                     text(
-                        "select distinct trade_date from module_e_benchmark_bars where benchmark_code='NIFTY50' and source='NSE_HISTORICAL_OR' order by trade_date"
+                        "select distinct trade_date from module_e_benchmark_bars where benchmark_code='NIFTY50' and source in ('NSE_HISTORICAL_OR','NSE_DAILY_INDEX') order by trade_date"
                     )
                 )
                 .scalars()

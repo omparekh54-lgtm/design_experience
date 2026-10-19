@@ -1,73 +1,74 @@
-name: PMS Market Close (PAPER)
+name: PMS Cloud Collection and PAPER
 
 on:
   schedule:
-    # 19:00, 19:15 and 19:30 IST. The sourced calendar decides sessions, including special weekends.
-    - cron: '30,45 13 * * *'
-    - cron: '0 14 * * *'
+    # 19:07, 19:27 and 19:47 IST; verified calendar and publication checks in Python.
+    - cron: '37,57 13 * * *'
+    - cron: '17 14 * * *'
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths:
-      - '.github/workflows/pms-market-close.yml'
-      - 'run_benchmark_ingest.py'
-      - 'scripts/ingest_module_e_benchmarks.py'
-      - 'scripts/run_market_close.py'
-      - 'packages/pms/daily_orchestrator.py'
 
 concurrency:
   group: pms-market-close-paper
   cancel-in-progress: false
 
 jobs:
-  market-close:
+  collect-and-paper:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:
       contents: read
     env:
       DATABASE_URL: ${{ secrets.PMS_DATABASE_URL }}
-      SUPABASE_PROJECT_REF: cxrkicqggsuylirzohqw
+      COLLECTION_ENABLED: ${{ vars.PMS_CLOUD_COLLECTION_ENABLED }}
+      PAPER_ENABLED: ${{ vars.PMS_CLOUD_PAPER_ENABLED }}
+      PMS_CLOUD_COLLECTION_REQUIRED: '1'
       EXECUTION_MODE: PAPER
+      LIVE_TRADING_ENABLED: 'false'
     steps:
       - uses: actions/checkout@v4
-
-      - name: Check database secret
+      - name: Check activation and secret
         id: guard
         shell: bash
         run: |
-          if [ -z "$DATABASE_URL" ]; then
-            echo "PMS_DATABASE_URL is not configured; skipping safely."
-            echo "skip=true" >> "$GITHUB_OUTPUT"
+          if [ "$COLLECTION_ENABLED" != "true" ]; then
+            echo '::warning::Cloud collection is DISABLED pending deployment configuration; campaign has not started.'
+            echo 'enabled=false' >> "$GITHUB_OUTPUT"
+          elif [ -z "$DATABASE_URL" ]; then
+            echo '::error::Enabled collection has no PMS_DATABASE_URL secret.'
+            exit 1
           else
-            echo "skip=false" >> "$GITHUB_OUTPUT"
+            echo 'enabled=true' >> "$GITHUB_OUTPUT"
           fi
-
       - uses: actions/setup-python@v5
-        if: steps.guard.outputs.skip != 'true'
+        if: steps.guard.outputs.enabled == 'true'
         with:
           python-version: '3.12'
-          cache: 'pip'
-
-      - name: Install dependencies
-        if: steps.guard.outputs.skip != 'true'
+          cache: pip
+      - name: Install collection dependencies
+        if: steps.guard.outputs.enabled == 'true'
+        run: pip install -r requirements.txt
+      - name: Collect and validate official sources
+        if: steps.guard.outputs.enabled == 'true'
+        id: collect
+        continue-on-error: true
+        run: python scripts/run_cloud_collection.py --run --output collection-report.json
+      - name: Run separately authorized PAPER lifecycle
+        # Settlement gets a chance even if collection fails; the fresh-collection gate blocks entries.
+        if: always() && steps.guard.outputs.enabled == 'true' && steps.collect.outcome != 'skipped' && env.PAPER_ENABLED == 'true'
+        shell: bash
         run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-
-      - name: Refresh official Module E benchmarks
-        if: steps.guard.outputs.skip != 'true'
-        run: python run_benchmark_ingest.py
-
-      - name: Run after-market-close PAPER pipeline
-        if: steps.guard.outputs.skip != 'true'
-        run: python scripts/run_market_close.py | tee daily-run.json
-
-      - name: Save daily run report
-        if: always() && steps.guard.outputs.skip != 'true'
+          set -o pipefail
+          python scripts/run_market_close.py | tee daily-run.json
+      - name: Preserve collection failure as workflow failure
+        if: always() && steps.guard.outputs.enabled == 'true' && steps.collect.outcome != 'success'
+        run: exit 1
+      - name: Save reports (raw XML requires separate private archival)
+        if: always() && steps.guard.outputs.enabled == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: pms-daily-run-${{ github.run_id }}
-          path: daily-run.json
-          if-no-files-found: ignore
-          retention-days: 14
+          name: pms-cloud-run-${{ github.run_id }}
+          path: |
+            collection-report.json
+            daily-run.json
+          if-no-files-found: warn
+          retention-days: 90
