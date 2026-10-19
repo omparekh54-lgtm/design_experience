@@ -265,17 +265,21 @@ def copy(source, target, src, dst, report):
 
 
 def run(mode, report):
+    report['stage'] = 'source_configuration'
     source = connection_url(os.environ.get('PMS_DATABASE_URL', ''))
+    report['stage'] = 'destination_configuration'
     target = connection_url(os.environ.get('NEON_PMS_DATABASE_URL', ''), destination=True)
     src, dst = online_engine(source, worker=True), online_engine(target, worker=True)
     try:
-        for label, engine in [('source', src), ('destination', dst)]:
+        for label, engine in [('destination', dst), ('source', src)]:
+            report['stage'] = label + '_connection'
             with engine.connect() as c:
                 version = int(c.execute(text("SELECT current_setting('server_version_num')")).scalar_one())
                 require(version // 10000 == 17, 'POSTGRES_MAJOR_VERSION_MISMATCH')
                 report[label + '_connection_verified_full'] = True
                 if label == 'destination':
                     require(c.execute(text(OBJECTS_SQL)).scalar_one() == 0, 'DESTINATION_NOT_EMPTY')
+        report['stage'] = 'source_dependencies'
         with src.connect().execution_options(isolation_level='REPEATABLE READ') as c:
             with c.begin():
                 c.execute(text('SET TRANSACTION READ ONLY'))
@@ -284,8 +288,11 @@ def run(mode, report):
                 report['source_dependency_bytes'] = sum(r['bytes'] for r in rows)
         report['private_archive_credential_present'] = bool(os.getenv('PMS_NEON_ARCHIVE_JSON'))
         report['status'] = 'CONNECTIONS_VERIFIED_COPY_PENDING'
+        report['stage'] = 'check_complete'
         if mode == 'copy':
+            report['stage'] = 'private_backup_and_copy'
             copy(source, target, src, dst, report)
+            report['stage'] = 'copy_complete'
         return report
     finally:
         src.dispose(); dst.dispose()
