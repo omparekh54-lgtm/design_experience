@@ -348,3 +348,13 @@ permission and complete data; this change does not unlock/enable anything.
 Inspect `paper_execution_status`/`paper_admission` as well as decision status.
 See [paper_execution.md](docs/paper_execution.md) for lifecycle, retry, accounting,
 review-required cases and acceptance limitations.
+
+## PMS operator console
+
+Run the complete API with `uvicorn apps.api.main_exec:app`, then configure
+`apps/web/.env.local` with `PMS_API_BASE_URL` and start the Next.js frontend.
+The private API origin takes precedence over the public compatibility fallback.
+Formal PAPER activity and manual PAPER_SANDBOX orders have separate pages.
+Each mutation requires an operator-entered API key; server-held keys are not
+forwarded for visitors. GET navigation never creates orders, fills or readiness
+records. See [UI completion](docs/ui_completion.md) and the frontend README.

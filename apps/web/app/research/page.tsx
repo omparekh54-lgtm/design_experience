@@ -1,40 +1,10 @@
-import Link from "next/link";
-import { api, formatNumber } from "@/lib/api";
-
-export const dynamic = "force-dynamic";
-
-export default async function ResearchHubPage() {
-  const today = new Date().toISOString().slice(0, 10);
-  const [rankings, runs, stress, walk] = await Promise.all([
-    api.moduleC(today, true), api.researchRuns(), api.stress(), api.walkForward(),
-  ]);
-  const selected = rankings.data?.rankings || [];
-  const researchRuns = runs.data?.runs || [];
-  const stressRuns = stress.data?.runs || [];
-  const walkRuns = walk.data?.runs || [];
-
-  return (
-    <>
-      <div className="page-title"><div><h2>Research Lab</h2><div className="subtle">Strategy validation, stock research and out-of-sample evidence.</div></div><span className="pill">Point-in-time research stack</span></div>
-      <div className="grid grid-4">
-        <div className="card"><div className="metric-label">Selected today</div><div className="metric-value">{selected.length}</div></div>
-        <div className="card"><div className="metric-label">Research runs</div><div className="metric-value">{researchRuns.length}</div></div>
-        <div className="card"><div className="metric-label">Stress runs</div><div className="metric-value">{stressRuns.length}</div></div>
-        <div className="card"><div className="metric-label">Walk-forward runs</div><div className="metric-value">{walkRuns.length}</div></div>
-      </div>
-
-      <section className="section">
-        <div className="section-head"><h3>Selected stocks to inspect</h3><span className="subtle">Open a stock to see Module A + B evidence.</span></div>
-        <div className="table-wrap"><table className="table"><thead><tr><th>Instrument</th><th>Module C score</th><th>Components</th><th></th></tr></thead><tbody>
-          {selected.map((row:any)=>{const instrument=`${row.exchange||"NSE"}:${row.symbol}`;return <tr key={instrument}><td className="mono">{instrument}</td><td>{formatNumber(row.score,1)}</td><td className="subtle">{Object.entries(row.components||{}).map(([k,v])=>`${k}:${formatNumber(v,1)}`).join(" · ")||"—"}</td><td><Link className="link-button" href={`/research/${encodeURIComponent(instrument)}`}>Open research</Link></td></tr>})}
-          {selected.length===0 && <tr><td colSpan={4}><div className="empty">No selected Module C candidates for today.</div></td></tr>}
-        </tbody></table></div>
-      </section>
-
-      <div className="section grid grid-2">
-        <div className="card"><div className="section-head"><h3>Latest stress studies</h3></div>{stressRuns.slice(0,5).map((r:any)=><div className="kv" key={r.id}><span>{r.variant || r.run_type || "Stress test"}</span><strong className="mono">{String(r.id).slice(0,8)}</strong></div>)}{stressRuns.length===0&&<div className="empty">No stress runs persisted.</div>}</div>
-        <div className="card"><div className="section-head"><h3>Latest walk-forward studies</h3></div>{walkRuns.slice(0,5).map((r:any)=><div className="kv" key={r.id}><span>{r.variant || "Walk forward"}</span><strong className="mono">{String(r.id).slice(0,8)}</strong></div>)}{walkRuns.length===0&&<div className="empty">No walk-forward runs persisted.</div>}</div>
-      </div>
-    </>
-  );
-}
+import { api, positivePage, validDate, formatNumber, timeIST } from "@/lib/api";
+import { Header, DateFilter, Errors, Empty, Pager, Badge, Score } from "@/components/ui";
+export const dynamic = 'force-dynamic';
+export default async function Research({ searchParams }: {
+    searchParams: Promise<{
+        date?: string;
+        q?: string;
+        page?: string;
+    }>;
+}) { const params = await searchParams; const date = validDate(params.date), q = (params.q || '').slice(0, 80), page = positivePage(params.page); const result = await api.universe(date, q, page); const d = result.data; return <><Header eyebrow="Modules A & B" title="Stock research" description="Browse the NSE universe and inspect fundamental eligibility, filing evidence and technical setups."/><DateFilter date={date} extra={<label>Search symbol<input type="search" name="q" defaultValue={q} maxLength={80} placeholder="RELIANCE, TCS…"/></label>}/><Errors items={[result.error]}/><p className="subtle">Membership here is the stored Module A decision as of the requested date. Open a stock for a fresh read-only evaluation.</p><div className="table-wrap"><table className="table"><thead><tr><th>Instrument</th><th>Sector</th><th>Stored A eligibility</th><th>A score</th><th>Recorded at · IST</th><th>Failed rules</th><th></th></tr></thead><tbody>{d?.rows.map(row => <tr key={row.instrument_id}><td className="symbol">{row.instrument_id}</td><td>{row.sector || 'Unavailable'}</td><td><Badge value={row.eligible === true ? 'ELIGIBLE' : row.eligible === false ? 'REJECTED' : 'NOT EVALUATED'}/></td><td><Score value={row.score}/></td><td>{timeIST(row.as_of)}</td><td className="reason">{(row.failed_rules || []).slice(0, 3).map(x => x.replaceAll('_', ' ')).join('; ') || 'No recorded rules'}{(row.failed_rules || []).length > 3 ? <small>+{row.failed_rules!.length - 3} more in stock details</small> : null}</td><td><a className="link" href={`/research/${encodeURIComponent(row.instrument_id)}?date=${date}`}>Inspect →</a></td></tr>)}{!d?.rows.length ? <tr><td colSpan={7}><Empty title={result.error ? 'Universe unavailable' : 'No matching instruments'} detail="Try another NSE symbol or clear the search."/></td></tr> : null}</tbody></table></div>{d ? <Pager path="/research" page={page} total={d.total} limit={d.limit} values={{ date, q }}/> : null}</>; }

@@ -63,10 +63,10 @@ def _render_safe_database_url(raw: str) -> str:
 
 @lru_cache(maxsize=1)
 def _db_engine():
-    url = os.getenv("DATABASE_URL")
+    url = os.getenv("DATABASE_URL") or os.getenv("PMS_DATABASE_URL")
     if not url:
         raise RuntimeError("DATABASE_URL is not configured")
-    return create_engine(_render_safe_database_url(url), pool_pre_ping=True)
+    return create_engine(_render_safe_database_url(url), pool_pre_ping=True, connect_args={"options":"-c search_path=pms,public"})
 
 
 def db_engine():

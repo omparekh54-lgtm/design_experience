@@ -38,6 +38,7 @@ class PaperSandboxOrderRequest(BaseModel):
     order_type: str = "MARKET"
     limit_price: float | None = Field(default=None, gt=0)
     trigger_price: float | None = Field(default=None, gt=0)
+    idempotency_key: str = Field(default="",max_length=120)
 
 
 class PaperSandboxProcessRequest(BaseModel):
@@ -141,6 +142,7 @@ def create_paper_sandbox_order(payload: PaperSandboxOrderRequest):
         order_type=payload.order_type.upper(),
         limit_price=payload.limit_price,
         trigger_price=payload.trigger_price,
+        idempotency_key=payload.idempotency_key,
     )
     try:
         result = _sandbox_broker().place_order(request)
@@ -216,7 +218,7 @@ def disable_orders():
 @router.get("/reconciliation/latest")
 def latest_reconciliation():
     with _engine().connect() as conn:
-        row = conn.execute(text("select * from reconciliation_runs order by started_at desc limit 1")).mappings().first()
+        row = conn.execute(text("select * from reconciliation_runs where account_mode='PAPER' order by started_at desc limit 1")).mappings().first()
     return dict(row) if row else {"status": "never_run"}
 
 
@@ -274,7 +276,6 @@ def latest_paper_validation():
 def readiness():
     ctl = ProductionReadinessController(_engine())
     result = ctl.evaluate()
-    ctl.persist(result, actor="api_operator")
     return result.__dict__
 
 

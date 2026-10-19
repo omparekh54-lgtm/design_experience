@@ -26,3 +26,8 @@ Thumbs.db
 secrets/
 artifacts/
 raw_data/
+
+# Browser test output
+apps/web/test-results/
+
+*.tsbuildinfo
