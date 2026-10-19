@@ -30,7 +30,7 @@ else if(path==='/v1/execution/readiness')data={stage:'PAPER',readiness_status:'N
 else if(path==='/v1/execution/paper-validation/latest'||path==='/v1/execution/reconciliation/latest')data={status:'never_run'};
 else if(path==='/v1/execution/workers')data={count:1,runs:[run]};
 else if(path==='/v1/execution/audit')data={count:0,events:[]};
-else if(path.startsWith('/v1/backtests/'))data={run:{id:tradeId,started_on:'2026-01-01',ended_on:day,status:'COMPLETED',initial_capital:1000000,realized_net_pnl:2000,return_pct:.2},fills:[]};
+else if(path.startsWith('/v1/backtests/'))data={run:{id:tradeId,started_on:'2026-01-01',ended_on:day,status:'COMPLETED',initial_capital:1000000,realized_net_pnl:2000,return_pct:.2},fills:[{id:1,trade_date:day,instrument_id:1,side:'BUY',quantity:10,price:100,costs:{total:2}}]};
 else data={count:0,runs:[]};
 res.end(JSON.stringify(data));});
 await new Promise(r=>server.listen(8019,'127.0.0.1',r));
@@ -43,7 +43,7 @@ async function visit(url){const response=await page.goto(url);await page.locator
 const routes=['/','/signals','/paper-trading','/regime','/research','/research/NSE%3ATESTONLY','/backtests','/data-health','/operations','/paper-trading/sandbox',`/paper-trading/${tradeId}`,`/backtests/${tradeId}`];
 await mkdir('test-results',{recursive:true});
 for(const route of routes){const response=await visit(`http://127.0.0.1:3019${route}`);assert.equal(response.status(),200,route);await page.locator('main h1').waitFor();assert(await page.locator('main h1').innerText(),route);}
-assert.equal(mutations.length,0,'Read-only navigation performed a mutation');
+assert.equal(mutations.length,0,'Read-only navigation performed a mutation');assert((await page.locator('tbody tr td').last().innerText()).includes('2.00'),'Persisted JSON fill costs must be displayed');
 await page.setViewportSize({width:1440,height:1000});await visit('http://127.0.0.1:3019');await page.screenshot({path:'test-results/overview-desktop.png',fullPage:true});
 await visit('http://127.0.0.1:3019/signals');await page.getByRole('link',{name:'Watchlist',exact:true}).click();await page.waitForURL(u=>u.searchParams.get('view')==='watchlist');await page.locator('input[name=q]').fill('NOTFOUND');await page.getByRole('button',{name:'Apply',exact:true}).click();await page.getByText('No symbols match this search').waitFor();
 await visit('http://127.0.0.1:3019/signals');await page.locator('input[name=date]').fill('2026-10-15');await page.getByRole('button',{name:'Apply',exact:true}).click();await page.waitForURL(u=>u.searchParams.get('date')==='2026-10-15');await page.waitForLoadState('networkidle');await page.getByRole('link',{name:'Next',exact:true}).click();await page.waitForURL(u=>u.searchParams.get('page')==='2');
