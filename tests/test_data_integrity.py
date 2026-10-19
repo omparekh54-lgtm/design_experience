@@ -419,3 +419,14 @@ def test_audit_manifest_retains_duplicate_identities_for_findings_but_matrix_sta
         and manifest["universe"][0]["instrument_id"]
         == manifest["universe"][1]["instrument_id"]
     )
+
+
+def test_csv_extension_cannot_overwrite_json_report(tmp_path):
+    with pytest.raises(ValueError, match="json"):
+        export_csv({"checks": []}, tmp_path / "evidence.csv")
+    assert not (tmp_path / "evidence.csv").exists()
+
+
+def test_cli_rejects_non_json_report_before_database_access():
+    with pytest.raises(SystemExit):
+        main(["--run", "--end", "2024-12-31", "--report", "evidence.csv"])

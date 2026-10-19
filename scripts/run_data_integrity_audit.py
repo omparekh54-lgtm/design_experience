@@ -24,6 +24,8 @@ from packages.pms.integrity_checks import CHECKS, REVIEWS
 
 
 def export_csv(report, path):
+    if Path(path).suffix.lower() != ".json":
+        raise ValueError("Audit report must use a .json path")
     target = Path(path).with_suffix(".csv")
     tmp = target.with_suffix(".csv.tmp")
     with tmp.open("w", newline="", encoding="utf-8") as stream:
@@ -95,6 +97,8 @@ def main(argv=None):
     )
     if not codes or not codes <= {c.code for c in CHECKS}:
         parser.error("Unknown/empty check selection")
+    if args.report and args.report.suffix.lower() != ".json":
+        parser.error("--report must end in .json to preserve JSON and CSV evidence")
     if args.plan:
         print(
             json.dumps(
@@ -151,7 +155,7 @@ def main(argv=None):
     )
     try:
         with report_lock(path):
-            if path.exists():
+            if path.exists() or path.with_suffix(".csv").exists():
                 raise ValueError("Preserve existing evidence; select a new report path")
             with consistent_inputs(engine) as snapshot:
                 auditor = IntegrityAuditor(
