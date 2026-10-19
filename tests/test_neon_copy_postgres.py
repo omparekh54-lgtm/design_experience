@@ -75,3 +75,50 @@ def test_real_snapshot_archives_restore_views_constraints_sequences_and_locked_s
             module.copy(*urls, src, dst, {})
     finally:
         src.dispose(); dst.dispose(); admin.dispose()
+
+
+@pytest.mark.skipif(not os.getenv('PMS_COPY_TEST_PG_URL'), reason='isolated PostgreSQL17 service required')
+def test_share_view_ties_keep_values_and_local_ids_across_storage_and_plan_changes():
+    url = make_url(os.environ['PMS_COPY_TEST_PG_URL'])
+    assert url.host in {'localhost', '127.0.0.1'}
+    admin = create_engine(url, isolation_level='AUTOCOMMIT')
+    name = 'share_view_' + uuid4().hex
+    with admin.connect() as c:
+        c.execute(text('CREATE DATABASE ' + name))
+    engine = create_engine(url.set(database=name))
+    migration = Path('migrations/011_deterministic_share_view_ids.sql').read_text()
+    try:
+        with engine.begin() as c:
+            c.execute(text('CREATE SCHEMA pms'))
+            c.execute(text('CREATE TABLE pms.instruments(id bigint PRIMARY KEY,external_security_id bigint UNIQUE)'))
+            c.execute(text('INSERT INTO pms.instruments VALUES(1,100)'))
+            c.execute(text('''CREATE TABLE public.sources(id bigint PRIMARY KEY,metadata jsonb,
+                source_type text,published_at timestamptz,retrieved_at timestamptz)'''))
+            c.execute(text("INSERT INTO public.sources VALUES(1,'{}','NSE','2026-01-01T00:00:00Z','2026-01-01T00:00:00Z')"))
+            c.execute(text('''CREATE TABLE public.financial_facts(id bigint PRIMARY KEY,security_id bigint,
+                period_end date,source_id bigint,value numeric,fact_name text,created_at timestamptz,
+                data jsonb,period_type text)'''))
+            # Annual/quarter facts have the same old ordering keys but distinct payloads.
+            c.execute(text("""INSERT INTO public.financial_facts VALUES
+                (20,100,'2025-12-31',1,200,'shares_outstanding','2026-01-01T00:00:00Z','{}','annual'),
+                (10,100,'2025-12-31',1,100,'shares_outstanding','2026-01-01T00:00:00Z','{}','quarter')"""))
+            c.execute(text('''CREATE TABLE pms.shares_outstanding_history_local(id bigint PRIMARY KEY,
+                instrument_id bigint,effective_from date,effective_to date,shares_outstanding numeric,
+                source text,knowable_at timestamptz,raw_payload jsonb)'''))
+            c.execute(text("""INSERT INTO pms.shares_outstanding_history_local VALUES
+                (7,1,'2025-01-01',NULL,75,'LOCAL','2025-01-01T00:00:00Z','{}')"""))
+            c.execute(text(migration))
+            query = text('SELECT id,shares_outstanding FROM pms.shares_outstanding_history ORDER BY id')
+            expected = [(7,75),(1000000000001,100),(1000000000002,200)]
+            assert [tuple(r) for r in c.execute(query)] == expected
+            c.execute(text('CREATE INDEX reverse_facts ON public.financial_facts(security_id,period_end,source_id,id DESC)'))
+            c.execute(text('CLUSTER public.financial_facts USING reverse_facts'))
+            c.execute(text('SET LOCAL enable_seqscan=off'))
+            c.execute(text('SET LOCAL enable_hashjoin=off'))
+            assert [tuple(r) for r in c.execute(query)] == expected
+            c.execute(text(migration))
+            assert [tuple(r) for r in c.execute(query)] == expected
+            assert c.execute(text('SELECT count(*) FROM public.financial_facts')).scalar_one() == 2
+            assert c.execute(text('SELECT id FROM pms.shares_outstanding_history_local')).scalar_one() == 7
+    finally:
+        engine.dispose(); admin.dispose()

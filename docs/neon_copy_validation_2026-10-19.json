@@ -1,0 +1,72 @@
+{
+  "source_preserved": true,
+  "source_writes_performed": false,
+  "cutover": false,
+  "campaign_started": false,
+  "acceptance": "NOT_CERTIFIED",
+  "strict_copy_workflow": {
+    "run": 39314787355,
+    "status": "BLOCKED",
+    "code": "RESTORED_DATA_MISMATCH",
+    "stage": "destination_verification"
+  },
+  "backups": {
+    "private": true,
+    "sha256_roundtrip_verified_by_runner": true,
+    "prefix": "database-copies/20261019T195747Z-9a056e273a4e44cdbd93339840b7df41",
+    "objects": [
+      {
+        "name": "public-dependencies.dump",
+        "bytes": 28968822,
+        "sha256": "c339e348f05de5c5c84785f529f3f868ec37d76efb7c79272a8ee29f41423e92"
+      },
+      {
+        "name": "pms.dump",
+        "bytes": 14240071,
+        "sha256": "d58d5c73a09d570216031763b75e6e5ff172537b91c1bce13d7deee89cbeae8a"
+      },
+      {
+        "name": "manifest.json",
+        "bytes": 491033,
+        "sha256": "f28348736d5ed230f29ff239623601fd3aa30f56807e226696615fb2529f5692"
+      }
+    ]
+  },
+  "snapshot_comparison": {
+    "relations_checked": 63,
+    "physical_tables_exact": 57,
+    "views_exact": 5,
+    "differing_view": "pms.shares_outstanding_history",
+    "share_rows": 44579,
+    "share_payload_md5_excluding_derived_id_source_and_target": "e7ecd55bb58a6812cf238301428bd74c",
+    "tied_sort_groups": 243,
+    "tied_rows_with_distinct_payloads": 486,
+    "sequences_nonregressed": 26
+  },
+  "capacity": {
+    "database_bytes": 575979520,
+    "database_limit_bytes": 1073741824,
+    "growth_capacity_not_certified": true
+  },
+  "safety": {
+    "execution_mode": "PAPER",
+    "new_orders_enabled": false,
+    "locked_reason": "reference_data_incomplete"
+  },
+  "migration": {
+    "file": "migrations/011_deterministic_share_view_ids.sql",
+    "id": "c07b91cd-6314-4cc1-a954-84256c32be6b",
+    "project": "green-resonance-86147459",
+    "temporary_branch": "br-lucky-lab-azr3ohss",
+    "parent_branch": "br-twilight-sea-azumjkpc",
+    "main_applied": false,
+    "branch_rows": 44579,
+    "branch_distinct_ids": 44579,
+    "branch_full_hash_both_plans": "78acaada051f06554b9aa71db443cfd9",
+    "branch_payload_hash": "e7ecd55bb58a6812cf238301428bd74c",
+    "local_id_payload_differences": 0,
+    "owner_acl_unchanged": true,
+    "paper_safety_unchanged": true,
+    "note": "Deterministic for the same input set; ordinal IDs can still shift when new source rows are added."
+  }
+}
