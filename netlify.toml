@@ -1,0 +1,11 @@
+[build]
+  base = "apps/web"
+  command = "npm run build"
+  publish = ".next"
+
+[build.environment]
+  NODE_VERSION = "22"
+
+# Next.js SSR uses Netlify's automatically installed OpenNext adapter.
+# Set PMS_API_BASE_URL (HTTPS) in both Builds and Functions scopes.
+# Do not put database credentials or OPS_API_KEY in this frontend project.

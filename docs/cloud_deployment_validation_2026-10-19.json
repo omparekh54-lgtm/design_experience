@@ -1,0 +1,33 @@
+{
+  "date": "2026-10-19",
+  "phase": "3 cloud deployment",
+  "status": "PREPARED_DEPLOYMENT_PENDING",
+  "checks": {
+    "python_tests": {
+      "passed": 693,
+      "skipped": 1
+    },
+    "ops_imports": "PASS",
+    "frontend_typecheck": "PASS",
+    "frontend_production_build": "PASS",
+    "npm_production_audit": {
+      "reported_vulnerabilities": 0
+    },
+    "render_public_json_schema": "PASS",
+    "render_platform_cli_validation": "NOT_RUN_CLI_UNAVAILABLE"
+  },
+  "live_api_verified": false,
+  "live_frontend_verified": false,
+  "migration_010_applied": false,
+  "collection_activated": false,
+  "paper_activated": false,
+  "campaign_started": false,
+  "pending": [
+    "Render workspace confirmation and service discovery",
+    "PMS frontend identification",
+    "Secure credentials and TLS CA",
+    "Backup and reviewed migration/grants",
+    "Private raw-source archive",
+    "Initial full-universe catch-up and capacity measurement"
+  ]
+}
