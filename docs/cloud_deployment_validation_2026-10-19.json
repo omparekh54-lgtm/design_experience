@@ -1,7 +1,7 @@
 {
   "date": "2026-10-19",
   "phase": "3 cloud deployment",
-  "status": "PREPARED_DEPLOYMENT_PENDING",
+  "status": "SERVICES_REACHABLE_DATABASE_NOT_READY",
   "checks": {
     "python_tests": {
       "passed": 693,
@@ -23,11 +23,23 @@
   "paper_activated": false,
   "campaign_started": false,
   "pending": [
-    "Render workspace confirmation and service discovery",
-    "PMS frontend identification",
-    "Secure credentials and TLS CA",
+    "Secure database connection/TLS diagnosis",
+    "Free-tier database capacity verification",
+    "Startup guard and platform readiness-check adoption",
     "Backup and reviewed migration/grants",
     "Private raw-source archive",
+    "GitHub Actions secret/activation configuration",
     "Initial full-universe catch-up and capacity measurement"
-  ]
+  ],
+  "workspace_confirmed": true,
+  "api_url": "https://pms-status-api.onrender.com",
+  "frontend_url": "https://pms-status-dashboard.onrender.com",
+  "api_health_http": 200,
+  "api_ready_http": 503,
+  "frontend_http": 200,
+  "api_database_error_type": "OperationalError",
+  "supabase_plan": "free",
+  "database_bytes": 681962643,
+  "user_relation_bytes": 669442048,
+  "nonsecret_environment_updates_applied": true
 }
