@@ -29,7 +29,7 @@ python -m venv .venv
 # Windows: .venv\Scripts\activate
 # macOS/Linux: source .venv/bin/activate
 pip install -r requirements.txt
-uvicorn apps.api.main:app --reload
+uvicorn apps.api.main_exec:app --reload
 ```
 
 Run tests with `pytest -q`.
@@ -242,3 +242,12 @@ Corporate-action exports can be loaded with `--corporate-actions SYMBOL:FILE` an
 ## Important
 
 This software is for research and controlled execution workflows. Backtests must use point-in-time data and model costs/slippage. Do not enable unattended live trading until data integrity, reconciliation, kill-switches and paper-trading validation are complete.
+
+## Operator UI
+
+The complete API entry point is `apps.api.main_exec:app`. The Next.js console
+in `apps/web` connects through `PMS_API_BASE_URL` and includes overview, signals,
+formal PAPER activity, regime, research, backtests, data health and operations.
+Manual sandbox activity has a separate account and route.
+See [frontend setup](apps/web/README.md) and [UI completion](docs/ui_completion.md)
+for operator authorization, verification and acceptance limits.
