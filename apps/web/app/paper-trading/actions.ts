@@ -1,5 +1,4 @@
-"use server";
-import { revalidatePath } from "next/cache";
+// Server-side helpers; imported only by the authenticated operator route.
 import type { ActionState } from "@/lib/action-state";
 const API_BASE = (process.env.PMS_API_BASE_URL || process.env.NEXT_PUBLIC_API_BASE_URL || 'http://127.0.0.1:8000').replace(/\/$/, '');
 async function post(path: string, body: unknown, form: FormData): Promise<{
@@ -21,26 +20,19 @@ export async function placePaperOrder(_previous: ActionState, form: FormData): P
     return { ok: false, message: 'Check the side, order type and positive whole-share quantity.' }; if ((type === 'LIMIT' && (!limit || !Number.isFinite(Number(limit)) || Number(limit) <= 0)) || (type === 'STOP_MARKET' && (!trigger || !Number.isFinite(Number(trigger)) || Number(trigger) <= 0)))
     return { ok: false, message: 'A positive price is required for the selected order type.' }; if (!/^[0-9a-f-]{36}$/i.test(id))
     return { ok: false, message: 'Refresh this form before placing an order.' }; const result = await post('/v1/execution/paper-sandbox/orders', { instrument_id: symbol.startsWith('NSE:') ? symbol : `NSE:${symbol}`, side, quantity, order_type: type, limit_price: type === 'LIMIT' ? Number(limit) : null, trigger_price: type === 'STOP_MARKET' ? Number(trigger) : null, idempotency_key: `ui-sandbox:${id}` }, form); if (result.ok) {
-    revalidatePath('/paper-trading/sandbox');
     return { ok: true, message: 'Sandbox order recorded. It can fill only against a later session’s observed bar.' };
 } return result; }
 export async function processPaperOrders(_previous: ActionState, form: FormData): Promise<ActionState> { const result = await post('/v1/execution/paper-sandbox/process', {}, form); if (result.ok) {
-    revalidatePath('/paper-trading/sandbox');
     return { ok: true, message: `Processed the latest saved market bar. ${Number(result.data?.fill_count || 0)} sandbox fill(s) recorded. Newly created orders wait for a later session.` };
 } return result; }
 export async function cancelPaperOrder(_previous: ActionState, form: FormData): Promise<ActionState> { const id = String(form.get('order_id') || ''); if (!/^[0-9a-f-]{36}$/i.test(id))
     return { ok: false, message: 'Invalid sandbox order.' }; const result = await post(`/v1/execution/paper-sandbox/orders/${encodeURIComponent(id)}/cancel`, {}, form); if (result.ok) {
-    revalidatePath('/paper-trading/sandbox');
     return { ok: true, message: result.data?.changed ? 'Sandbox order canceled.' : 'This order is no longer cancellable. Refresh to see its current state.' };
 } return result; }
 export async function disablePaperOrders(_previous: ActionState, form: FormData): Promise<ActionState> { const result = await post('/v1/execution/disable-orders', {}, form); if (result.ok) {
-    revalidatePath('/operations');
-    revalidatePath('/');
     return { ok: true, message: 'New orders disabled. Existing protective management remains active.' };
 } return result; }
 export async function emergencyStop(_previous: ActionState, form: FormData): Promise<ActionState> { const reason = String(form.get('reason') || '').trim(); if (form.get('confirm') !== 'yes' || reason.length < 3 || reason.length > 200)
     return { ok: false, message: 'Enter a reason and confirm the emergency stop.' }; const result = await post('/v1/execution/emergency-stop', { reason }, form); if (result.ok) {
-    revalidatePath('/operations');
-    revalidatePath('/');
     return { ok: true, message: 'Emergency stop recorded. New entries are blocked; protective exits remain managed.' };
 } return result; }
