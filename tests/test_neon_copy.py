@@ -117,3 +117,27 @@ def test_missing_configuration_receipt_never_contains_credentials(tmp_path):
     receipt = json.loads((tmp_path/'receipt.json').read_text())
     assert receipt['status'] == 'BLOCKED' and not receipt['cutover']
     assert 'private-password' not in r.stdout + r.stderr + json.dumps(receipt)
+
+
+@pytest.mark.parametrize('value,code', [
+    ('not-json-secret', 'ARCHIVE_CREDENTIAL_JSON_INVALID'),
+    ('[]', 'ARCHIVE_CREDENTIAL_CONFIGURATION'),
+    ('{"access_key_id":12,"secret_access_key":"secret"}', 'ARCHIVE_CREDENTIAL_CONFIGURATION'),
+])
+def test_invalid_archive_configuration_has_fixed_safe_code(monkeypatch, value, code):
+    from scripts.copy_pms_to_neon import archive_client
+    monkeypatch.setenv('PMS_NEON_ARCHIVE_JSON', value)
+    with pytest.raises(CopyBlocked, match='^' + code + '$'):
+        archive_client()
+
+
+def test_error_diagnostics_never_echo_storage_or_sql_secrets():
+    from scripts.copy_pms_to_neon import failure_code
+    class StorageError(Exception):
+        response = {'Error': {'Code': 'AccessDenied', 'Message': 'private-secret'}}
+    class DatabaseError(Exception):
+        pgcode = '42501'
+    assert failure_code(StorageError('private-secret')) == 'ARCHIVE_ACCESSDENIED'
+    assert failure_code(DatabaseError('private-secret')) == 'DATABASE_SQLSTATE_42501'
+    StorageError.response['Error']['Code'] = 'private-secret'
+    assert failure_code(StorageError('private-secret')) == 'DATABASE_CONNECTION_FAILED'

@@ -167,10 +167,14 @@ def verify_sequences(actual, baseline):
 
 def archive_client():
     require(bool(os.getenv('PMS_NEON_ARCHIVE_JSON')), 'PRIVATE_ARCHIVE_CREDENTIAL_MISSING')
+    try:
+        config = json.loads(os.environ['PMS_NEON_ARCHIVE_JSON'])
+    except (ValueError, TypeError):
+        raise CopyBlocked('ARCHIVE_CREDENTIAL_JSON_INVALID') from None
+    require(isinstance(config, dict), 'ARCHIVE_CREDENTIAL_CONFIGURATION')
+    require(set(config) == {'access_key_id', 'secret_access_key'} and all(isinstance(v, str) and v.strip() for v in config.values()), 'ARCHIVE_CREDENTIAL_CONFIGURATION')
     import boto3
     from botocore.config import Config
-    config = json.loads(os.environ['PMS_NEON_ARCHIVE_JSON'])
-    require(set(config) == {'access_key_id', 'secret_access_key'} and all(config.values()), 'ARCHIVE_CREDENTIAL_CONFIGURATION')
     return boto3.client('s3', endpoint_url=ARCHIVE_ENDPOINT, region_name='ap-southeast-1',
                         aws_access_key_id=config['access_key_id'], aws_secret_access_key=config['secret_access_key'],
                         config=Config(signature_version='s3v4', s3={'addressing_style': 'path'},
@@ -209,7 +213,9 @@ def filtered_toc(archive, target):
 
 
 def copy(source, target, src, dst, report):
+    report['stage'] = 'archive_configuration'
     client = archive_client()  # fail before any dump/restore when archival is unavailable
+    report['stage'] = 'source_snapshot'
     with src.connect().execution_options(isolation_level='REPEATABLE READ') as conn:
         with conn.begin():
             conn.execute(text('SET TRANSACTION READ ONLY'))
@@ -225,17 +231,21 @@ def copy(source, target, src, dst, report):
                 archives = [root/'public-dependencies.dump', root/'pms.dump']
                 public_args = [arg for r in rows if r['nspname'] == 'public' for arg in ('--table', qualified(r))]
                 for archive, selection in zip(archives, [public_args, ['--schema=pms']]):
+                    report['stage'] = 'dump_public' if archive == archives[0] else 'dump_pms'
                     command(['pg_dump', '--format=custom', '--no-owner', '--no-privileges',
                              '--snapshot', snapshot, '--lock-wait-timeout=15000', '--dbname', source_dsn,
                              '--file', str(archive), *selection], env=source_env)
+                report['stage'] = 'source_data_manifest'
                 expected = data_manifest(conn, rows)
                 manifest = root/'manifest.json'
                 manifest.write_text(json.dumps({'tables': expected, 'safety': expected_safety,
                                                 'sequence_baseline': baseline_sequences}, sort_keys=True))
+                report['stage'] = 'private_backup'
                 report['private_backups'] = private_backup(client, [*archives, manifest],
                      'database-copies/' + datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ') + '-' + uuid4().hex)
                 # All six sections share a single psql transaction. Constraints and
                 # triggers are restored after COPY, avoiding mutation of the source audit log.
+                report['stage'] = 'render_restore'
                 tocs = []
                 for i, archive in enumerate(archives):
                     toc = root/f'{i}.list'; filtered_toc(archive, toc); tocs.append(toc)
@@ -252,9 +262,11 @@ def copy(source, target, src, dst, report):
                 with dst.connect() as c:
                     require(c.execute(text(OBJECTS_SQL)).scalar_one() == 0, 'DESTINATION_NOT_EMPTY')
                 env, dsn = pg_environment(target)
+                report['stage'] = 'destination_restore'
                 report['restore_attempted'] = True
                 command(['psql', '--no-psqlrc', '--single-transaction', '--set', 'ON_ERROR_STOP=1',
                          '--dbname', dsn, '--file', str(sql)], env=env)
+                report['stage'] = 'destination_verification'
                 with dst.connect().execution_options(isolation_level='REPEATABLE READ') as c:
                     with c.begin():
                         require(data_manifest(c, rows) == expected, 'RESTORED_DATA_MISMATCH')
@@ -306,6 +318,26 @@ def run(mode, report):
         dst.dispose()
 
 
+def failure_code(exc):
+    """Allowlisted codes only: SDK/driver messages can contain secret values."""
+    if isinstance(exc, CopyBlocked):
+        return str(exc)
+    response = getattr(exc, 'response', None)
+    if isinstance(response, dict):
+        code = response.get('Error', {}).get('Code')
+        storage_codes = {'AccessDenied', 'InvalidAccessKeyId', 'SignatureDoesNotMatch',
+                         'NoSuchBucket', 'InvalidToken', 'ExpiredToken'}
+        if code in storage_codes:
+            return 'ARCHIVE_' + code.upper()
+    cause = getattr(exc, 'orig', exc)
+    state = getattr(cause, 'sqlstate', None) or getattr(cause, 'pgcode', None)
+    if isinstance(state, str) and len(state) == 5 and state.isascii() and state.isalnum():
+        return 'DATABASE_SQLSTATE_' + state
+    if isinstance(exc, subprocess.TimeoutExpired):
+        return 'POSTGRES_TOOL_TIMEOUT'
+    return connection_failure_code(exc)
+
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument('--mode', choices=['check', 'copy'], default='check')
@@ -317,8 +349,7 @@ def main():
         run(args.mode, report)
         code = 0
     except Exception as exc:
-        report.update(status='BLOCKED', code=str(exc) if isinstance(exc, CopyBlocked)
-                      else connection_failure_code(exc), data_copied='NOT_VERIFIED')
+        report.update(status='BLOCKED', code=failure_code(exc), data_copied='NOT_VERIFIED')
         code = 2
     args.output.write_text(json.dumps(report, indent=2) + '\n')
     print(json.dumps(report))
