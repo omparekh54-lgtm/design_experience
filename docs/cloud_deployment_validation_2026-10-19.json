@@ -1,11 +1,11 @@
 {
   "date": "2026-10-19",
   "phase": "3 cloud deployment",
-  "status": "NEON_FREE_DESTINATION_PROVISIONED_COPY_PENDING",
+  "status": "NEON_TLS_VERIFIED_SOURCE_SECRET_PLACEHOLDER_COPY_BLOCKED",
   "checks": {
     "python_tests": {
-      "passed": 712,
-      "skipped": 1
+      "passed": 725,
+      "skipped": 2
     },
     "ops_imports": "PASS",
     "frontend_typecheck": "PASS",
@@ -16,8 +16,9 @@
     "render_public_json_schema": "PASS",
     "render_platform_cli_validation": "NOT_RUN_CLI_UNAVAILABLE",
     "connection_policy_regressions": 19,
-    "ci_run": 39302310843,
-    "ci_all_jobs": "PASS"
+    "ci_run": 39307009777,
+    "ci_all_jobs": "PASS",
+    "neon_copy_postgres_rehearsal": "PASS"
   },
   "live_api_verified": true,
   "live_frontend_verified": true,
@@ -26,7 +27,7 @@
   "paper_activated": false,
   "campaign_started": false,
   "pending": [
-    "Configure private Neon destination secret, prepare/review copy runner and measure restored free-tier headroom",
+    "Replace source placeholder secret, configure private archive credential and execute reviewed one-time copy",
     "Guarded startup/platform readiness-check adoption",
     "Backup and reviewed migration/grants",
     "Private raw-source archive",
@@ -92,13 +93,20 @@
     "probe_download_http": 200,
     "probe_content_match": true,
     "probe_anonymous_http": 403,
-    "external_driver_tls_verified": false,
+    "external_driver_tls_verified": true,
     "data_copied": false,
     "cutover": false,
     "source_view_fk_dependency_bytes": 626384896,
     "complete_object_dependency_review": false,
     "backup_created": false,
     "restore_verified": false,
-    "destination_github_secret_verified": false
+    "destination_github_secret_verified": true,
+    "source_github_secret_error": "DATABASE_PASSWORD_PLACEHOLDER",
+    "preflight_run": 39307509790,
+    "preflight_revision": "f920a0217719b16b39ffc1c04f5b67c2628cc89d",
+    "preflight_checked_at_utc": "2026-10-19T19:02:04Z",
+    "copy_runner_implemented": true,
+    "target_empty_verified": true,
+    "archive_github_credential_verified": false
   }
 }
