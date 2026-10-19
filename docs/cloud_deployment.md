@@ -200,3 +200,45 @@ The prior successful connection checks are historical evidence. A separate
 read-only Neon check after the retry still found 0 application objects and
 7,520,256 database bytes; database-copies/ contained no objects. No data copy,
 service cutover, migration or campaign has happened.
+
+
+## Stored data restored and verified; derived-ID repair pending (2026-10-19 UTC)
+
+Fresh run `39314574277` verified all secret formats and both verify-full database
+connections. Explicit copy run `39314787355` created and round-trip SHA-256 checked
+two private database dumps and the snapshot manifest before committing the
+isolated restore. Its strict comparison correctly stopped with
+`RESTORED_DATA_MISMATCH`; do not rerun copy over this populated destination.
+
+Independent comparisons against that archived snapshot matched all **57 physical
+tables** and **5 of 6 views** exactly (62/63 relation manifests). All 26 sequences
+passed their nonregression checks. All 2,302 instruments are present. The new
+PMS database measured 575,979,520 bytes against its 1,073,741,824-byte limit.
+This is current capacity evidence, not a 3-month growth guarantee.
+
+The sole mismatch is `pms.shares_outstanding_history`. Its external view generates
+ordinal IDs using ROW_NUMBER ordered by security, period end and source, without
+a final unique tie-breaker. There are 243 tied groups covering 486 distinct
+payload rows. Different physical layouts/plans assign different IDs to those
+rows. The entire 44,579-row multiset excluding only that generated ID matches
+between source and destination (MD5 `e7ecd55bb58a6812cf238301428bd74c`). The underlying
+physical tables, including stored local IDs, match the snapshot exactly. No
+source or destination stored rows were changed to obtain this result. The
+original workflow remains BLOCKED rather than being relabeled a strict pass.
+
+`migrations/011_deterministic_share_view_ids.sql` adds the source financial-fact
+primary key as a final sort key. It changes only the derived view, retaining
+all rows and local IDs. Ordinal IDs remain derived and can shift when source
+rows are added; they are not permanent source identifiers. The change has been
+prepared on temporary Neon branch `br-lucky-lab-azr3ohss`, migration
+`c07b91cd-6314-4cc1-a954-84256c32be6b`. Branch tests found 44,579 unique IDs,
+identical full hashes under different planner settings, unchanged payload hash,
+zero local-ID/payload differences, unchanged owner/ACL and locked PAPER safety.
+Main is unchanged. The Neon completion tool requires explicit confirmation
+before applying the prepared migration and removing its temporary branch.
+
+Detailed non-secret receipts are in `docs/neon_copy_validation_2026-10-19.json`.
+The private dumps and row-level hash buckets remain outside GitHub. Supabase
+is preserved. Migration010, application grants, service cutover, raw-source
+archival, collector catch-up and capacity/operational acceptance remain pending.
+No campaign or new orders were enabled.
