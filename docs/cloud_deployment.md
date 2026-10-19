@@ -128,3 +128,31 @@ Remaining one-time configuration in GitHub Actions secrets:
 3. Open repository Actions **PMS Neon one-time copy**, select **Run workflow**, branch main, mode **copy**. The existing authorization covers the isolated copy; the connection and private-backup guards run before restore. The connector cannot write Actions secrets or dispatch workflows, so these are one-time dashboard steps, not daily laptop commands. Never paste credentials into chat or public files.
 
 The hosted receipt contains only fixed status codes and connection verification flags. It is not evidence that data has been migrated or that the full cloud deployment/campaign is accepted.
+
+
+## Latest hosted copy attempt (2026-10-19 19:28 UTC)
+
+The user corrected the source secret. Check-only run `39307509790`, attempt 3,
+verified both database connections with certificate and hostname verification.
+Copy run `39310049295` stopped before restore with an initially generic receipt.
+PR18 added fixed diagnostic codes and detailed stages; all five CI jobs passed
+(run `39310602409`), including 18 PostgreSQL17 copy-rehearsal tests. The local
+suite passed 729 tests with 2 integration skips.
+
+Explicit copy retry `39311170924` at revision
+`5f5f2dd77b55122befeffb5aed18a8847c15ce62` stopped at
+`archive_configuration` with `ARCHIVE_CREDENTIAL_JSON_INVALID`.
+`PMS_NEON_ARCHIVE_JSON` is present but cannot be parsed as JSON. This is a format
+failure before SDK authentication, database dumping, archival or restore; it
+does not establish whether the credential values are valid. Both database
+connections and the source dependency/safety gates passed. The target was empty
+at the start of this attempt. No cutover, migration or campaign was started.
+
+The only immediate user action is to edit that existing Actions secret into a
+JSON object containing exactly `access_key_id` and `secret_access_key`, with both
+values as double-quoted strings. Use the actual Neon Storage parameter values
+privately. Do not include shell assignments, Markdown fences, an outer quoted
+JSON string or a trailing comma. Preserve both database URL secrets. Never put
+credential values into chat or repository files. Retry the guarded workflow
+only after correcting the secret. The earlier placeholder diagnosis above is
+historical and is resolved.
