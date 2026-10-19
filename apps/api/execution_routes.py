@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 from datetime import date, datetime
+from typing import Literal
+from uuid import UUID
 from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict, model_validator
 from sqlalchemy import text
 
 from packages.pms.audit import AuditTrail
+from packages.pms.reliability import reliability_report, safe_details
 from packages.pms.brokers import BrokerOrderRequest, PaperBroker
 from packages.pms.live_validation import LiveValidationLimits, LiveValidationService
 from packages.pms.paper_execution import PaperExecutionService
@@ -18,75 +21,95 @@ from packages.pms.safety import SafetyController
 router = APIRouter(prefix="/v1/execution", tags=["execution"])
 
 
-class StopRequest(BaseModel):
-    reason: str = "operator_emergency_stop"
+class OperatorRequest(BaseModel):
+    model_config = ConfigDict(allow_inf_nan=False, extra="forbid")
 
 
-class ModeRequest(BaseModel):
-    mode: str
+class StopRequest(OperatorRequest):
+    reason: str = Field(default="operator_emergency_stop", min_length=1, max_length=200)
 
 
-class PaperValidationRequest(BaseModel):
+class ModeRequest(OperatorRequest):
+    mode: Literal["PAPER", "LIVE_VALIDATION", "LIVE_APPROVAL"]
+
+
+class PaperValidationRequest(OperatorRequest):
     started_on: date
     ended_on: date
 
 
-class PaperSandboxOrderRequest(BaseModel):
-    instrument_id: str
-    side: str
-    quantity: int = Field(gt=0)
-    order_type: str = "MARKET"
+class PaperSandboxOrderRequest(OperatorRequest):
+    instrument_id: str = Field(pattern=r"^NSE:[A-Z0-9&._-]{1,30}$")
+    side: Literal["BUY", "SELL"]
+    quantity: int = Field(gt=0, le=10000000, strict=True)
+    order_type: Literal["MARKET", "LIMIT", "STOP", "STOP_MARKET", "SL-M"] = "MARKET"
     limit_price: float | None = Field(default=None, gt=0)
     trigger_price: float | None = Field(default=None, gt=0)
-    idempotency_key: str = Field(default="",max_length=120)
+    idempotency_key: str = Field(
+        min_length=1, max_length=120, pattern=r"^[A-Za-z0-9:._-]+$"
+    )
+
+    @model_validator(mode="after")
+    def prices_for_type(self):
+        if self.order_type == "LIMIT" and self.limit_price is None:
+            raise ValueError("LIMIT requires limit_price")
+        if (
+            self.order_type in {"STOP", "STOP_MARKET", "SL-M"}
+            and self.trigger_price is None
+        ):
+            raise ValueError("Stop order requires trigger_price")
+        return self
 
 
-class PaperSandboxProcessRequest(BaseModel):
+class PaperSandboxProcessRequest(OperatorRequest):
     trade_date: date | None = None
 
 
-class LiveSessionRequest(BaseModel):
-    max_capital: float
-    max_order_value: float
-    max_open_positions: int = 2
-    max_daily_loss: float
+class LiveSessionRequest(OperatorRequest):
+    max_capital: float = Field(gt=0)
+    max_order_value: float = Field(gt=0)
+    max_open_positions: int = Field(default=2, gt=0)
+    max_daily_loss: float = Field(gt=0)
     allowed_symbols: list[str] = Field(default_factory=list)
     notes: str | None = None
 
 
-class LiveProposalRequest(BaseModel):
-    instrument_id: str
-    side: str
-    quantity: int
-    estimated_price: float
-    order_type: str = "MARKET"
-    limit_price: float | None = None
-    trigger_price: float | None = None
+class LiveProposalRequest(OperatorRequest):
+    instrument_id: str = Field(pattern=r"^NSE:[A-Z0-9&._-]{1,30}$")
+    side: Literal["BUY", "SELL"]
+    quantity: int = Field(gt=0, le=10000000, strict=True)
+    estimated_price: float = Field(gt=0)
+    order_type: Literal["MARKET", "LIMIT", "STOP", "STOP_MARKET", "SL-M"] = "MARKET"
+    limit_price: float | None = Field(default=None, gt=0)
+    trigger_price: float | None = Field(default=None, gt=0)
     reason: str | None = None
 
 
-class LiveObservationRequest(BaseModel):
-    expected_price: float
-    fill_price: float
-    quantity: int
+class LiveObservationRequest(OperatorRequest):
+    expected_price: float = Field(gt=0)
+    fill_price: float = Field(gt=0)
+    quantity: int = Field(gt=0, le=10000000, strict=True)
     executed_at: datetime
-    fees: float = 0.0
+    fees: float = Field(default=0, ge=0)
     external_order_reference: str | None = None
     reconciliation_ok: bool = False
     notes: str | None = None
 
 
-class RejectRequest(BaseModel):
+class RejectRequest(OperatorRequest):
     reason: str
 
 
 def _engine():
     from apps.api.main import db_engine
+
     return db_engine()
 
 
 def _sandbox_broker():
-    return PaperBroker(_engine(), account_mode="PAPER_SANDBOX", broker_name="PAPER_SANDBOX")
+    return PaperBroker(
+        _engine(), account_mode="PAPER_SANDBOX", broker_name="PAPER_SANDBOX"
+    )
 
 
 @router.get("/safety")
@@ -109,7 +132,9 @@ def safety_status():
 def paper_sandbox_account():
     broker = _sandbox_broker()
     with _engine().connect() as conn:
-        latest_trade_date = conn.execute(text("select max(trade_date) from daily_prices")).scalar_one_or_none()
+        latest_trade_date = conn.execute(
+            text("select max(trade_date) from daily_prices")
+        ).scalar_one_or_none()
         fills = int(conn.execute(text("""
             select count(*) from broker_fills f
             join broker_orders o on o.id=f.order_id
@@ -158,7 +183,7 @@ def create_paper_sandbox_order(payload: PaperSandboxOrderRequest):
 
 
 @router.post("/paper-sandbox/orders/{order_id}/cancel")
-def cancel_paper_sandbox_order(order_id: str):
+def cancel_paper_sandbox_order(order_id: UUID):
     return _sandbox_broker().cancel_order(order_id)
 
 
@@ -168,12 +193,18 @@ def process_paper_sandbox(payload: PaperSandboxProcessRequest):
     trade_date = payload.trade_date
     if trade_date is None:
         with engine.connect() as conn:
-            trade_date = conn.execute(text("select max(trade_date) from daily_prices")).scalar_one_or_none()
+            trade_date = conn.execute(
+                text("select max(trade_date) from daily_prices")
+            ).scalar_one_or_none()
     if trade_date is None:
         raise HTTPException(status_code=400, detail="No market bars are available")
-    broker = PaperBroker(engine, account_mode="PAPER_SANDBOX", broker_name="PAPER_SANDBOX")
+    broker = PaperBroker(
+        engine, account_mode="PAPER_SANDBOX", broker_name="PAPER_SANDBOX"
+    )
     try:
-        fills = PaperExecutionService(engine, broker=broker, account_mode="PAPER_SANDBOX").process_date(trade_date)
+        fills = PaperExecutionService(
+            engine, broker=broker, account_mode="PAPER_SANDBOX"
+        ).process_date(trade_date)
     except (ValueError, KeyError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {
@@ -194,10 +225,16 @@ def emergency_stop(payload: StopRequest):
 @router.post("/mode")
 def set_mode(payload: ModeRequest):
     try:
-        SafetyController(_engine()).set_mode(payload.mode.upper(), actor="api_operator")
-    except ValueError as exc:
+        ProductionReadinessController(_engine()).promote(
+            payload.mode.upper(), actor="api_operator"
+        )
+    except (ValueError, RuntimeError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return {"execution_mode": payload.mode.upper(), "new_orders_enabled": False, "live_auto_enabled": False}
+    return {
+        "execution_mode": payload.mode.upper(),
+        "new_orders_enabled": False,
+        "live_auto_enabled": False,
+    }
 
 
 @router.post("/enable-orders")
@@ -218,7 +255,15 @@ def disable_orders():
 @router.get("/reconciliation/latest")
 def latest_reconciliation():
     with _engine().connect() as conn:
-        row = conn.execute(text("select * from reconciliation_runs where account_mode='PAPER' order by started_at desc limit 1")).mappings().first()
+        row = (
+            conn.execute(
+                text(
+                    "select * from reconciliation_runs where account_mode='PAPER' order by started_at desc limit 1"
+                )
+            )
+            .mappings()
+            .first()
+        )
     return dict(row) if row else {"status": "never_run"}
 
 
@@ -226,7 +271,11 @@ def latest_reconciliation():
 def reconcile_paper():
     engine = _engine()
     result = ReconciliationService(engine, PaperBroker(engine)).run("PAPER")
-    return {"run_id": result.run_id, "ok": result.ok, "discrepancies": list(result.discrepancies)}
+    return {
+        "run_id": result.run_id,
+        "ok": result.ok,
+        "discrepancies": list(result.discrepancies),
+    }
 
 
 @router.get("/portfolio-snapshot/{snapshot_date}")
@@ -249,27 +298,55 @@ def portfolio_snapshot(snapshot_date: date):
 @router.get("/workers")
 def worker_runs():
     with _engine().connect() as conn:
-        rows = conn.execute(text("select * from worker_runs order by started_at desc limit 50")).mappings().all()
-    return {"count": len(rows), "runs": [dict(r) for r in rows]}
+        rows = (
+            conn.execute(
+                text("select * from worker_runs order by started_at desc limit 50")
+            )
+            .mappings()
+            .all()
+        )
+    return {"count": len(rows), "runs": [safe_details(dict(r)) for r in rows]}
 
 
 @router.get("/audit")
-def audit_history(entity_type: str | None = None, entity_id: str | None = None, limit: int = Query(100, ge=1, le=500)):
-    rows = AuditTrail(_engine()).history(entity_type=entity_type, entity_id=entity_id, limit=limit)
-    return {"count": len(rows), "events": rows}
+def audit_history(
+    entity_type: str | None = None,
+    entity_id: str | None = None,
+    limit: int = Query(100, ge=1, le=500),
+):
+    rows = AuditTrail(_engine()).history(
+        entity_type=entity_type, entity_id=entity_id, limit=limit
+    )
+    return {"count": len(rows), "events": safe_details(rows)}
 
 
 @router.post("/paper-validation")
 def paper_validation(payload: PaperValidationRequest):
-    result = PaperValidationService(_engine()).evaluate(payload.started_on, payload.ended_on, actor="api_operator")
-    return {"run_id":result.run_id,"passed":result.passed,"metrics":result.metrics,"gates":result.gates,"criteria":result.criteria.__dict__}
+    result = PaperValidationService(_engine()).evaluate(
+        payload.started_on, payload.ended_on, actor="api_operator"
+    )
+    return {
+        "run_id": result.run_id,
+        "passed": result.passed,
+        "metrics": result.metrics,
+        "gates": result.gates,
+        "criteria": result.criteria.__dict__,
+    }
 
 
 @router.get("/paper-validation/latest")
 def latest_paper_validation():
     with _engine().connect() as conn:
-        row = conn.execute(text("select * from paper_validation_runs order by created_at desc limit 1")).mappings().first()
-    return dict(row) if row else {"status":"never_run"}
+        row = (
+            conn.execute(
+                text(
+                    "select * from paper_validation_runs order by created_at desc limit 1"
+                )
+            )
+            .mappings()
+            .first()
+        )
+    return dict(row) if row else {"status": "never_run"}
 
 
 @router.get("/readiness")
@@ -282,67 +359,110 @@ def readiness():
 @router.post("/promote/{stage}")
 def promote(stage: str):
     try:
-        result = ProductionReadinessController(_engine()).promote(stage.upper(), actor="api_operator")
+        result = ProductionReadinessController(_engine()).promote(
+            stage.upper(), actor="api_operator"
+        )
     except (ValueError, RuntimeError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return {"promoted_to": stage.upper(), "readiness": result.__dict__, "live_auto_enabled": False}
+    return {
+        "promoted_to": stage.upper(),
+        "readiness": result.__dict__,
+        "live_auto_enabled": False,
+    }
 
 
 @router.post("/live-validation/session")
 def create_live_validation_session(payload: LiveSessionRequest):
-    limits = LiveValidationLimits(payload.max_capital,payload.max_order_value,payload.max_open_positions,payload.max_daily_loss,tuple(s.upper() for s in payload.allowed_symbols))
+    limits = LiveValidationLimits(
+        payload.max_capital,
+        payload.max_order_value,
+        payload.max_open_positions,
+        payload.max_daily_loss,
+        tuple(s.upper() for s in payload.allowed_symbols),
+    )
     try:
-        session_id = LiveValidationService(_engine()).create_session(limits, actor="api_operator", notes=payload.notes)
+        session_id = LiveValidationService(_engine()).create_session(
+            limits, actor="api_operator", notes=payload.notes
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return {"session_id":session_id,"status":"DRAFT"}
+    return {"session_id": session_id, "status": "DRAFT"}
 
 
 @router.post("/live-validation/session/{session_id}/activate")
-def activate_live_validation_session(session_id: str):
+def activate_live_validation_session(session_id: UUID):
     try:
-        LiveValidationService(_engine()).activate_session(session_id, actor="api_operator")
+        LiveValidationService(_engine()).activate_session(
+            session_id, actor="api_operator"
+        )
     except (RuntimeError, KeyError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return {"session_id":session_id,"status":"ACTIVE"}
+    return {"session_id": session_id, "status": "ACTIVE"}
 
 
 @router.post("/live-validation/session/{session_id}/close")
-def close_live_validation_session(session_id: str, completed: bool = True):
+def close_live_validation_session(session_id: UUID, completed: bool = True):
     try:
-        LiveValidationService(_engine()).close_session(session_id, actor="api_operator", completed=completed)
+        LiveValidationService(_engine()).close_session(
+            session_id, actor="api_operator", completed=completed
+        )
     except (RuntimeError, KeyError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return {"session_id":session_id,"status":"COMPLETED" if completed else "ABORTED"}
+    return {"session_id": session_id, "status": "COMPLETED" if completed else "ABORTED"}
 
 
 @router.post("/live-validation/session/{session_id}/proposal")
-def create_live_validation_proposal(session_id: str, payload: LiveProposalRequest):
-    request = BrokerOrderRequest(payload.instrument_id.upper(),payload.side.upper(),payload.quantity,payload.order_type.upper(),payload.limit_price,payload.trigger_price)
+def create_live_validation_proposal(session_id: UUID, payload: LiveProposalRequest):
+    request = BrokerOrderRequest(
+        payload.instrument_id.upper(),
+        payload.side.upper(),
+        payload.quantity,
+        payload.order_type.upper(),
+        payload.limit_price,
+        payload.trigger_price,
+    )
     try:
-        approval_id = LiveValidationService(_engine()).propose_order(session_id,request,estimated_price=payload.estimated_price,actor="api_operator",reason=payload.reason)
+        approval_id = LiveValidationService(_engine()).propose_order(
+            session_id,
+            request,
+            estimated_price=payload.estimated_price,
+            actor="api_operator",
+            reason=payload.reason,
+        )
     except (RuntimeError, ValueError, KeyError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return {"approval_id":approval_id,"status":"PROPOSED","broker_submission":False}
+    return {
+        "approval_id": approval_id,
+        "status": "PROPOSED",
+        "broker_submission": False,
+    }
 
 
 @router.post("/live-validation/proposal/{approval_id}/approve")
-def approve_live_validation_proposal(approval_id: str):
+def approve_live_validation_proposal(approval_id: UUID):
     try:
         LiveValidationService(_engine()).approve(approval_id, actor="api_operator")
     except (PermissionError, RuntimeError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return {"approval_id":approval_id,"status":"APPROVED","broker_submission":False}
+    return {
+        "approval_id": approval_id,
+        "status": "APPROVED",
+        "broker_submission": False,
+    }
 
 
 @router.post("/live-validation/proposal/{approval_id}/reject")
-def reject_live_validation_proposal(approval_id: str, payload: RejectRequest):
-    LiveValidationService(_engine()).reject(approval_id, actor="api_operator", reason=payload.reason)
-    return {"approval_id":approval_id,"status":"REJECTED"}
+def reject_live_validation_proposal(approval_id: UUID, payload: RejectRequest):
+    LiveValidationService(_engine()).reject(
+        approval_id, actor="api_operator", reason=payload.reason
+    )
+    return {"approval_id": approval_id, "status": "REJECTED"}
 
 
 @router.post("/live-validation/proposal/{approval_id}/observation")
-def record_live_validation_observation(approval_id: str, payload: LiveObservationRequest):
+def record_live_validation_observation(
+    approval_id: UUID, payload: LiveObservationRequest
+):
     try:
         observation_id = LiveValidationService(_engine()).record_observation(
             approval_id,
@@ -358,4 +478,9 @@ def record_live_validation_observation(approval_id: str, payload: LiveObservatio
         )
     except (ValueError, RuntimeError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return {"observation_id":observation_id,"recorded":True}
+    return {"observation_id": observation_id, "recorded": True}
+
+
+@router.get("/reliability")
+def reliability():
+    return reliability_report(_engine())

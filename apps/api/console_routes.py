@@ -6,6 +6,7 @@ from uuid import UUID
 from fastapi import APIRouter, HTTPException, Query
 from sqlalchemy import text
 from packages.pms.config import load_strategy_config
+from packages.pms.reliability import safe_details
 from packages.pms.module_a_context import IST, end_of_day
 from packages.pms.module_e import ENGINE_VERSION
 
@@ -51,7 +52,7 @@ def _snapshot(conn, day):
         .mappings()
         .first()
     )
-    return dict(row) if row else None
+    return safe_details(dict(row)) if row else None
 
 
 def _run(conn, job):
@@ -65,7 +66,7 @@ def _run(conn, job):
         .mappings()
         .first()
     )
-    return dict(row) if row else None
+    return safe_details(dict(row)) if row else None
 
 
 def normalize_regime(row, session, requested):

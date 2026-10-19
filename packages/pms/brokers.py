@@ -86,11 +86,15 @@ class PaperBroker:
         self.lookup = _InstrumentLookup(engine)
         self.initial_cash = float(initial_cash)
         self.account_mode = account_mode.upper()
+        if self.account_mode not in {"PAPER", "PAPER_SANDBOX"}:
+            raise ValueError("Paper broker requires a paper account")
+        if not math.isfinite(self.initial_cash) or self.initial_cash <= 0:
+            raise ValueError("Paper capital must be finite and positive")
         self.broker_name = (broker_name or self.account_mode).upper()
         self.name = self.broker_name
 
     def place_order(self, request: BrokerOrderRequest) -> BrokerOrderResult:
-        if request.quantity <= 0:
+        if type(request.quantity) is not int or request.quantity <= 0:
             raise ValueError("quantity must be positive")
         side = request.side.upper()
         if side not in {"BUY", "SELL"}:
@@ -103,6 +107,11 @@ class PaperBroker:
         if kind in {"STOP", "STOP_MARKET", "SL-M"} and request.trigger_price is None:
             raise ValueError("trigger_price is required for stop orders")
 
+        if any(
+            v is not None and (not math.isfinite(float(v)) or v <= 0)
+            for v in (request.limit_price, request.trigger_price)
+        ):
+            raise ValueError("Order prices must be finite and positive")
         instrument = self.lookup.row(request.instrument_id)
         order_id = str(uuid4())
         status = "OPEN"
@@ -134,12 +143,34 @@ class PaperBroker:
                     int(existing["instrument_id"]),
                     existing["side"],
                     int(existing["quantity"]),
+                    existing["order_type"],
+                    (
+                        float(existing["limit_price"])
+                        if existing["limit_price"] is not None
+                        else None
+                    ),
+                    (
+                        float(existing["trigger_price"])
+                        if existing["trigger_price"] is not None
+                        else None
+                    ),
                 ) != (
                     self.account_mode,
                     self.broker_name,
                     int(instrument["id"]),
                     side,
                     request.quantity,
+                    kind,
+                    (
+                        float(request.limit_price)
+                        if request.limit_price is not None
+                        else None
+                    ),
+                    (
+                        float(request.trigger_price)
+                        if request.trigger_price is not None
+                        else None
+                    ),
                 ):
                     raise ValueError(
                         "Idempotency key belongs to a different order or account"

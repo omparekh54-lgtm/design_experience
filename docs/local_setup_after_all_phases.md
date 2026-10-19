@@ -12,7 +12,8 @@ This checklist is being maintained while implementation continues. Final ordered
 6. Run read-only module/orchestrator checks, then the required historical calculations.
 7. Run the matrix plan and preflight, repair actual blockers, then run/resume the research matrix and inspect saved evidence.
 8. Freeze the walk-forward design, run its offline plan and read-only preflight, then run/resume retrospective folds. Review the separate 2025 final-holdout inclusion before consuming it; never retune settings against test results. Continue with integrity/security/acceptance audits.
-9. Start the complete API and frontend and verify connected local views.
-10. Begin the forward PAPER campaign only when its gates and explicit PAPER permissions are satisfied. Its 2–3 months are elapsed trading sessions, not an instant batch command.
+9. Configure private operator authentication, HTTPS, verified database TLS and restricted broker/database access using the Step-13 runbook. Run the security/reliability plan and read-only check. Rehearse a trusted, complete backup restore into a separate empty disposable database and compare the source manifest; review grants, application behavior and recovery objectives separately. Do not restore over the backfilled source.
+10. Start the complete API and frontend and verify connected local views, request guards and worker journals.
+11. Begin the forward PAPER campaign only when its gates and explicit PAPER permissions are satisfied. Its 2–3 months are elapsed trading sessions, not an instant batch command.
 
 No Angel One credential, real-money promotion or safety unlock is required to implement or plan the research matrix. Existing safety locks remain active. Implementation tests use synthetic fixtures and do not represent completed historical experiments on the user's computer.

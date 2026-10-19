@@ -2,11 +2,8 @@ from __future__ import annotations
 
 import json
 import os
-import secrets
 import threading
 
-from fastapi import Request
-from fastapi.responses import JSONResponse
 
 from apps.api.main import app
 from apps.api.execution_routes import router as execution_router
@@ -14,21 +11,6 @@ from apps.api.data_gap_routes import router as data_gap_router
 from apps.api.console_routes import router as console_router
 from apps.api.matrix_routes import router as matrix_router
 
-
-@app.middleware("http")
-async def protect_execution_mutations(request: Request, call_next):
-    """Require a private operator key for execution-changing API calls.
-
-    Read-only GET/HEAD/OPTIONS endpoints remain available to the status dashboard.
-    If OPS_API_KEY is absent, all execution mutations fail closed.
-    """
-    path = request.url.path
-    if path.startswith("/v1/execution/") and request.method.upper() not in {"GET", "HEAD", "OPTIONS"}:
-        expected = os.getenv("OPS_API_KEY", "")
-        supplied = request.headers.get("x-ops-key", "")
-        if not expected or not supplied or not secrets.compare_digest(supplied, expected):
-            return JSONResponse(status_code=401, content={"detail": "operator authentication required"})
-    return await call_next(request)
 
 
 def _reference_gap_backfill_worker() -> None:
@@ -54,9 +36,9 @@ def _reference_gap_backfill_worker() -> None:
                 result = func()
                 print("REFERENCE_GAP_BACKFILL " + json.dumps({"step": name, "ok": True, "result": result}, default=str), flush=True)
             except Exception as exc:  # each dataset is independent; continue and report all failures
-                print("REFERENCE_GAP_BACKFILL " + json.dumps({"step": name, "ok": False, "error": str(exc)}), flush=True)
+                print("REFERENCE_GAP_BACKFILL " + json.dumps({"step": name, "ok": False, "error_type": type(exc).__name__}), flush=True)
     except Exception as exc:
-        print("REFERENCE_GAP_BACKFILL " + json.dumps({"step": "bootstrap", "ok": False, "error": str(exc)}), flush=True)
+        print("REFERENCE_GAP_BACKFILL " + json.dumps({"step": "bootstrap", "ok": False, "error_type": type(exc).__name__}), flush=True)
 
 
 @app.on_event("startup")

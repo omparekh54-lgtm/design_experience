@@ -31,3 +31,8 @@ raw_data/
 apps/web/test-results/
 
 *.tsbuildinfo
+
+# Private recovery archives
+backups/
+*.dump
+*.backup

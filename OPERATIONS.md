@@ -376,3 +376,7 @@ The V2 design, gates, frozen selection and resume procedure are described in [wa
 ## Data integrity audit
 
 Use the [dated audit design](docs/data_integrity_audit.md) in the consolidated end setup. Each run preserves a new report, source scans are read-only, and optional persistence writes only research evidence. REVIEW_REQUIRED and NOT_RUN cannot certify full history. No automatic repairs, DQ resolution or safety unlock occur.
+
+## Security and recovery
+
+Follow the [Step-13 runbook](docs/security_reliability.md) for private operator keys, HTTPS/TLS, bounded workers, failure review and isolated restore verification. Plan/check commands join the deferred consolidated setup. A posture report or inspected archive does not establish full security or recovery acceptance. Keep existing execution locks and the disabled real broker adapter in place.

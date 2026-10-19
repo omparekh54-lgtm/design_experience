@@ -26,6 +26,7 @@ jobs:
           python-version: '3.12'
       - run: python -m pip install --upgrade pip
       - run: pip install -r requirements-ops.txt
+      - run: pytest -q tests/test_worker_reliability.py
       - run: python -c "from packages.pms.workers import celery_app; import packages.pms.worker_tasks_extended; print(sorted(celery_app.conf.beat_schedule))"
 
   web-build:

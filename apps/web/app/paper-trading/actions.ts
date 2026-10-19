@@ -5,7 +5,7 @@ async function post(path: string, body: unknown, form: FormData): Promise<{
     ok: boolean;
     message: string;
     data?: Record<string, unknown>;
-}> { const key = String(form.get('operator_key') || ''); if (!key || key.length > 256)
+}> { const endpoint = new URL(API_BASE);if(endpoint.protocol!=='https:' && !['localhost','127.0.0.1','[::1]'].includes(endpoint.hostname) && process.env.PMS_ALLOW_PRIVATE_HTTP!=='1')return {ok:false,message:'The operator connection requires HTTPS.'}; const key = String(form.get('operator_key') || ''); if (!key || key.length > 256)
     return { ok: false, message: 'Enter your operator key to authorize this action.' }; try {
     const response = await fetch(`${API_BASE}${path}`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-ops-key': key }, body: JSON.stringify(body), cache: 'no-store', signal: AbortSignal.timeout(15000) });
     if (!response.ok)
