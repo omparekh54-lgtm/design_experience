@@ -3,6 +3,27 @@
 from urllib.parse import unquote
 
 
+def connection_failure_code(error):
+    """Return an allowlisted diagnostic; never expose driver text or credentials."""
+    cause = getattr(error, "orig", error)
+    message = str(cause).lower()
+    if "root certificate file" in message or "sslrootcert" in message:
+        return "DATABASE_CA_CONFIGURATION"
+    if "certificate verify failed" in message or "certificate verification failed" in message:
+        return "DATABASE_CERTIFICATE_VERIFICATION"
+    if "does not match host name" in message or "hostname mismatch" in message:
+        return "DATABASE_CERTIFICATE_HOSTNAME"
+    if "password authentication failed" in message:
+        return "DATABASE_AUTHENTICATION"
+    if "could not translate host name" in message or "name resolution" in message:
+        return "DATABASE_DNS"
+    if "timeout expired" in message or "connection timed out" in message:
+        return "DATABASE_CONNECT_TIMEOUT"
+    if "connection refused" in message:
+        return "DATABASE_CONNECTION_REFUSED"
+    return "DATABASE_CONNECTION_FAILED"
+
+
 def placeholder_password(password):
     return unquote(password or "").upper() in {
         "[YOUR-PASSWORD]", "[YOUR_PASSWORD]", "YOUR_DATABASE_PASSWORD",

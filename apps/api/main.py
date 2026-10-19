@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import logging
 from dataclasses import asdict
 from datetime import date, datetime, time
 from functools import lru_cache
@@ -11,6 +12,7 @@ from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from apps.api.security import APISecurityMiddleware, safe_validation_error, safe_http_error
 from packages.pms.database import online_engine
+from packages.pms.connection_config import connection_failure_code
 from pydantic import BaseModel, Field, ConfigDict
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import make_url
@@ -144,7 +146,8 @@ def ready():
     try:
         with db_engine().connect() as conn:
             conn.execute(text("select 1")).scalar_one()
-    except Exception:
+    except Exception as exc:
+        logging.getLogger(__name__).warning("Readiness failed: %s", connection_failure_code(exc))
         raise HTTPException(503,"Database unavailable") from None
     return {"status":"ready","database":"reachable","execution_readiness":False}
 

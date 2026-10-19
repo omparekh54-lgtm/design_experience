@@ -7,6 +7,22 @@ from packages.pms.deployment_readiness import environment_checks
 from scripts.start_cloud_api import configuration_errors
 
 
+@pytest.mark.parametrize("message,code", [
+    ('root certificate file "system" does not exist', "DATABASE_CA_CONFIGURATION"),
+    ("SSL error: certificate verify failed", "DATABASE_CERTIFICATE_VERIFICATION"),
+    ('server certificate does not match host name "private"', "DATABASE_CERTIFICATE_HOSTNAME"),
+    ("password authentication failed for user private", "DATABASE_AUTHENTICATION"),
+    ("could not translate host name private", "DATABASE_DNS"),
+    ("connection timed out private", "DATABASE_CONNECT_TIMEOUT"),
+    ("connection refused private", "DATABASE_CONNECTION_REFUSED"),
+    ("postgresql://operator:private@host/db", "DATABASE_CONNECTION_FAILED"),
+])
+def test_connection_diagnostic_never_returns_driver_text(message, code):
+    from packages.pms.connection_config import connection_failure_code
+    from sqlalchemy.exc import OperationalError
+    assert connection_failure_code(OperationalError("", {}, RuntimeError(message))) == code
+
+
 @pytest.mark.parametrize("value", ["[YOUR-PASSWORD]", "%5BYOUR-PASSWORD%5D", "YOUR_DATABASE_PASSWORD"])
 def test_actual_placeholder_spellings_are_rejected(value):
     assert placeholder_password(value)
