@@ -22,6 +22,8 @@ export const request = cache(async <T,>(path: string): Promise<ApiResult<T>> => 
 function query(values: Record<string, string | number | undefined>) { const p = new URLSearchParams(); Object.entries(values).forEach(([k, v]) => { if (v !== undefined && v !== "")
     p.set(k, String(v)); }); return p.toString(); }
 export const api = {
+    walkStudies: () => request<{count:number;runs:Json[]}>("/v1/research/walk-forward/studies"),
+    walkStudy: (id:string,page=1) => request<{run:Json;folds:Json[];total:number;page:number;limit:number;acceptance:string}>(`/v1/research/walk-forward/studies/${encodeURIComponent(id)}?${query({page})}`),
     matrices: () => request<{count:number;runs:Json[]}>("/v1/research/matrix"),
     matrix: (id:string,page=1,status="",family="") => request<{run:Json;cells:Json[];total:number;page:number;limit:number;acceptance:string}>(`/v1/research/matrix/${encodeURIComponent(id)}?${query({page,status,family})}`),
     overview: (d?: string) => request<Overview>(`/v1/console/overview?${query({ as_of: d })}`),

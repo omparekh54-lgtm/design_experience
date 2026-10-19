@@ -384,7 +384,20 @@ def summarize(cells):
 class MatrixRunner:
     """Checkpoint only completed cells; changed config/data cannot reuse evidence."""
 
-    def __init__(self, base, cells, dataset, path, *, executor, gate, code_version):
+    def __init__(
+        self,
+        base,
+        cells,
+        dataset,
+        path,
+        *,
+        executor,
+        gate,
+        code_version,
+        purpose="MATRIX",
+    ):
+        if purpose not in {"MATRIX", "WALK_FORWARD_PHASE"}:
+            raise ValueError("Unknown research purpose")
         self.base, self.cells, self.dataset = deepcopy(base), tuple(cells), dataset
         if not self.cells:
             raise ValueError("Nonempty matrix required")
@@ -393,6 +406,7 @@ class MatrixRunner:
         self.identity = fingerprint(
             dict(
                 version=MATRIX_VERSION,
+                purpose=purpose,
                 config=base,
                 cells=plan,
                 dataset=dataset,
@@ -437,11 +451,20 @@ class MatrixRunner:
                 config=deepcopy(base),
                 scope="RESEARCH_ONLY",
                 design_scope=(
-                    "FULL_DEFAULT"
-                    if [c.key for c in self.cells] == [c.key for c in matrix_plan(base)]
-                    else "REDUCED_OR_CUSTOM"
+                    "WALK_FORWARD_PHASE"
+                    if purpose == "WALK_FORWARD_PHASE"
+                    else (
+                        "FULL_DEFAULT"
+                        if [c.key for c in self.cells]
+                        == [c.key for c in matrix_plan(base)]
+                        else "REDUCED_OR_CUSTOM"
+                    )
                 ),
-                holdout="2025 onward is reserved; no parameter selection or production config updates",
+                holdout=(
+                    "Walk-forward phase: training selects parameters; selected tests do not select or promote settings"
+                    if purpose == "WALK_FORWARD_PHASE"
+                    else "2025 onward is reserved; no parameter selection or production config updates"
+                ),
                 cells=[
                     dict(
                         key=c.key,

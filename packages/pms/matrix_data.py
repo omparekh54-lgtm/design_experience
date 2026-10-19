@@ -69,6 +69,7 @@ def code_fingerprint():
     files = [
         *sorted((root / "packages").rglob("*.py")),
         root / "scripts/run_backtest_matrix.py",
+        root / "scripts/run_walk_forward.py",
     ]
     return fingerprint(
         {

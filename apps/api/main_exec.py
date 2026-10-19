@@ -70,3 +70,6 @@ app.include_router(data_gap_router)
 
 app.include_router(console_router)
 app.include_router(matrix_router)
+
+from apps.api.walk_forward_routes import router as walk_forward_router
+app.include_router(walk_forward_router)

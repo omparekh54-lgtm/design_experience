@@ -158,24 +158,13 @@ Results persist to `stress_test_runs` and `stress_test_results` unless `--no-per
 
 ### Phase 16 — Walk-forward / out-of-sample validation
 
-`packages/pms/walk_forward.py` implements real train -> parameter selection -> freeze -> test evaluation. The OOS test window never participates in parameter selection. Default windows are:
+The V2 runner uses the isolated historical portfolio replay introduced by the backtesting matrix. It completes a predeclared technical grid on training data, freezes a deterministic selection, then evaluates that configuration once on a separate test window. Each replay starts a fresh account; production settings and execution modes are never changed.
 
-- train 2014–2018, test 2019–2020
-- train 2015–2020, test 2021–2022
-- train 2017–2022, test 2023–2024
-- final holdout: train through 2024, test 2025–2026-10-16
+Default folds train from 2018 through 2019/2020/2022 and test 2020, 2021–2022 and 2023–2024. These are retrospective development tests. The separate 2025 final holdout requires explicit inclusion. Its pristine/unseen status is not certified.
 
-Training searches the ADR/rally/risk/volume grid using return + bounded profit-factor reward - drawdown. The selected configuration is then frozen for the OOS window.
+The default grid has 27 ADR/rally/volume candidates per fold; risk sizing stays fixed. Interrupted runs resume with matching input/code hashes and checksummed journals. Missing training candidates or insufficient closed cycles block selection. Saved V2 studies use `research_runs` with type `WALK_FORWARD_V2`; older lab records remain clearly separate.
 
-Run full grid:
-
-```bash
-python scripts/run_walk_forward.py \
-  --symbols NSE:RELIANCE,NSE:TCS,NSE:INFY \
-  --variant FULL_A_B_C_E
-```
-
-Use `--quick` for a reduced smoke/research grid. Results persist to `walk_forward_runs` and `walk_forward_results`.
+See [walk-forward design and usage](docs/walk_forward_testing.md). Local execution remains deferred to the consolidated end-of-build setup.
 
 ### Phase 17 — Production FastAPI surface
 
