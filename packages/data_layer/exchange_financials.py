@@ -202,27 +202,32 @@ class NSEIntegratedFinancialsProvider:
 
     def _parse_row(self, row: dict[str, Any]) -> ExchangeFilingRecord | None:
         symbol = _pick(row, "symbol", "sm_symbol", "securitySymbol")
-        period_end = _parse_date(_pick(row, "quarterEndDate", "quarter_end_date", "periodEnded", "period_end"))
+        period_end = _parse_date(_pick(row, "quarterEndDate", "quarter_end_date", "periodEnded", "period_end", "qe_Date"))
         filed_at = _parse_datetime(
-            _pick(row, "broadcastDateTime", "broadcast_date_time", "sort_date", "filingDateTime", "exchdisstime")
+            _pick(row, "broadcastDateTime", "broadcast_date_time", "sort_date", "filingDateTime", "exchdisstime", "broadcast_Date", "revised_Date", "creation_Date")
         )
         if not symbol or period_end is None or filed_at is None:
             return None
+        if 'creation_Date' in row:
+            # Modern integrated payload: never date a revised/disseminated filing
+            # earlier than its latest explicit exchange publication timestamp.
+            filed_at=max(t for t in (filed_at,_parse_datetime(row.get('creation_Date')),
+                                    _parse_datetime(row.get('revised_Date'))) if t is not None)
 
-        submission_type = str(_pick(row, "typeOfSubmission", "submissionType", "type_of_submission") or "Original")
+        submission_type = str(_pick(row, "typeOfSubmission", "submissionType", "type_of_submission", "type_Sub") or "Original")
         return ExchangeFilingRecord(
             exchange="NSE",
             symbol=str(symbol).upper(),
-            company_name=_pick(row, "companyName", "company_name", "sm_name", "issuer"),
+            company_name=_pick(row, "companyName", "company_name", "sm_name", "issuer", "cmName"),
             period_end=period_end,
             filed_at=filed_at,
-            statement_scope=_scope(_pick(row, "consolidatedStandalone", "consolidated_standalone", "statementType", "scope")),
+            statement_scope=_scope(_pick(row, "consolidatedStandalone", "consolidated_standalone", "statementType", "scope", "consolidated")),
             submission_type=submission_type,
-            audit_status=_pick(row, "auditedUnaudited", "auditStatus", "audited_unaudited"),
-            revised_at=_parse_datetime(_pick(row, "revisedDateTime", "revised_date_time", "revisedAt")),
-            revision_remarks=_pick(row, "revisionRemarks", "revision_remarks", "remarks"),
+            audit_status=_pick(row, "auditedUnaudited", "auditStatus", "audited_unaudited", "audited"),
+            revised_at=_parse_datetime(_pick(row, "revisedDateTime", "revised_date_time", "revisedAt", "revised_Date")),
+            revision_remarks=_pick(row, "revisionRemarks", "revision_remarks", "remarks", "revision_Remark"),
             exchange_received_at=_parse_datetime(_pick(row, "exchangeReceivedTime", "exchange_received_time")),
-            exchange_disseminated_at=_parse_datetime(_pick(row, "exchangeDisseminationTime", "exchange_dissemination_time")),
+            exchange_disseminated_at=_parse_datetime(_pick(row, "exchangeDisseminationTime", "exchange_dissemination_time", "creation_Date")),
             external_id=str(_pick(row, "id", "filingId", "seqId", "sequenceNo") or "") or None,
             details_uri=_absolute(self.BASE_URL, _pick(row, "details", "detailsLink", "attachment", "attchmntFile")),
             xbrl_uri=_absolute(self.BASE_URL, _pick(row, "xbrl", "xbrlLink", "xbrlFile", "xbrl_file_link")),

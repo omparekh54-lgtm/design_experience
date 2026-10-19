@@ -9,7 +9,7 @@ from packages.pms.module_a_context import as_ist
 CONTEXT_SQL = """
 with calendar as (
  select distinct trade_date from module_e_benchmark_bars where benchmark_code='NIFTY50'
- and source='NSE_HISTORICAL_OR' and trade_date<=cast(:market_date as date)
+ and source in ('NSE_HISTORICAL_OR','NSE_DAILY_INDEX') and trade_date<=cast(:market_date as date)
 ), price_daily as (
  select distinct on (p.instrument_id,p.trade_date) p.instrument_id,p.trade_date,p.close,p.volume,p.turnover
  from daily_prices p join calendar c on c.trade_date=p.trade_date
@@ -35,8 +35,15 @@ with calendar as (
  where effective_from<=cast(:reference_date as date) and (effective_to is null or effective_to>cast(:reference_date as date))
  order by instrument_id,effective_from desc,id desc
 ), surveillance_coverage as (
+ select surveillance_type,max(latest) latest from (
  select surveillance_type,max(effective_from) latest from surveillance_history
  where effective_from<=:as_of and source like 'NSE_%' group by surveillance_type
+ union all
+ select t.kind, max((metadata->>'date')::date::timestamp at time zone 'Asia/Kolkata') latest
+ from provider_snapshots p cross join (values ('ASM'),('GSM')) t(kind)
+ where p.provider='NSE' and p.dataset='CLOUD_SURVEILLANCE' and p.observed_at<=:as_of
+ and p.metadata->>'complete'='true' group by t.kind
+ ) verified group by surveillance_type
 ), active_surveillance as (
  select distinct instrument_id from surveillance_history h where surveillance_type in ('ASM','GSM')
  and effective_from<=:as_of and (effective_to is null or
@@ -80,6 +87,9 @@ def normalize_context(row: dict, as_of: datetime, cfg: dict) -> dict:
     if not context.get('industry') and knowable:
         context['industry'] = observation.get('industry') or metadata.get('industry')
     context['suspended'] = str(observation.get('is_suspended')).lower()=='true' if knowable else None
+    cloud_status=metadata.get('cloud_status') or {}
+    if cloud_status.get('observed_at') and as_ist(datetime.fromisoformat(cloud_status['observed_at']))<=stamp:
+        context['suspended']=cloud_status.get('suspended')
     context['listing_known'] = bool(context.get('listed_from') and context['listed_from']<=stamp.date()
                                     and (context.get('delisted_on') is None or context['delisted_on']>stamp.date()))
     context['surveillance_known'] = context.get('surveillance_types_ready',0)==2 and (

@@ -9,6 +9,7 @@ from decimal import Decimal
 import hashlib
 import json
 import math
+import os
 from uuid import NAMESPACE_URL, uuid5
 
 from sqlalchemy import text
@@ -434,6 +435,11 @@ class FormalPaperExecution:
         return budget, list(dict.fromkeys(reasons))
 
     def _entry_gate(self, conn, day, calendar):
+        if os.getenv('PMS_CLOUD_COLLECTION_REQUIRED','0')=='1':
+            from packages.pms.cloud_collection import collection_gate
+            now=self.now()
+            if not collection_gate(conn,now.date(),now):
+                return 0,['cloud_collection_missing_partial_failed_or_stale']
         prior = max((d for d in calendar.sessions if d < day), default=None)
         safety = (
             conn.execute(
@@ -1021,6 +1027,11 @@ class FormalPaperExecution:
             return result
         with self.engine.begin() as conn:
             self.lock(conn)
+            if os.getenv('PMS_CLOUD_COLLECTION_REQUIRED','0')=='1':
+                from packages.pms.cloud_collection import collection_gate
+                now=self.now()
+                if not collection_gate(conn,day,now):
+                    return {**result,'status':'BLOCKED','reason':'cloud_collection_missing_partial_failed_or_stale'}
             run = (
                 conn.execute(
                     text(

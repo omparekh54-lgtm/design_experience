@@ -321,7 +321,7 @@ python scripts/run_market_close.py --rerun
 
 Run after data ingestion. `--check` is read-only; normal runs use today's IST date
 only. Use direct PostgreSQL or the session pooler on 5432, not transaction pooling.
-GitHub/Celery schedules are 19:00, 19:15 and 19:30 IST with exchange-calendar guards.
+The cloud GitHub collection/PAPER workflow now schedules 19:07, 19:27 and 19:47 IST; legacy Celery beat times are 19:00, 19:15 and 19:30. Select one scheduler owner and require a fresh cloud collection journal on all deployed entry points.
 A configured schedule needs its secret/worker to be active. BLOCKED/FAILED exits
 are nonzero; a successful repeat returns its saved report. No locks are cleared
 or execution modes promoted. See [daily_orchestrator.md](docs/daily_orchestrator.md)
@@ -384,3 +384,7 @@ Follow the [Step-13 runbook](docs/security_reliability.md) for private operator 
 ## Unattended deployment readiness
 
 The user now requires cloud operation without daily laptop commands. Follow [Phase-1 readiness](docs/deployment_readiness.md), which supersedes the local-only operating model. `scripts/check_deployment_readiness.py --plan` is offline; `--check --database` explicitly inspects the database read-only. Exit 2 preserves outstanding deployment/campaign blockers. No migration application, repair, safety unlock or campaign start occurs. Full data collection, confirmed hosting workspace, resource measurements and deployment evidence are prerequisites for later phases.
+
+## Official cloud collection
+
+See [Phase-2 collection](docs/cloud_data_collection.md) for source contracts, checked pagination, bounded XML catch-up, the pending migration 010, view/local-table routing, separate collection/PAPER activation and fresh-journal entry gates. Initial XML backlogs are PARTIAL; unsupported source changes remain blockers. The existing backfill is preserved. Raw private archival, deployment verification, alerts and recovery remain explicit later-phase work.

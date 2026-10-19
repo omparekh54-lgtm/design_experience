@@ -13,7 +13,7 @@ COVERAGE_SQL = """
 with calendar as (
  select trade_date,row_number() over(order by trade_date desc) session_rank
  from (select distinct trade_date from module_e_benchmark_bars where benchmark_code='NIFTY50'
-       and source='NSE_HISTORICAL_OR' and trade_date<=:d order by trade_date desc limit 50) c
+       and source in ('NSE_HISTORICAL_OR','NSE_DAILY_INDEX') and trade_date<=:d order by trade_date desc limit 50) c
 ), prices as (
  select distinct on (p.instrument_id,p.trade_date) p.*,c.session_rank
  from daily_prices p join calendar c using(trade_date) where c.session_rank<=20

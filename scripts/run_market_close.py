@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 from dotenv import load_dotenv
-from sqlalchemy import create_engine
+from packages.pms.database import online_engine
 from apps.api.main import _render_safe_database_url
 from packages.pms.daily_orchestrator import DailyOrchestrator
 
@@ -23,11 +23,7 @@ def engine_from_env():
     raw = os.getenv("DATABASE_URL") or os.getenv("PMS_DATABASE_URL")
     if not raw:
         raise RuntimeError("DATABASE_URL/PMS_DATABASE_URL is required in .env")
-    return create_engine(
-        _render_safe_database_url(raw),
-        pool_pre_ping=True,
-        connect_args={"options": "-c search_path=pms,public"},
-    )
+    return online_engine(_render_safe_database_url(raw),worker=True)
 
 
 def run(trade_date: date | None = None, *, check_only=False, rerun=False):

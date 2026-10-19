@@ -263,3 +263,7 @@ Authenticated mutations, transactional safety guards, bounded online connections
 ### Unattended cloud deployment — Phase 1
 
 The operating target is cloud scheduling with the laptop switched off. The [readiness assessment and deployment plan](docs/deployment_readiness.md) inventories migration/build inputs, validates cloud configuration and optionally inspects schema/safety/DQ in a read-only transaction. It preserves blockers and does not start the campaign. Full cloud ingestion is the next phase.
+
+### Unattended cloud deployment — Phase 2
+
+The [official collection pipeline](docs/cloud_data_collection.md) implements bulk prices/benchmarks/surveillance and incremental filings, ownership, events and reference updates. It uses checked source receipts and blocks cloud PAPER entries on partial or stale collection. Activation, reviewed migration 010 and full deployed-universe verification remain Phase-3 prerequisites; no daily laptop commands are required by the operating design.

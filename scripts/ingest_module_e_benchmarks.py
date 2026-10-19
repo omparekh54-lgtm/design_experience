@@ -166,7 +166,7 @@ def coverage_audit(engine, start: date, end: date) -> dict:
         bars = conn.execute(text("""
             select benchmark_code,trade_date from pms.module_e_benchmark_bars
             where benchmark_code in ('NIFTYMIDSMALLCAP400','INDIAVIX','NIFTY50')
-              and source=:source and trade_date between :start and :end
+              and source in ('NSE_HISTORICAL_OR','NSE_DAILY_INDEX') and trade_date between :start and :end
         """), {"start": start, "end": end, "source": SOURCE}).all()
     expected = {r[1] for r in bars if r[0] == CALENDAR_CODE}
     dates = {code: {r[1] for r in bars if r[0] == code}
@@ -187,7 +187,7 @@ def coverage_audit(engine, start: date, end: date) -> dict:
             "min_date": min(observed) if observed else None, "max_date": latest,
             "stale": latest is None or (end-latest).days > 5,
             "calendar_unavailable": not calendar_complete,
-            "calendar_source": "NSE_HISTORICAL_OR:NIFTY50",
+            "calendar_source": "OFFICIAL_NSE:NIFTY50",
             "unexpected_dates": [str(d) for d in sorted(observed-expected)],
         }
     return result

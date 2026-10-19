@@ -1,5 +1,7 @@
 # Cloud rollout Phase 1 — Deployment readiness
 
+Phase 2 has since implemented the collection chain and revised scheduler. Its [collection runbook](cloud_data_collection.md) supersedes the corresponding implementation gaps recorded in the dated Phase-1 assessment below. Deployment activation, migration 010 and full-universe verification are still pending.
+
 The target is unattended cloud PAPER operation with the laptop switched off. This assessment prepares that deployment; it does not start services, ingestion, migrations, orders or the campaign. Existing module implementation tests do not establish historical or forward performance.
 
 ## Current assessment (2026-10-19)

@@ -7,6 +7,7 @@ from dataclasses import asdict
 from datetime import date, datetime
 import hashlib
 import json
+import os
 from uuid import uuid4
 
 from sqlalchemy import text
@@ -181,11 +182,16 @@ class DailyServices:
             return {"status": "SKIPPED", "reasons": ["exchange_non_session"]}
         if now.date() == day and (now.hour, now.minute) < (15, 30):
             return {"status": "SKIPPED", "reasons": ["market_not_closed"]}
+        if os.getenv('PMS_CLOUD_COLLECTION_REQUIRED', '0') == '1':
+            from packages.pms.cloud_collection import collection_gate
+            with self.engine.connect() as conn:
+                if not collection_gate(conn, day, now):
+                    return {'status':'BLOCKED','reasons':['cloud_collection_missing_partial_failed_or_stale']}
         with self.engine.connect() as conn:
             counts = dict(
                 conn.execute(
-                    text("""select benchmark_code,count(*) from module_e_benchmark_bars
-                where trade_date=:d and source='NSE_HISTORICAL_OR' and close>0
+                    text("""select benchmark_code,count(distinct trade_date) from module_e_benchmark_bars
+                where trade_date=:d and source in ('NSE_HISTORICAL_OR','NSE_DAILY_INDEX') and close>0
                 and close::text not in ('NaN','Infinity','-Infinity')
                 and benchmark_code in ('NIFTY50','NIFTY500','NIFTYMIDSMALLCAP400','INDIAVIX')
                 group by benchmark_code"""),
@@ -356,7 +362,7 @@ class DailyOrchestrator:
                     "reason": "another_daily_run_holds_lock",
                 }
             prior = self.journal.latest(key)
-            if prior and prior["status"] == "SUCCESS" and not rerun:
+            if prior and prior["status"] == "SUCCESS" and not rerun and os.getenv('PMS_CLOUD_COLLECTION_REQUIRED','0')!='1':
                 replay = {**prior["details"], "replayed": True}
                 try:
                     replay["paper_admission"] = self.services.admit(day)

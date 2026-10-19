@@ -109,7 +109,7 @@ def input_manifest(snapshot, cells, symbols=None, *, allow_ambiguous=False):
     forward_calendar = (
         snapshot.execute(
             text(
-                "select trade_date from pms.module_e_benchmark_bars where benchmark_code='NIFTY50' and source='NSE_HISTORICAL_OR' and trade_date between :warmup and :calendar_end order by trade_date"
+                "select distinct trade_date from pms.module_e_benchmark_bars where benchmark_code='NIFTY50' and source in ('NSE_HISTORICAL_OR','NSE_DAILY_INDEX') and trade_date between :warmup and :calendar_end order by trade_date"
             ),
             params,
         )
@@ -154,11 +154,11 @@ def input_manifest(snapshot, cells, symbols=None, *, allow_ambiguous=False):
 
 
 COVERAGE = """with calendar as (
-  select trade_date from pms.module_e_benchmark_bars
-  where benchmark_code='NIFTY50' and source='NSE_HISTORICAL_OR' and
+  select distinct trade_date from pms.module_e_benchmark_bars
+  where benchmark_code='NIFTY50' and source in ('NSE_HISTORICAL_OR','NSE_DAILY_INDEX') and
   trade_date between coalesce((select min(trade_date) from (
-    select trade_date from pms.module_e_benchmark_bars where benchmark_code='NIFTY50'
-    and source='NSE_HISTORICAL_OR' and trade_date<:start order by trade_date desc limit 257) h),:start) and :end
+    select distinct trade_date from pms.module_e_benchmark_bars where benchmark_code='NIFTY50'
+    and source in ('NSE_HISTORICAL_OR','NSE_DAILY_INDEX') and trade_date<:start order by trade_date desc limit 257) h),:start) and :end
 ), chosen as (
   select distinct on(p.instrument_id,p.trade_date) p.* from pms.daily_prices p
   join calendar c using(trade_date) where p.instrument_id in(select value::bigint from jsonb_array_elements_text(cast(:ids as jsonb)))
@@ -246,7 +246,7 @@ class MatrixGates:
             sessions = (
                 self.snapshot.execute(
                     text(
-                        "select trade_date from pms.module_e_benchmark_bars where benchmark_code='NIFTY50' and source='NSE_HISTORICAL_OR' and trade_date between :s and :e order by trade_date"
+                        "select distinct trade_date from pms.module_e_benchmark_bars where benchmark_code='NIFTY50' and source in ('NSE_HISTORICAL_OR','NSE_DAILY_INDEX') and trade_date between :s and :e order by trade_date"
                     ),
                     params,
                 )
@@ -263,7 +263,7 @@ class MatrixGates:
                 )
             prior = self.snapshot.execute(
                 text(
-                    "select count(*) from pms.module_e_benchmark_bars where benchmark_code='NIFTY50' and source='NSE_HISTORICAL_OR' and trade_date<:s"
+                    "select count(distinct trade_date) from pms.module_e_benchmark_bars where benchmark_code='NIFTY50' and source in ('NSE_HISTORICAL_OR','NSE_DAILY_INDEX') and trade_date<:s"
                 ),
                 params,
             ).scalar_one()

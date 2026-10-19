@@ -15,7 +15,7 @@ class IntegrityCheck:
 
 # Every instrument-scoped rule uses the dated audit universe, including inactive stocks.
 IDS = "in (select value::bigint from jsonb_array_elements_text(cast(:ids as jsonb)))"
-CAL = "select trade_date from pms.module_e_benchmark_bars where benchmark_code='NIFTY50' and source='NSE_HISTORICAL_OR' and trade_date between :start and :end"
+CAL = "select distinct trade_date from pms.module_e_benchmark_bars where benchmark_code='NIFTY50' and source in ('NSE_HISTORICAL_OR','NSE_DAILY_INDEX') and trade_date between :start and :end"
 NUM = "('NaN','Infinity','-Infinity')"
 CHECKS = []
 
@@ -95,8 +95,8 @@ having count(*)=0 or min(trade_date)>cast(:start as date)+7 or max(trade_date)<c
 add(
     "CALENDAR_WARMUP",
     "COVERAGE",
-    """select count(*) sessions from pms.module_e_benchmark_bars where benchmark_code='NIFTY50'
-and source='NSE_HISTORICAL_OR' and trade_date<:start having count(*)<257""",
+    """select count(distinct trade_date) sessions from pms.module_e_benchmark_bars where benchmark_code='NIFTY50'
+and source in ('NSE_HISTORICAL_OR','NSE_DAILY_INDEX') and trade_date<:start having count(distinct trade_date)<257""",
     "Load at least 257 official sessions before the audit/research start.",
 )
 add(
@@ -104,7 +104,7 @@ add(
     "COVERAGE",
     f"""select codes.code,c.trade_date from ({CAL}) c cross join
 (values ('NIFTYMIDSMALLCAP400'),('INDIAVIX'),('NIFTY500')) codes(code)
-where not exists(select 1 from pms.module_e_benchmark_bars b where b.benchmark_code=codes.code and b.trade_date=c.trade_date and b.source='NSE_HISTORICAL_OR')""",
+where not exists(select 1 from pms.module_e_benchmark_bars b where b.benchmark_code=codes.code and b.trade_date=c.trade_date and b.source in ('NSE_HISTORICAL_OR','NSE_DAILY_INDEX'))""",
     "Repair exact missing official benchmark/VIX dates; row totals are not a coverage denominator.",
 )
 add(
