@@ -1,0 +1,58 @@
+name: PMS Neon one-time copy
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/pms-neon-copy.yml
+  workflow_dispatch:
+    inputs:
+      mode:
+        type: choice
+        options: [check, copy]
+        default: check
+        description: Copy only into the empty isolated Neon destination
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pms-market-close-paper
+  cancel-in-progress: false
+
+jobs:
+  transfer:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      PMS_DATABASE_URL: ${{ secrets.PMS_DATABASE_URL }}
+      NEON_PMS_DATABASE_URL: ${{ secrets.NEON_PMS_DATABASE_URL }}
+      PMS_NEON_ARCHIVE_JSON: ${{ secrets.PMS_NEON_ARCHIVE_JSON }}
+      PMS_DATABASE_VERIFY_FULL: '1'
+      COPY_MODE: ${{ inputs.mode || 'check' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install isolated transfer dependencies
+        run: pip install sqlalchemy==2.0.44 psycopg2-binary==2.9.11 'psycopg[binary]==3.2.10' boto3==1.43.114
+      - name: Install matching PostgreSQL clients for explicit copy only
+        if: env.COPY_MODE == 'copy'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-common ca-certificates
+          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
+          sudo apt-get install -y postgresql-client-17
+          echo '/usr/lib/postgresql/17/bin' >> "$GITHUB_PATH"
+      - name: Verify connections or perform explicit isolated copy
+        run: python scripts/copy_pms_to_neon.py --mode "$COPY_MODE" --output neon-copy-report.json
+      - name: Save sanitized receipt only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pms-neon-copy-receipt
+          path: neon-copy-report.json
+          if-no-files-found: warn
+          retention-days: 14
+      # Database dumps/manifests/SQL stay in private object storage, never Actions artifacts.

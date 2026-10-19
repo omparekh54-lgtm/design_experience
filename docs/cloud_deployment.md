@@ -71,3 +71,46 @@ No data copied; no migration 010; no service connection switch; no scheduler act
 Open the Neon project's **Connect** panel, choose database `pms` and role `pms_owner`, disable connection pooling, and copy the direct connection string privately. Add it to repository **Settings → Secrets and variables → Actions → New repository secret** as `NEON_PMS_DATABASE_URL`. Preserve existing `PMS_DATABASE_URL` as the source; do not overwrite it. Never paste either URL into chat, source, issue text or logs. The GitHub connector cannot write Actions secrets.
 
 A reviewed one-shot migration runner and private backup credentials still need configuration before executing a copy. It must use a consistent source snapshot, archive all required dependencies privately before restore, verify fingerprints/constraints/sequences/safety and measure capacity. Do not mistake adding the secret for starting that runner. No local or daily laptop command is needed for this configuration step.
+
+## One-time copy runner
+
+`scripts/copy_pms_to_neon.py` defaults to a read-only connection/dependency/safety check.
+The destination is pinned to the provisioned direct Neon endpoint/database/role;
+the source is pinned to the existing Supabase project on session port 5432.
+Both use verify-full with reviewed CA selection. No connection is silently
+rewritten to a guessed pooler. The user reports adding `NEON_PMS_DATABASE_URL`;
+a successful actual runner check is still needed to verify it.
+
+`.github/workflows/pms-neon-copy.yml` runs **check only** when its configuration
+lands on main. It has no schedule. Its manual `copy` mode refuses non-empty
+destinations and requires `PMS_NEON_ARCHIVE_JSON` with exactly these JSON fields:
+`access_key_id` and `secret_access_key`. These must be a branch-scoped Neon
+credential with storage read/write permission, configured privately in GitHub
+Actions secrets. The private bucket/branch endpoint are pinned in code. This is
+separate from the Postgres connection password; a working SQL secret does not
+authorize S3 uploads. Never print or commit the credential.
+
+The copy holds a read-only REPEATABLE READ source transaction and exports its
+snapshot to two custom-format pg_dump archives: public dependencies (including
+owned sequences), and the complete PMS schema. The runner checks the live
+view/FK dependencies against the reviewed seven public tables and blocks
+unsupported external types/functions/triggers. Additional newly introduced
+dependencies require review. It does not copy unrelated public tables or users.
+
+Before any restore it writes both archives and the row-hash manifest to the
+private bucket and downloads each to verify SHA-256. It reserves archive and
+Postgres capacity below the Free limits. Restore renders pre-data, data and
+post-data sections in dependency order into one psql transaction. Supabase API
+role policies/ACLs are omitted; RLS is retained, PUBLIC access is revoked and
+owner access is used for validation. Application role grants remain separate.
+Every selected table/view is compared using row-count-preserving sorted hash
+buckets; sequence state may not regress, and PAPER/new-orders-disabled state
+must match. No app URL, ingestion toggle or trading permission is changed.
+
+Only the sanitized receipt is published as a workflow artifact. Dumps, manifests,
+restore SQL and credentials never go into Actions artifacts. A failed restore or
+post-restore comparison leaves the isolated destination for review, refuses to
+retry over it, and never clears it automatically. A successful copy still needs
+role/privilege, quota, collection migration and application validation before
+cutover. The separate CI PostgreSQL17 rehearsal uses synthetic data and no
+production credentials; it does not certify that the real data has been copied.
