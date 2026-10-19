@@ -21,7 +21,7 @@ from packages.pms.portfolio_accounting import PortfolioAccountingService
 from packages.pms.brokers import PaperBroker
 from packages.pms.reconciliation import ReconciliationService
 
-VERSION = "DAILY_ORCHESTRATOR_v1.0"
+VERSION = "DAILY_ORCHESTRATOR_v1.1"
 JOB = "daily_orchestrator"
 LOCK = "pms_daily_orchestrator:PAPER"
 
@@ -159,6 +159,16 @@ class DailyServices:
     def __init__(self, engine, cfg):
         self.engine, self.cfg = engine, cfg
 
+    def settle(self, day):
+        from packages.pms.formal_paper import FormalPaperExecution
+
+        return FormalPaperExecution(self.engine, self.cfg).settle(day)
+
+    def admit(self, day):
+        from packages.pms.formal_paper import FormalPaperExecution
+
+        return FormalPaperExecution(self.engine, self.cfg).admit(day)
+
     def preflight(self, day, now):
         calendar = MarketCalendar.from_database(self.engine, now)
         forward = calendar.forward(day, 1)
@@ -269,8 +279,11 @@ class DailyServices:
         }
 
     def allocation(self, day):
+        from packages.pms.formal_paper import FormalPaperExecution
+
+        reentries = FormalPaperExecution(self.engine, self.cfg).reentry_signals(day)
         report = ModuleCPipeline(self.engine, self.cfg).generate(
-            day, persist=True, persist_upstream=True
+            day, persist=True, persist_upstream=True, reentry_signals=reentries
         )
         values = asdict(report)
         return {
@@ -323,7 +336,9 @@ class DailyOrchestrator:
             "config_hash": fingerprint,
             "run_key": key,
             "broker_orders_submitted": 0,
-            "proposal_only": True,
+            "proposal_only": False,
+            "decision_outputs_are_proposals": True,
+            "external_broker_orders_submitted": 0,
         }
         if check_only:
             preflight = self.services.preflight(day, now)
@@ -342,7 +357,20 @@ class DailyOrchestrator:
                 }
             prior = self.journal.latest(key)
             if prior and prior["status"] == "SUCCESS" and not rerun:
-                return {**prior["details"], "replayed": True}
+                replay = {**prior["details"], "replayed": True}
+                try:
+                    replay["paper_admission"] = self.services.admit(day)
+                    replay["paper_execution_status"] = replay["paper_admission"][
+                        "status"
+                    ]
+                except Exception as exc:
+                    replay.update(
+                        status="FAILED",
+                        reasons=["paper_admission_failed"],
+                        error_type=type(exc).__name__,
+                    )
+                self.journal.save(replay)
+                return replay
             if prior and prior["status"] == "RUNNING":
                 interrupted = {
                     **prior["details"],
@@ -376,10 +404,17 @@ class DailyOrchestrator:
                 return item["result"]
 
             try:
+                settlement = stage(
+                    "paper_settlement", lambda: self.services.settle(day)
+                )
                 preflight = stage(
                     "preflight", lambda: self.services.preflight(day, now)
                 )
-                if preflight["status"] != "READY":
+                if settlement["status"] in {"BLOCKED", "FAILED"}:
+                    report.update(
+                        status="BLOCKED", reasons=["paper_settlement_requires_review"]
+                    )
+                elif preflight["status"] != "READY":
                     report.update(
                         status=preflight["status"], reasons=preflight["reasons"]
                     )
@@ -431,4 +466,18 @@ class DailyOrchestrator:
                     )
             report["finished_at"] = self._now().isoformat()
             self.journal.save(report)
+            if report["status"] == "SUCCESS":
+                try:
+                    report["paper_admission"] = self.services.admit(day)
+                    report["paper_execution_status"] = report["paper_admission"][
+                        "status"
+                    ]
+                    self.journal.save(report)
+                except Exception as exc:
+                    report.update(
+                        status="FAILED",
+                        reasons=["paper_admission_failed"],
+                        error_type=type(exc).__name__,
+                    )
+                    self.journal.save(report)
             return report

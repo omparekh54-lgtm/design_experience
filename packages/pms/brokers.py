@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Protocol, Any
 from uuid import uuid4
+import math
+from packages.pms.ledger import ledger_positions
 
 from sqlalchemy import Engine, text
 
@@ -28,6 +30,7 @@ class BrokerOrderResult:
 
 class Broker(Protocol):
     name: str
+
     def place_order(self, request: BrokerOrderRequest) -> BrokerOrderResult: ...
     def cancel_order(self, order_id: str) -> dict[str, Any]: ...
     def get_orders(self) -> list[dict[str, Any]]: ...
@@ -43,17 +46,19 @@ class _InstrumentLookup:
         exchange, symbol = instrument_id.split(":", 1)
         trading_symbol = f"{symbol}-EQ" if exchange == "NSE" else symbol
         with self.engine.connect() as conn:
-            row = conn.execute(
-                text(
-                    """
+            row = (
+                conn.execute(
+                    text("""
                     select id, exchange, trading_symbol, nse_symbol
                     from instruments
                     where exchange=:e and trading_symbol=:s
                     order by valid_from desc limit 1
-                    """
-                ),
-                {"e": exchange, "s": trading_symbol},
-            ).mappings().first()
+                    """),
+                    {"e": exchange, "s": trading_symbol},
+                )
+                .mappings()
+                .first()
+            )
         if not row:
             raise KeyError(instrument_id)
         return dict(row)
@@ -102,19 +107,46 @@ class PaperBroker:
         order_id = str(uuid4())
         status = "OPEN"
         with self.engine.begin() as conn:
+            conn.execute(
+                text("select pg_advisory_xact_lock(hashtext(:key))"),
+                {
+                    "key": (
+                        "pms_formal_paper_account"
+                        if self.account_mode == "PAPER"
+                        else "pms_account:" + self.account_mode
+                    )
+                },
+            )
             existing = (
                 conn.execute(
-                    text("select id,status from broker_orders where idempotency_key=:k"),
+                    text("select * from broker_orders where idempotency_key=:k"),
                     {"k": request.idempotency_key},
-                ).mappings().first()
+                )
+                .mappings()
+                .first()
                 if request.idempotency_key
                 else None
             )
             if existing:
+                if (
+                    existing["mode"],
+                    existing["broker"],
+                    int(existing["instrument_id"]),
+                    existing["side"],
+                    int(existing["quantity"]),
+                ) != (
+                    self.account_mode,
+                    self.broker_name,
+                    int(instrument["id"]),
+                    side,
+                    request.quantity,
+                ):
+                    raise ValueError(
+                        "Idempotency key belongs to a different order or account"
+                    )
                 return BrokerOrderResult(str(existing["id"]), str(existing["status"]))
             conn.execute(
-                text(
-                    """
+                text("""
                     insert into broker_orders(
                       id,broker,mode,instrument_id,side,order_type,quantity,
                       limit_price,trigger_price,status,idempotency_key
@@ -122,8 +154,7 @@ class PaperBroker:
                       :id,:broker,:mode,:instrument,:side,:type,:qty,
                       :limit,:trigger,:status,:key
                     )
-                    """
-                ),
+                    """),
                 {
                     "id": order_id,
                     "broker": self.broker_name,
@@ -140,18 +171,67 @@ class PaperBroker:
             )
         return BrokerOrderResult(order_id, status)
 
-    def fill_order(self, order_id: str, price: float, quantity: int | None = None, fees: float = 0.0) -> dict[str, Any]:
-        if price <= 0:
-            raise ValueError("fill price must be positive")
+    def fill_order(
+        self,
+        order_id: str,
+        price: float,
+        quantity: int | None = None,
+        fees: float = 0.0,
+    ) -> dict[str, Any]:
+        if (
+            not math.isfinite(price)
+            or price <= 0
+            or not math.isfinite(fees)
+            or fees < 0
+        ):
+            raise ValueError("fill price/fees must be finite and valid")
         with self.engine.begin() as conn:
-            order = conn.execute(
-                text("select * from broker_orders where id=:id and broker=:broker for update"),
-                {"id": order_id, "broker": self.broker_name},
-            ).mappings().one()
-            if str(order["status"]).upper() != "OPEN":
+            conn.execute(
+                text("select pg_advisory_xact_lock(hashtext(:key))"),
+                {
+                    "key": (
+                        "pms_formal_paper_account"
+                        if self.account_mode == "PAPER"
+                        else "pms_account:" + self.account_mode
+                    )
+                },
+            )
+            order = (
+                conn.execute(
+                    text(
+                        "select * from broker_orders where id=:id and broker=:broker and mode=:mode for update"
+                    ),
+                    {
+                        "id": order_id,
+                        "broker": self.broker_name,
+                        "mode": self.account_mode,
+                    },
+                )
+                .mappings()
+                .one()
+            )
+            if (order.get("raw_response") or {}).get("formal_paper"):
+                raise PermissionError(
+                    "Formal strategy fills require the transactional lifecycle executor"
+                )
+            if str(order["status"]).upper() not in {"OPEN", "PARTIALLY_FILLED"}:
                 raise ValueError("only OPEN paper orders can be filled")
-            qty = int(quantity or order["quantity"])
-            if qty <= 0 or qty > int(order["quantity"]):
+            already = int(
+                conn.execute(
+                    text(
+                        "select coalesce(sum(quantity),0) from broker_fills where order_id=:id"
+                    ),
+                    {"id": order_id},
+                ).scalar_one()
+            )
+            remaining = int(order["quantity"]) - already
+            qty = remaining if quantity is None else quantity
+            if (
+                not isinstance(qty, int)
+                or isinstance(qty, bool)
+                or qty <= 0
+                or qty > remaining
+            ):
                 raise ValueError("invalid fill quantity")
 
             side = str(order["side"]).upper()
@@ -161,13 +241,11 @@ class PaperBroker:
                     raise ValueError("insufficient paper cash")
             else:
                 held = conn.execute(
-                    text(
-                        """
+                    text("""
                         select coalesce(sum(quantity),0)
                         from portfolio_ledger
                         where account_mode=:mode and event_type='FILL' and instrument_id=:instrument
-                        """
-                    ),
+                        """),
                     {"mode": self.account_mode, "instrument": order["instrument_id"]},
                 ).scalar_one()
                 if int(held or 0) < qty:
@@ -175,39 +253,57 @@ class PaperBroker:
 
             realized = 0.0
             if side == "SELL":
-                basis = conn.execute(
-                    text(
-                        """
-                        select sum(case when quantity>0 then quantity*price else 0 end)
-                               / nullif(sum(case when quantity>0 then quantity else 0 end),0)
-                        from portfolio_ledger
-                        where account_mode=:mode and event_type='FILL' and instrument_id=:instrument
-                        """
-                    ),
-                    {"mode": self.account_mode, "instrument": order["instrument_id"]},
-                ).scalar_one_or_none()
-                avg_cost = float(basis or 0.0)
+                fills = (
+                    conn.execute(
+                        text(
+                            """select instrument_id,quantity,price,fees from portfolio_ledger
+                    where account_mode=:mode and event_type='FILL' and instrument_id=:instrument order by event_time,id"""
+                        ),
+                        {
+                            "mode": self.account_mode,
+                            "instrument": order["instrument_id"],
+                        },
+                    )
+                    .mappings()
+                    .all()
+                )
+                avg_cost = ledger_positions(fills)[int(order["instrument_id"])][
+                    "average_price"
+                ]
                 realized = (float(price) - avg_cost) * qty - float(fees)
 
             fill_id = str(uuid4())
             now = datetime.now(timezone.utc)
             conn.execute(
-                text(
-                    """
+                text("""
                     insert into broker_fills(id,order_id,external_trade_id,fill_time,price,quantity,fees)
                     values (:id,:oid,:tid,:t,:p,:q,:f)
-                    """
-                ),
-                {"id": fill_id, "oid": order_id, "tid": fill_id, "t": now, "p": price, "q": qty, "f": fees},
+                    """),
+                {
+                    "id": fill_id,
+                    "oid": order_id,
+                    "tid": fill_id,
+                    "t": now,
+                    "p": price,
+                    "q": qty,
+                    "f": fees,
+                },
             )
-            conn.execute(
-                text("update broker_orders set status='FILLED',updated_at=:t where id=:id"),
-                {"t": now, "id": order_id},
-            )
-            cash_delta = -(price * qty + fees) if side == "BUY" else (price * qty - fees)
             conn.execute(
                 text(
-                    """
+                    "update broker_orders set status=:status,updated_at=:t where id=:id"
+                ),
+                {
+                    "t": now,
+                    "id": order_id,
+                    "status": "FILLED" if qty == remaining else "PARTIALLY_FILLED",
+                },
+            )
+            cash_delta = (
+                -(price * qty + fees) if side == "BUY" else (price * qty - fees)
+            )
+            conn.execute(
+                text("""
                     insert into portfolio_ledger(
                       account_mode,event_type,instrument_id,order_id,quantity,price,
                       cash_delta,realized_pnl_delta,fees,metadata
@@ -215,8 +311,7 @@ class PaperBroker:
                       :mode,'FILL',:instrument,:oid,:qty,:price,
                       :cash,:realized,:fees,jsonb_build_object('side',:side)
                     )
-                    """
-                ),
+                    """),
                 {
                     "mode": self.account_mode,
                     "instrument": order["instrument_id"],
@@ -229,55 +324,84 @@ class PaperBroker:
                     "side": side,
                 },
             )
-        return {"fill_id": fill_id, "price": price, "quantity": qty, "realized_pnl": round(realized, 2)}
+        return {
+            "fill_id": fill_id,
+            "price": price,
+            "quantity": qty,
+            "realized_pnl": round(realized, 2),
+        }
 
     def cancel_order(self, order_id: str) -> dict[str, Any]:
         with self.engine.begin() as conn:
-            result = conn.execute(
-                text(
-                    """
-                    update broker_orders set status='CANCELLED',updated_at=now()
-                    where id=:id and broker=:broker and status='OPEN'
-                    """
-                ),
-                {"id": order_id, "broker": self.broker_name},
+            conn.execute(
+                text("select pg_advisory_xact_lock(hashtext(:key))"),
+                {
+                    "key": (
+                        "pms_formal_paper_account"
+                        if self.account_mode == "PAPER"
+                        else "pms_account:" + self.account_mode
+                    )
+                },
             )
-        return {"order_id": order_id, "status": "CANCELLED", "changed": bool(result.rowcount)}
+            result = conn.execute(
+                text("""
+                    update broker_orders set status='CANCELLED',updated_at=now()
+                    where id=:id and broker=:broker and mode=:mode and status in ('OPEN','PARTIALLY_FILLED')
+                    """),
+                {"id": order_id, "broker": self.broker_name, "mode": self.account_mode},
+            )
+        return {
+            "order_id": order_id,
+            "status": "CANCELLED",
+            "changed": bool(result.rowcount),
+        }
 
     def get_orders(self) -> list[dict[str, Any]]:
         with self.engine.connect() as conn:
-            rows = conn.execute(
-                text("select * from broker_orders where broker=:broker order by created_at desc"),
-                {"broker": self.broker_name},
-            ).mappings().all()
+            rows = (
+                conn.execute(
+                    text(
+                        "select * from broker_orders where broker=:broker and mode=:mode order by created_at desc"
+                    ),
+                    {"broker": self.broker_name, "mode": self.account_mode},
+                )
+                .mappings()
+                .all()
+            )
         return [dict(r) for r in rows]
 
     def get_positions(self) -> list[dict[str, Any]]:
         with self.engine.connect() as conn:
-            rows = conn.execute(
-                text(
-                    """
-                    select i.exchange,
-                           coalesce(i.nse_symbol,replace(i.trading_symbol,'-EQ','')) symbol,
-                           sum(l.quantity) quantity,
-                           sum(case when l.quantity>0 then l.quantity*l.price else 0 end)
-                             / nullif(sum(case when l.quantity>0 then l.quantity else 0 end),0) avg_price
-                    from portfolio_ledger l
-                    join instruments i on i.id=l.instrument_id
-                    where l.account_mode=:mode and l.event_type='FILL'
-                    group by i.id,i.exchange,i.nse_symbol,i.trading_symbol
-                    having sum(l.quantity)<>0
-                    order by symbol
-                    """
-                ),
-                {"mode": self.account_mode},
-            ).mappings().all()
-        return [dict(r) for r in rows]
+            rows = (
+                conn.execute(
+                    text(
+                        """select l.instrument_id,l.quantity,l.price,l.fees,i.exchange,
+                coalesce(i.nse_symbol,replace(i.trading_symbol,'-EQ','')) symbol
+                from portfolio_ledger l join instruments i on i.id=l.instrument_id
+                where l.account_mode=:mode and l.event_type='FILL' order by l.event_time,l.id"""
+                    ),
+                    {"mode": self.account_mode},
+                )
+                .mappings()
+                .all()
+            )
+        names = {int(r["instrument_id"]): (r["exchange"], r["symbol"]) for r in rows}
+        return [
+            {
+                "exchange": names[pk][0],
+                "symbol": names[pk][1],
+                "quantity": v["quantity"],
+                "avg_price": v["average_price"],
+            }
+            for pk, v in sorted(ledger_positions(rows).items())
+        ]
 
     def get_cash(self) -> float:
         with self.engine.connect() as conn:
             delta = conn.execute(
-                text("select coalesce(sum(cash_delta),0) from portfolio_ledger where account_mode=:mode"),
+                text(
+                    "select coalesce(sum(cash_delta),0) from portfolio_ledger where account_mode=:mode"
+                ),
                 {"mode": self.account_mode},
             ).scalar_one()
         return float(self.initial_cash) + float(delta)
@@ -293,7 +417,9 @@ class DisabledLiveBroker:
 
     @staticmethod
     def _blocked():
-        raise PermissionError("Real-money broker execution is disabled. Use the internal PAPER broker.")
+        raise PermissionError(
+            "Real-money broker execution is disabled. Use the internal PAPER broker."
+        )
 
     def place_order(self, request: BrokerOrderRequest) -> BrokerOrderResult:
         self._blocked()

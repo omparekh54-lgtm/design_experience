@@ -50,6 +50,14 @@ class Services:
         if self.fail == name:
             raise RuntimeError("secret database password should never be recorded")
 
+    def settle(self, day):
+        self.call("settle")
+        return dict(status="SUCCESS")
+
+    def admit(self, day):
+        self.call("admit")
+        return dict(status="SUCCESS", paper_orders_created=0)
+
     def preflight(self, day, now):
         self.call("preflight")
         return dict(
@@ -95,18 +103,20 @@ def test_full_sequence_and_success_is_replayed_without_writes():
     first = runner.run()
     assert first["status"] == "SUCCESS"
     assert services.calls == [
+        "settle",
         "preflight",
         "reconcile",
         "snapshot",
         "regime",
         "allocation",
+        "admit",
     ]
     writes = len(journal.writes)
     services.calls.clear()
     replay = runner.run()
     assert replay["replayed"] and replay["run_id"] == first["run_id"]
-    assert not services.calls and len(journal.writes) == writes
-    assert replay["broker_orders_submitted"] == 0 and replay["proposal_only"]
+    assert services.calls == ["admit"] and len(journal.writes) == writes + 1
+    assert replay["broker_orders_submitted"] == 0 and not replay["proposal_only"]
 
 
 def test_busy_does_not_run_or_write():
@@ -121,7 +131,7 @@ def test_preflight_stops_downstream(status):
     runner, journal, services = workflow()
     services.preflight_status = status
     report = runner.run()
-    assert report["status"] == status and services.calls == ["preflight"]
+    assert report["status"] == status and services.calls == ["settle", "preflight"]
     assert journal.rows[-1]["status"] == status
 
 
@@ -137,11 +147,11 @@ def test_reconciliation_mismatch_stops_before_snapshot():
     services.reconciled = False
     report = runner.run()
     assert report["status"] == "BLOCKED"
-    assert services.calls == ["preflight", "reconcile"]
+    assert services.calls == ["settle", "preflight", "reconcile"]
 
 
 @pytest.mark.parametrize(
-    "failed", ["preflight", "reconcile", "snapshot", "regime", "allocation"]
+    "failed", ["settle", "preflight", "reconcile", "snapshot", "regime", "allocation"]
 )
 def test_failed_stage_journal_and_safe_retry_from_start(failed):
     runner, journal, services = workflow()
@@ -156,11 +166,13 @@ def test_failed_stage_journal_and_safe_retry_from_start(failed):
     assert retry["status"] == "SUCCESS" and retry["attempt"] == 2
     assert retry["previous_run_id"] == report["run_id"]
     assert services.calls == [
+        "settle",
         "preflight",
         "reconcile",
         "snapshot",
         "regime",
         "allocation",
+        "admit",
     ]
     assert len(journal.rows) == 2
 
@@ -469,3 +481,28 @@ def test_cli_exit_codes_make_blocked_and_failed_runs_visible(monkeypatch, capsys
         )
         assert run_market_close.main([]) == code
         assert status in capsys.readouterr().out
+
+
+def test_protective_settlement_runs_before_blocked_preflight():
+    runner, journal, services = workflow()
+    services.preflight_status = "BLOCKED"
+    report = runner.run()
+    assert services.calls == ["settle", "preflight"] and report["status"] == "BLOCKED"
+
+
+def test_failed_settlement_blocks_new_decisions():
+    runner, journal, services = workflow()
+    services.settle = lambda day: dict(status="BLOCKED")
+    assert runner.run()["reasons"] == ["paper_settlement_requires_review"]
+    assert services.calls == ["preflight"]
+
+
+def test_admission_failure_is_durable_and_safe_to_retry():
+    runner, journal, services = workflow()
+    services.fail = "admit"
+    first = runner.run()
+    assert first["status"] == "FAILED" and first["reasons"] == [
+        "paper_admission_failed"
+    ]
+    services.fail = None
+    assert runner.run()["status"] == "SUCCESS"

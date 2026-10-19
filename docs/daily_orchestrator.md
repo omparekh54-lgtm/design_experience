@@ -128,3 +128,12 @@ lock survives commit and explicitly unlocks. Controlled unit fixtures cover
 contention, retry, release and backend changes. A concurrent connector experiment
 was inconclusive because requests serialized; no full multi-process production
 run or production-qualified selection is claimed.
+
+## Paper-execution integration update
+
+`DAILY_ORCHESTRATOR_v1.1` adds forward PAPER settlement before preflight and
+idempotent admission after the successful decision journal. Successful replay
+retries admission; it does not repeat fills. Decision success and admission
+permission are reported separately. A/B/C receives eligible, unused Leg-2
+re-entry candidates from persisted checkpoints and applies its usual ranking
+and portfolio limits. See [paper_execution.md](paper_execution.md).
