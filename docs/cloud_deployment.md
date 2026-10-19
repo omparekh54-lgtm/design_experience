@@ -156,3 +156,21 @@ JSON string or a trailing comma. Preserve both database URL secrets. Never put
 credential values into chat or repository files. Retry the guarded workflow
 only after correcting the secret. The earlier placeholder diagnosis above is
 historical and is resolved.
+
+
+## Retry after user secret update (2026-10-19 19:33 UTC)
+
+Run `39311170924`, attempt 2, stopped at `destination_configuration`, before any
+database connection or data operation. The destination URL previously verified
+successfully, but this latest attempt could not read its configuration. It did
+not reach the archive JSON check, so the previous archive format failure must
+not be described as the current confirmed blocker. Source data and application
+settings remain unchanged; no copy or campaign has started.
+
+The runner now reports independent, credential-free format checks for
+`NEON_PMS_DATABASE_URL`, `PMS_DATABASE_URL` and `PMS_NEON_ARCHIVE_JSON` before
+opening a connection. URL parsing failures have fixed source/destination error
+codes and never echo their input. A `FORMAT_VALID` result confirms only syntax,
+pinned destination and connection options; it does not prove authentication or
+storage access. Correct only the specific secrets identified by the hosted
+receipt. Database URL values and storage JSON belong in different secrets.

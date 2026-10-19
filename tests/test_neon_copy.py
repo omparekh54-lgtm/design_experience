@@ -141,3 +141,21 @@ def test_error_diagnostics_never_echo_storage_or_sql_secrets():
     assert failure_code(DatabaseError('private-secret')) == 'DATABASE_SQLSTATE_42501'
     StorageError.response['Error']['Code'] = 'private-secret'
     assert failure_code(StorageError('private-secret')) == 'DATABASE_CONNECTION_FAILED'
+
+
+@pytest.mark.parametrize('raw', ['{"secret":"do-not-print"}', 'postgresql://owner:secret@host:notaport/pms'])
+def test_malformed_destination_url_never_echoes_the_secret(raw):
+    with pytest.raises(CopyBlocked, match='^DESTINATION_URL_INVALID$'):
+        connection_url(raw, destination=True)
+
+
+def test_all_configuration_failures_are_reported_in_one_pass(monkeypatch):
+    from scripts.copy_pms_to_neon import configuration_checks
+    monkeypatch.setenv('NEON_PMS_DATABASE_URL', '{"secret":"private"}')
+    monkeypatch.setenv('PMS_DATABASE_URL', 'postgresql://postgres.cxrkicqggsuylirzohqw:private@aws-0-ap-south-1.pooler.supabase.com:5432/postgres')
+    monkeypatch.setenv('PMS_NEON_ARCHIVE_JSON', '{"access_key_id":"private","secret_access_key":"private"}')
+    assert configuration_checks() == {
+        'NEON_PMS_DATABASE_URL': 'DESTINATION_URL_INVALID',
+        'PMS_DATABASE_URL': 'FORMAT_VALID',
+        'PMS_NEON_ARCHIVE_JSON': 'FORMAT_VALID',
+    }
