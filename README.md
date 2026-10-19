@@ -251,3 +251,7 @@ read-only consistent input snapshots and resumable, checksummed reports.
 See [matrix documentation](docs/backtesting_matrix.md) and the
 [deferred consolidated local setup](docs/local_setup_after_all_phases.md).
 No historical performance pass or completed local run is implied by implementation.
+
+### Step 12 — Data integrity audit
+
+The read-only audit checks schema, 39 automated source-integrity rules and five independent review requirements, with dated fingerprints, bounded findings, JSON/CSV evidence and saved UI views. See [audit design and deferred usage](docs/data_integrity_audit.md). This does not certify the user’s unexecuted local data audit.

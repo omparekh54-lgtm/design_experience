@@ -7,7 +7,7 @@ This checklist is being maintained while implementation continues. Final ordered
 1. Pull the final repository state once and update Python/frontend dependencies.
 2. Verify the existing environment and database connection without printing secrets.
 3. Back up the populated database and apply only outstanding migrations to `pms`.
-4. Run coverage/integrity checks, including historical warmup and source-vintage requirements.
+4. Run the dated Step-12 integrity plan and full audit, including historical warmup, financial-unit conventions, source vintages and listing/sector session coverage. Preserve reports, investigate FAIL/ERROR items, and separately reconcile the five independent source reviews (including full ASM/GSM archives). A REVIEW_REQUIRED or partial scan is not full data certification.
 5. Supply the owner's explicit strategy policies where the original specification did not give numerical defaults. Missing policies continue to block eligibility.
 6. Run read-only module/orchestrator checks, then the required historical calculations.
 7. Run the matrix plan and preflight, repair actual blockers, then run/resume the research matrix and inspect saved evidence.

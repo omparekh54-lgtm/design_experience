@@ -70,6 +70,7 @@ def code_fingerprint():
         *sorted((root / "packages").rglob("*.py")),
         root / "scripts/run_backtest_matrix.py",
         root / "scripts/run_walk_forward.py",
+        root / "scripts/run_data_integrity_audit.py",
     ]
     return fingerprint(
         {
@@ -79,7 +80,7 @@ def code_fingerprint():
     )
 
 
-def input_manifest(snapshot, cells, symbols=None):
+def input_manifest(snapshot, cells, symbols=None, *, allow_ambiguous=False):
     start, end = min(c.period.start for c in cells), max(c.period.end for c in cells)
     params = {
         "warmup": start - timedelta(days=1100),
@@ -136,7 +137,9 @@ def input_manifest(snapshot, cells, symbols=None):
         universe = [r for r in universe if r["instrument_id"] in requested]
         if {r["instrument_id"] for r in universe} != requested:
             raise ValueError("Unknown or out-of-period requested symbols")
-    if len({r["instrument_id"] for r in universe}) != len(universe):
+    if not allow_ambiguous and len({r["instrument_id"] for r in universe}) != len(
+        universe
+    ):
         raise ValueError("Canonical instrument identity is ambiguous")
     payload = dict(
         tables=tables,

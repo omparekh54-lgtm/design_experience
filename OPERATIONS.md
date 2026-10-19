@@ -372,3 +372,7 @@ The user is deferring local commands until the final consolidated setup. See
 ## Walk-forward research
 
 The V2 design, gates, frozen selection and resume procedure are described in [walk-forward testing](docs/walk_forward_testing.md). No intermediate command is assumed to have run on the user’s PC. Keep using the accumulating consolidated setup checklist. Saved V2 evidence is separate from legacy research-lab walk-forward records; no new migration or safety unlock is required.
+
+## Data integrity audit
+
+Use the [dated audit design](docs/data_integrity_audit.md) in the consolidated end setup. Each run preserves a new report, source scans are read-only, and optional persistence writes only research evidence. REVIEW_REQUIRED and NOT_RUN cannot certify full history. No automatic repairs, DQ resolution or safety unlock occur.

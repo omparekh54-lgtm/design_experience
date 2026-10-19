@@ -1,0 +1,25 @@
+{
+  "phase": "DATA_INTEGRITY_v1.0",
+  "date": "2026-10-19",
+  "automated_rules": 39,
+  "schema_contract_checks": 1,
+  "mandatory_independent_reviews": 5,
+  "python_tests_passed": 547,
+  "python_tests_skipped": 1,
+  "new_integrity_tests": 34,
+  "distinct_sql_statements_explained_against_actual_schema": 49,
+  "postgres_read_only_predicate_fixtures": {
+    "invalid_price_rows_detected": 3,
+    "invalid_financial_values_detected": 1,
+    "ambiguous_financial_units_flagged_for_review": 1,
+    "valid_negative_profit_was_not_rejected": true
+  },
+  "typescript": "passed locally; final CI covers the published tree",
+  "production_build": "passed locally; final CI covers the published tree",
+  "browser_suite": "Extended to 18 routes; final evidence is retained in PR CI artifacts",
+  "full_user_database_audit": "NOT_EXECUTED",
+  "full_data_certification": false,
+  "source_repairs_or_dq_resolution": false,
+  "safety_unlock": false,
+  "local_commands": "Deferred to consolidated end-of-build setup"
+}
