@@ -380,3 +380,7 @@ Use the [dated audit design](docs/data_integrity_audit.md) in the consolidated e
 ## Security and recovery
 
 Follow the [Step-13 runbook](docs/security_reliability.md) for private operator keys, HTTPS/TLS, bounded workers, failure review and isolated restore verification. Plan/check commands join the deferred consolidated setup. A posture report or inspected archive does not establish full security or recovery acceptance. Keep existing execution locks and the disabled real broker adapter in place.
+
+## Unattended deployment readiness
+
+The user now requires cloud operation without daily laptop commands. Follow [Phase-1 readiness](docs/deployment_readiness.md), which supersedes the local-only operating model. `scripts/check_deployment_readiness.py --plan` is offline; `--check --database` explicitly inspects the database read-only. Exit 2 preserves outstanding deployment/campaign blockers. No migration application, repair, safety unlock or campaign start occurs. Full data collection, confirmed hosting workspace, resource measurements and deployment evidence are prerequisites for later phases.

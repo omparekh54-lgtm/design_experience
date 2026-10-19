@@ -16,6 +16,13 @@ jobs:
       - run: python -m pip install --upgrade pip
       - run: pip install -r requirements.txt
       - run: pytest -q
+      - name: Save offline deployment readiness inventory
+        run: python scripts/check_deployment_readiness.py --plan --output artifacts/deployment-readiness.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pms-deployment-readiness
+          path: artifacts/deployment-readiness.json
+          retention-days: 14
 
   ops-import:
     runs-on: ubuntu-latest
