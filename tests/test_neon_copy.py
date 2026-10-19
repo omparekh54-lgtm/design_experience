@@ -43,6 +43,35 @@ def test_source_is_pinned_to_existing_project_session_connection():
     assert make_url(u).query['sslrootcert'].endswith('supabase-prod-ca-2021.crt')
 
 
+def test_placeholder_diagnostic_identifies_the_setting_without_its_value():
+    with pytest.raises(CopyBlocked, match='^DATABASE_PASSWORD_PLACEHOLDER$'):
+        connection_url('postgresql://postgres:%5BYOUR-PASSWORD%5D@db.cxrkicqggsuylirzohqw.supabase.co/postgres')
+
+
+def test_destination_is_probed_even_when_source_configuration_is_invalid(monkeypatch):
+    import scripts.copy_pms_to_neon as m
+    class Result:
+        def __init__(self, value): self.value = value
+        def scalar_one(self): return self.value
+    class Connection:
+        def __enter__(self): return self
+        def __exit__(self, *args): pass
+        def execute(self, sql): return Result(170011 if 'server_version_num' in str(sql) else 0)
+    class Engine:
+        disposed = False
+        def connect(self): return Connection()
+        def dispose(self): self.disposed = True
+    engine = Engine()
+    monkeypatch.setenv('NEON_PMS_DATABASE_URL', target())
+    monkeypatch.setenv('PMS_DATABASE_URL', 'postgresql://postgres:%5BYOUR-PASSWORD%5D@db.cxrkicqggsuylirzohqw.supabase.co/postgres')
+    monkeypatch.setattr(m, 'online_engine', lambda *args, **kw: engine)
+    report = {}
+    with pytest.raises(CopyBlocked, match='PASSWORD_PLACEHOLDER'):
+        m.run('check', report)
+    assert report['destination_connection_verified_full'] is True
+    assert report['stage'] == 'source_configuration' and engine.disposed
+
+
 def test_supabase_policies_removed_but_rls_and_constraints_retained(tmp_path, monkeypatch):
     import scripts.copy_pms_to_neon as m
     monkeypatch.setattr(m, 'command', lambda args: b'''1; 0 1 TABLE public securities postgres

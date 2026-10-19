@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - .github/workflows/pms-neon-copy.yml
+      - scripts/copy_pms_to_neon.py
   workflow_dispatch:
     inputs:
       mode:
