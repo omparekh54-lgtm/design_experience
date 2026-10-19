@@ -1,7 +1,7 @@
 {
   "date": "2026-10-19",
   "phase": "3 cloud deployment",
-  "status": "VERIFIED_TLS_DEPLOYED_CAPACITY_BLOCKED",
+  "status": "NEON_FREE_DESTINATION_PROVISIONED_COPY_PENDING",
   "checks": {
     "python_tests": {
       "passed": 712,
@@ -26,7 +26,7 @@
   "paper_activated": false,
   "campaign_started": false,
   "pending": [
-    "Free-tier database capacity decision and measured headroom",
+    "Configure private Neon destination secret, prepare/review copy runner and measure restored free-tier headroom",
     "Guarded startup/platform readiness-check adoption",
     "Backup and reviewed migration/grants",
     "Private raw-source archive",
@@ -71,5 +71,34 @@
       "api_ready_http": 200,
       "result": "OFFICIAL_SUPABASE_ROOT_VERIFIED_FULL"
     }
-  ]
+  ],
+  "neon": {
+    "organization_id": "org-holy-firefly-58167446",
+    "plan": "free",
+    "project_id": "green-resonance-86147459",
+    "project_name": "pms-paper",
+    "region": "aws-ap-southeast-1",
+    "pg_version": 17,
+    "branch_id": "br-twilight-sea-azumjkpc",
+    "database": "pms",
+    "role": "pms_owner",
+    "compute_id": "ep-bitter-forest-azwuzrwh",
+    "min_cu": 0.25,
+    "max_cu": 0.25,
+    "database_limit_bytes": 1073741824,
+    "empty_database_bytes": 7520256,
+    "private_bucket": "pms-private-archive",
+    "probe_upload_http": 200,
+    "probe_download_http": 200,
+    "probe_content_match": true,
+    "probe_anonymous_http": 403,
+    "external_driver_tls_verified": false,
+    "data_copied": false,
+    "cutover": false,
+    "source_view_fk_dependency_bytes": 626384896,
+    "complete_object_dependency_review": false,
+    "backup_created": false,
+    "restore_verified": false,
+    "destination_github_secret_verified": false
+  }
 }

@@ -42,14 +42,32 @@ Free Render services can sleep and lose local files; the API is not the daily sc
 
 Phase 3 is complete only after verified live API and SSR frontend deployment, reviewed migration and grants, secure scheduler configuration, private raw archival, full-universe catch-up and measured free-tier capacity. Until then do not mark this phase complete or begin the 2–3 month campaign. Historical validation, alerts/restore and consecutive-session rehearsal remain Phases 4–6.
 
-## Proposed free capacity route — not provisioned
+## Selected free capacity route — destination provisioned, copy pending
 
 Current Supabase data exceeds its documented 500 MB free quota. Read-only table statistics do not demonstrate enough reclaimable space to solve this with routine vacuuming. No data or indexes were deleted.
 
-Neon's official pricing page (https://neon.com/pricing, checked 2026-10-19) currently lists **1 GB PostgreSQL storage**, **5 GB object storage**, **100 CU-hours/month/project**, and **5 GB public transfer/month** on Free with no card required. Its older FAQ still mentions 0.5 GB; verify the actual account entitlement before provisioning. This is a candidate, not a certified capacity solution or an automatic provider switch. Aiven Free currently lists 1 GB disk, so it offers less useful separation of raw archives and database data.
+Neon's official pricing page (https://neon.com/pricing, checked 2026-10-19) currently lists **1 GB PostgreSQL storage**, **5 GB object storage**, **100 CU-hours/month/project**, and **5 GB public transfer/month** on Free with no card required. Its older FAQ still mentions 0.5 GB; verify the actual account entitlement before provisioning. The user selected a separate Neon Free PMS copy. The destination is provisioned as recorded below; capacity after restore and application cutover remain unverified. Aiven Free currently lists 1 GB disk, so it offers less useful separation of raw archives and database data.
 
-If selected, create a separate free PMS project and copy only the complete dependency closure: the `pms` schema plus every public source table/view/function/extension it reads. Do not move or delete the shared Supabase source. Use a consistent source snapshot and preserve a private dump and hashes. Validate row counts, key/date coverage, view dependencies, constraints, identity sequences and PAPER safety before switching either the API or scheduler. Use a direct/session-compatible PostgreSQL connection because collection/orchestration use session advisory locks; transaction pooling cannot substitute for that guarantee. Test certificates, role grants and source connectivity on the actual runner.
+Copy only the complete dependency closure into the separate free PMS project: the `pms` schema plus every public source table/view/function/extension it reads. Do not move or delete the shared Supabase source. Use a consistent source snapshot and preserve a private dump and hashes. Validate row counts, key/date coverage, view dependencies, constraints, identity sequences and PAPER safety before switching either the API or scheduler. Use a direct/session-compatible PostgreSQL connection because collection/orchestration use session advisory locks; transaction pooling cannot substitute for that guarantee. Test certificates, role grants and source connectivity on the actual runner.
 
 Keep raw source documents and backup dumps in private object storage with retention, checksums and a successful restore rehearsal. Do not put raw XML, database dumps or secrets in public repository files or public Actions artifacts. Object-storage functionality, regional availability and access controls must be verified against the actual account; the pricing allowance alone is not a working archive.
 
-A 682 MB database leaves only about 318 MB nominal headroom under a 1 GB limit. Initial catch-up, indexes, WAL/history accounting, daily growth, compute and network allowances need measurement. Stop below hard limits; do not enable a paid plan or card-backed overages. This candidate requires account/provider selection before any database or financial data is copied.
+A 682 MB database leaves only about 318 MB nominal headroom under a 1 GB limit. Initial catch-up, indexes, WAL/history accounting, daily growth, compute and network allowances need measurement. Stop below hard limits; do not enable a paid plan or card-backed overages. The user authorized this separate copy; no source data has been transferred yet.
+
+## Neon destination provisioned (2026-10-19 UTC / 2026-10-20 IST)
+
+- Organization `org-holy-firefly-58167446` (Om), plan `free` verified before and after creation.
+- Project `green-resonance-86147459` (`pms-paper`), AWS Singapore, PostgreSQL 17.
+- Default branch `br-twilight-sea-azumjkpc` (`main`), database `pms`, owner `pms_owner`.
+- Compute `ep-bitter-forest-azwuzrwh`, fixed minimum/maximum 0.25 CU. Free-account custom suspend-time configuration was rejected before creation; creation succeeded with the provider default. Do not infer tested idle-suspend behavior from the returned zero-valued setting.
+- Actual project database limit: 1,073,741,824 bytes. Empty database query succeeded (7,520,256 bytes). The internal MCP SQL connection reports TLS false; this is not evidence about external client TLS. Verify the external direct connection with verify-full before transfer/cutover.
+- Private bucket `pms-private-archive` on the default branch. Storage upload and signed download returned 200 with matching SHA-256; anonymous download returned 403. The 44-byte probe is storage transport evidence, not a database backup or restore rehearsal.
+- Read-only view/foreign-key traversal identifies 82 PMS relations plus `public.benchmarks`, `public.corporate_events`, `public.financial_facts`, `public.market_bars`, `public.securities`, `public.security_benchmarks`, and `public.sources`: 626,384,896 bytes of relation storage. Complete function, type, extension, sequence, trigger and policy dependency review remains necessary before building the archive. PMS has the `audit_operational_change()` function.
+
+No data copied; no migration 010; no service connection switch; no scheduler activation. Supabase is unchanged. No database or storage credential has been recorded in this document.
+
+### One-time destination secret setup
+
+Open the Neon project's **Connect** panel, choose database `pms` and role `pms_owner`, disable connection pooling, and copy the direct connection string privately. Add it to repository **Settings → Secrets and variables → Actions → New repository secret** as `NEON_PMS_DATABASE_URL`. Preserve existing `PMS_DATABASE_URL` as the source; do not overwrite it. Never paste either URL into chat, source, issue text or logs. The GitHub connector cannot write Actions secrets.
+
+A reviewed one-shot migration runner and private backup credentials still need configuration before executing a copy. It must use a consistent source snapshot, archive all required dependencies privately before restore, verify fingerprints/constraints/sequences/safety and measure capacity. Do not mistake adding the secret for starting that runner. No local or daily laptop command is needed for this configuration step.
