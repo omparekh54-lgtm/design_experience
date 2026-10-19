@@ -14,6 +14,7 @@ from uuid import uuid4
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from sqlalchemy import text
+from sqlalchemy.exc import ArgumentError
 from sqlalchemy.engine import make_url, URL
 from packages.pms.connection_config import placeholder_password, tls_connect_options, connection_failure_code
 from packages.pms.database import online_engine
@@ -58,7 +59,11 @@ def qualified(row):
 
 def connection_url(raw, *, destination=False):
     require(bool(raw), 'DESTINATION_URL_MISSING' if destination else 'SOURCE_URL_MISSING')
-    u = make_url(raw)
+    try:
+        u = make_url(raw)
+    except (ArgumentError, ValueError, TypeError):
+        # SQLAlchemy URL errors can echo the complete secret; never propagate them.
+        raise CopyBlocked('DESTINATION_URL_INVALID' if destination else 'SOURCE_URL_INVALID') from None
     require(u.drivername in {'postgresql', 'postgresql+psycopg', 'postgresql+psycopg2'}, 'POSTGRES_URL_REQUIRED')
     for name, value in [('HOST', u.host), ('USERNAME', u.username), ('PASSWORD', u.password), ('DATABASE', u.database)]:
         require(bool(value), 'DATABASE_' + name + '_MISSING')
@@ -165,7 +170,7 @@ def verify_sequences(actual, baseline):
                 (not before['is_called'] or after['is_called']), 'SEQUENCE_REGRESSION')
 
 
-def archive_client():
+def archive_configuration():
     require(bool(os.getenv('PMS_NEON_ARCHIVE_JSON')), 'PRIVATE_ARCHIVE_CREDENTIAL_MISSING')
     try:
         config = json.loads(os.environ['PMS_NEON_ARCHIVE_JSON'])
@@ -173,6 +178,11 @@ def archive_client():
         raise CopyBlocked('ARCHIVE_CREDENTIAL_JSON_INVALID') from None
     require(isinstance(config, dict), 'ARCHIVE_CREDENTIAL_CONFIGURATION')
     require(set(config) == {'access_key_id', 'secret_access_key'} and all(isinstance(v, str) and v.strip() for v in config.values()), 'ARCHIVE_CREDENTIAL_CONFIGURATION')
+    return config
+
+
+def archive_client():
+    config = archive_configuration()
     import boto3
     from botocore.config import Config
     return boto3.client('s3', endpoint_url=ARCHIVE_ENDPOINT, region_name='ap-southeast-1',
@@ -278,7 +288,26 @@ def copy(source, target, src, dst, report):
                               tables_verified=len(expected), acceptance='NOT_CERTIFIED')
 
 
+def configuration_checks():
+    """Validate each secret independently without connections or secret output."""
+    checks = {}
+    for name, validate in (
+        ('NEON_PMS_DATABASE_URL', lambda: connection_url(os.getenv('NEON_PMS_DATABASE_URL', ''), destination=True)),
+        ('PMS_DATABASE_URL', lambda: connection_url(os.getenv('PMS_DATABASE_URL', ''))),
+        ('PMS_NEON_ARCHIVE_JSON', archive_configuration),
+    ):
+        try:
+            validate()
+            checks[name] = 'FORMAT_VALID'
+        except CopyBlocked as exc:
+            checks[name] = str(exc)
+        except Exception:
+            checks[name] = 'CONFIGURATION_INVALID'
+    return checks
+
+
 def run(mode, report):
+    report['configuration_checks'] = configuration_checks()
     report['stage'] = 'destination_configuration'
     target = connection_url(os.environ.get('NEON_PMS_DATABASE_URL', ''), destination=True)
     src, dst = None, online_engine(target, worker=True)

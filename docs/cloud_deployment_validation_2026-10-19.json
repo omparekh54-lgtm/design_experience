@@ -1,10 +1,10 @@
 {
   "date": "2026-10-19",
   "phase": "3 cloud deployment",
-  "status": "DATABASES_TLS_VERIFIED_ARCHIVE_JSON_INVALID_COPY_BLOCKED",
+  "status": "DESTINATION_URL_CONFIGURATION_CHANGED_COPY_BLOCKED",
   "checks": {
     "python_tests": {
-      "passed": 729,
+      "passed": 732,
       "skipped": 2
     },
     "ops_imports": "PASS",
@@ -28,7 +28,7 @@
   "paper_activated": false,
   "campaign_started": false,
   "pending": [
-    "Correct PMS_NEON_ARCHIVE_JSON JSON syntax and execute guarded isolated copy",
+    "Restore valid NEON_PMS_DATABASE_URL and recheck all secret formats before guarded copy",
     "Guarded startup/platform readiness-check adoption",
     "Backup and reviewed migration/grants",
     "Private raw-source archive",
@@ -101,7 +101,7 @@
     "complete_object_dependency_review": false,
     "backup_created": false,
     "restore_verified": false,
-    "destination_github_secret_verified": true,
+    "destination_github_secret_verified": false,
     "source_github_secret_error": null,
     "preflight_run": 39307509790,
     "preflight_revision": "f920a0217719b16b39ffc1c04f5b67c2628cc89d",
@@ -116,6 +116,13 @@
     "copy_attempt_stage": "archive_configuration",
     "archive_github_credential_error": "ARCHIVE_CREDENTIAL_JSON_INVALID",
     "copy_diagnostics_ci": "PASS",
-    "restore_attempted": false
+    "restore_attempted": false,
+    "destination_previous_verified": true,
+    "latest_retry_run": 39311170924,
+    "latest_retry_attempt": 2,
+    "latest_retry_checked_at_utc": "2026-10-19T19:33:41Z",
+    "latest_retry_stage": "destination_configuration",
+    "latest_retry_code": "DATABASE_CONNECTION_FAILED",
+    "archive_latest_format_check": "NOT_REACHED"
   }
 }
