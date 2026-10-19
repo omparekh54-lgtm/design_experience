@@ -1,7 +1,7 @@
 {
   "date": "2026-10-19",
   "phase": "3 cloud deployment",
-  "status": "DESTINATION_URL_CONFIGURATION_CHANGED_COPY_BLOCKED",
+  "status": "NEON_URL_AND_ARCHIVE_JSON_FORMAT_INVALID_COPY_BLOCKED",
   "checks": {
     "python_tests": {
       "passed": 732,
@@ -16,10 +16,10 @@
     "render_public_json_schema": "PASS",
     "render_platform_cli_validation": "NOT_RUN_CLI_UNAVAILABLE",
     "connection_policy_regressions": 19,
-    "ci_run": 39310602409,
+    "ci_run": 39312281024,
     "ci_all_jobs": "PASS",
     "neon_copy_postgres_rehearsal": "PASS",
-    "neon_copy_postgres_rehearsal_tests": 18
+    "neon_copy_postgres_rehearsal_tests": 21
   },
   "live_api_verified": true,
   "live_frontend_verified": true,
@@ -28,7 +28,7 @@
   "paper_activated": false,
   "campaign_started": false,
   "pending": [
-    "Restore valid NEON_PMS_DATABASE_URL and recheck all secret formats before guarded copy",
+    "Correct NEON_PMS_DATABASE_URL and PMS_NEON_ARCHIVE_JSON using their distinct expected formats",
     "Guarded startup/platform readiness-check adoption",
     "Backup and reviewed migration/grants",
     "Private raw-source archive",
@@ -123,6 +123,16 @@
     "latest_retry_checked_at_utc": "2026-10-19T19:33:41Z",
     "latest_retry_stage": "destination_configuration",
     "latest_retry_code": "DATABASE_CONNECTION_FAILED",
-    "archive_latest_format_check": "NOT_REACHED"
+    "archive_latest_format_check": "ARCHIVE_CREDENTIAL_JSON_INVALID",
+    "configuration_check_run": 39312565267,
+    "configuration_check_revision": "5c33bc192775c61a1eba89a87dea1a62d485fc1a",
+    "configuration_checked_at_utc": "2026-10-19T19:37:55Z",
+    "configuration_checks": {
+      "NEON_PMS_DATABASE_URL": "DESTINATION_URL_INVALID",
+      "PMS_DATABASE_URL": "FORMAT_VALID",
+      "PMS_NEON_ARCHIVE_JSON": "ARCHIVE_CREDENTIAL_JSON_INVALID"
+    },
+    "latest_target_database_bytes": 7520256,
+    "latest_target_app_objects": 0
   }
 }
