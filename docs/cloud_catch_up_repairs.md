@@ -48,3 +48,16 @@ The latter budget covers the fresh-classification backlog of 2,528 active issuer
 24 times 100 could not. Each pass retains private raw archival, verified TLS,
 locked PAPER safety, capacity bounds and incremental commits. Partial, busy,
 skipped or failed results are never a completed Phase 3. PAPER remains disabled.
+
+The manual `PMS catch-up source preflight` workflow verifies all unacknowledged
+financial/shareholding XML (including newly discovered revisions), every due
+classification, current master/index identities, actions, meetings and the target
+session's core source formats. Its connections enforce default transaction
+read-only before any query. It writes no database receipts, facts, permissions or
+orders and requires no storage credential. Its artifact contains counts, fixed
+error codes, issuer symbols and document hashes; raw XML is never published.
+Eight source workers, a 45-minute network deadline, a 1 GiB aggregate download
+budget and 9,000-record ceiling bound the review. A source-check pass is evidence
+for a fresh main catch-up dispatch, not proof of imported data, private archival,
+future source availability or campaign readiness. Review every reported exception
+before dispatching the writer workflow.
