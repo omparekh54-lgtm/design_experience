@@ -1,0 +1,107 @@
+{
+  "scope": "Current identifiers only; historical event dates and adjustment factors are not inferred",
+  "master_sha256": "64bc3997cc8e6d67f77fec2d04e4f74c45d7f7cb712ffd55c0885fb5a56722d8",
+  "quote_checks": [
+    {
+      "symbol": "BANSALWIRE",
+      "old_isin": "INE0B9K01025",
+      "isin": "INE0B9K01033",
+      "quote_verified": true,
+      "quote_sha256": "fa6388de6b95ed33a9233c7bc36538160c7cd1b0c796a383a70711e71275c404",
+      "quote_url": "https://www.nseindia.com/api/NextApi/apiClient/GetQuoteApi?functionName=getSymbolData&marketType=N&series=EQ&symbol=BANSALWIRE",
+      "observed_at": "2026-10-20T13:02:53.668697+05:30",
+      "classification": {
+        "sector": "Capital Goods",
+        "industry": "Industrial Products",
+        "series": "EQ",
+        "is_suspended": false
+      }
+    },
+    {
+      "symbol": "BLSE",
+      "old_isin": "INE0NLT01010",
+      "isin": "INE0NLT01028",
+      "quote_verified": true,
+      "quote_sha256": "473f1c2c1c919136c86a04dc9e74dafada793cd3d1247178145f1a84db06542b",
+      "quote_url": "https://www.nseindia.com/api/NextApi/apiClient/GetQuoteApi?functionName=getSymbolData&marketType=N&series=EQ&symbol=BLSE",
+      "observed_at": "2026-10-20T13:03:03.771466+05:30",
+      "classification": {
+        "sector": "Information Technology",
+        "industry": "IT - Services",
+        "series": "EQ",
+        "is_suspended": false
+      }
+    },
+    {
+      "symbol": "BUILDPRO",
+      "old_isin": "INE24OJ01011",
+      "isin": "INE24OJ01029",
+      "quote_verified": true,
+      "quote_sha256": "fc68381328290a890df06a35729c597f7abafd246133bb6d9668080fcc485c31",
+      "quote_url": "https://www.nseindia.com/api/NextApi/apiClient/GetQuoteApi?functionName=getSymbolData&marketType=N&series=EQ&symbol=BUILDPRO",
+      "observed_at": "2026-10-20T13:03:14.055028+05:30",
+      "classification": {
+        "sector": "Services",
+        "industry": "Commercial Services & Supplies",
+        "series": "EQ",
+        "is_suspended": false
+      }
+    },
+    {
+      "symbol": "CCAVENUE",
+      "old_isin": "INE483S01020",
+      "isin": "INE483S01038",
+      "quote_verified": true,
+      "quote_sha256": "6f34ff5628b353af9904b6f57ccd0f5da5509fea3c511688a542a1360911a9ee",
+      "quote_url": "https://www.nseindia.com/api/NextApi/apiClient/GetQuoteApi?functionName=getSymbolData&marketType=N&series=EQ&symbol=CCAVENUE",
+      "observed_at": "2026-10-20T13:03:25.420748+05:30",
+      "classification": {
+        "sector": "Financial Services",
+        "industry": "Financial Technology (Fintech)",
+        "series": "EQ",
+        "is_suspended": false
+      }
+    },
+    {
+      "symbol": "TAALTECH",
+      "old_isin": "INE524T01011",
+      "isin": "INE524T01029",
+      "quote_verified": true,
+      "quote_sha256": "1a9cfff373d3b431ffb68de86f08154126b4303a712f99a08a71539bb4564b0d",
+      "quote_url": "https://www.nseindia.com/api/NextApi/apiClient/GetQuoteApi?functionName=getSymbolData&marketType=N&series=EQ&symbol=TAALTECH",
+      "observed_at": "2026-10-20T13:03:37.183045+05:30",
+      "classification": {
+        "sector": "Information Technology",
+        "industry": "IT - Services",
+        "series": "EQ",
+        "is_suspended": false
+      }
+    },
+    {
+      "symbol": "TCC",
+      "old_isin": "INE887D01016",
+      "isin": "INE887D01024",
+      "quote_verified": true,
+      "quote_sha256": "32b9fb90b9e3d97f94280d268969fd028c9e61eac577f952501511e4c9919e20",
+      "quote_url": "https://www.nseindia.com/api/NextApi/apiClient/GetQuoteApi?functionName=getSymbolData&marketType=N&series=EQ&symbol=TCC",
+      "observed_at": "2026-10-20T13:03:47.579339+05:30",
+      "classification": {
+        "sector": "Consumer Services",
+        "industry": "Retailing",
+        "series": "EQ",
+        "is_suspended": false
+      }
+    }
+  ],
+  "legacy_mapping": "pms.instruments.external_security_id preserved; legacy views join this identifier, not ISIN",
+  "historical_price_evidence": {
+    "2026-10-13": {
+      "sha256": "b3aba7f1e20587e4c77a5de2b720cbcd5d8f4c8fe42e1b67f06f0d7deaabbf46",
+      "BANSALWIRE_isin": "INE0B9K01025"
+    },
+    "2026-10-19": {
+      "sha256": "f0a2e9bf7cb185bb112704355772d2954d662abee3d7295414aabc26d6ecfbde",
+      "BANSALWIRE_isin": "INE0B9K01033"
+    }
+  }
+}
