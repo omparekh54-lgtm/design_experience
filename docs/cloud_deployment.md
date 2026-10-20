@@ -2,6 +2,26 @@
 
 Status: the existing free API and SSR dashboard are live on Neon. Guarded startup, database readiness, read-only API credentials and controlled releases are applied. The combined hosted preflight passed. Collection-only scheduling is enabled; initial full-universe catch-up is still being verified. No PAPER campaign has started.
 
+### Dated price-exception review (20 October)
+
+The twelve original 13-October exceptions are absent from both official dated
+price reports. The review also covers 14, 15, 16 and 19 October; every eligible
+reported UDiFF candle agrees exactly with the security-wise report on symbol,
+series, OHLC and volume. The collector now records a distinct `no_reported_bar`
+observation after that reconciliation. It writes no synthetic candle, volume,
+fill or suspension status. Collection completeness means all source outcomes
+are accounted for; it does not mean every active listing traded or has a usable
+price. The paper executor still requires an actual bar for its execution date.
+
+Official NSE circulars CML76849 and CML76916 establish CCAVENUE's suspension
+from 13 October through 18 October and resumption on 19 October with ISIN
+INE483S01038. The bounded correction verifies the exact reviewed PDF hashes
+and archives both originals before use. It explains missing historical trading
+status, including the inconsistent active indicator on 16 October, without
+inventing ASM/GSM history or changing current permissions. Full evidence is in
+`cloud_price_exceptions_2026-10-20.json`. A fresh hosted catch-up must pass before
+the deployment data gate is certified. The campaign remains off.
+
 ## Prepared configuration
 
 - `render.yaml`: the existing free Python API and Node SSR dashboard, one API process, `/ready` database health probe, explicit PAPER-only environment, collection freshness gate and startup backfill disabled. The proposed Blueprint turns automatic deploys off; current services still deploy on commits. No paid worker, cron, Redis, database or disk is provisioned. The existing service names were verified against the repository; do not create a duplicate API or frontend. The Blueprint is reviewed desired configuration, not a record that it has been applied. Existing dashboard settings use `next start`; standalone output was removed to match this runtime.

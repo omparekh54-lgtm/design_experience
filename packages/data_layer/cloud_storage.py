@@ -208,7 +208,8 @@ class CloudStore:
         self._known = None
         return {"source_rows": len(rows), "identity_conflicts": 0}
 
-    def prices(self, rows, doc, day, surveillance):
+    def prices(self, rows, doc, day, surveillance, *, secondary=None,
+               secondary_doc=None, suspensions=None, suspension_docs=()):
         known = self.instruments()
         by_symbol = {}
         for r in rows:
@@ -241,6 +242,19 @@ class CloudStore:
             for s, i in known.items()
             if i["listed_from"] and i["listed_from"] <= day and s not in surveillance
         }
+        no_reported_bar = []
+        suspensions = suspensions or {}
+        # A reviewed circular explains only this bounded price/status exception;
+        # it does not manufacture historical ASM/GSM classifications.
+        if set(suspensions) & by_symbol.keys():
+            raise SourceError('suspended_security_has_reported_bar')
+        if secondary is not None:
+            from packages.data_layer.price_observations import verify_absences
+            if secondary_doc is None:
+                raise SourceError('secondary_price_receipt_required')
+            no_reported_bar = verify_absences(rows, secondary, missing, suspensions)
+            missing -= set(no_reported_bar) | set(suspensions)
+            uncovered -= set(suspensions)
         # Partial data may be stored for repair, but it never receives a complete gate.
         with self.engine.begin() as c:
             if by_symbol:
@@ -262,12 +276,15 @@ class CloudStore:
             self.receipt(
                 c,
                 "CLOUD_PRICES",
-                [doc],
+                [doc] + ([secondary_doc] if secondary_doc else []) + list(suspension_docs),
                 {
                     "date": day,
                     "written": len(by_symbol),
                     "missing": len(missing),
                     "uncovered": len(uncovered),
+                    "no_reported_bar_symbols": no_reported_bar,
+                    "reviewed_suspensions": suspensions,
+                    "synthetic_candles": False,
                     "complete": bool(expected) and not missing and not uncovered,
                 },
             )
@@ -276,6 +293,8 @@ class CloudStore:
             "expected": len(expected),
             "missing_symbols": sorted(missing),
             "uncovered_symbols": sorted(uncovered),
+            "no_reported_bar_symbols": no_reported_bar,
+            "reviewed_suspensions": suspensions,
             "complete": bool(expected) and not missing and not uncovered,
         }
 

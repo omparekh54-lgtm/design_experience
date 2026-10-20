@@ -1,5 +1,5 @@
 {
-  "status": "NOT_CERTIFIED",
+  "status": "SOURCE_ABSENCES_VERIFIED_DEPLOYMENT_RECHECK_PENDING",
   "session": "2026-10-13",
   "price_archive_sha256": "b3aba7f1e20587e4c77a5de2b720cbcd5d8f4c8fe42e1b67f06f0d7deaabbf46",
   "independent_security_report_sha256": "94494192a5657cc4854117bdca22a8f36d32080025dc24539c00553b340d2d38",
@@ -17,7 +17,7 @@
     "VASUPRADA",
     "WHBRADY"
   ],
-  "interpretation": "No reported bars observed; this is not an assertion of suspension or a fabricated zero-volume candle",
+  "interpretation": "All 12 original names have no reported bar in either dated NSE price report. No OHLC or zero-volume candle is invented; this observation is separate from investability and execution availability.",
   "dated_source_identities": [
     {
       "source_symbol": "GFSTEELS",
@@ -30,7 +30,218 @@
       "isin": "INE545A01024"
     }
   ],
-  "remaining_uncovered_historical_symbol": "CCAVENUE",
   "entries_unlocked": false,
-  "source_preserved": true
+  "source_preserved": true,
+  "reviewed_historical_suspension": {
+    "symbol": "CCAVENUE",
+    "isin": "INE483S01038",
+    "effective_from": "2026-10-13",
+    "resume_on": "2026-10-19",
+    "reason": "Equity share consolidation from face value INR 1 to INR 10",
+    "sources": [
+      {
+        "url": "https://nsearchives.nseindia.com/content/circulars/CML76849.pdf",
+        "sha256": "17392db2008c37e11798eb17d4e08936fc67d3a44876a1093bdb066809ce141f"
+      },
+      {
+        "url": "https://nsearchives.nseindia.com/content/circulars/CML76916.pdf",
+        "sha256": "79601d2e2d08e1f7b6ee362aa3b1191f1076aa756aa54cb9db4d45c68ea27a73"
+      }
+    ],
+    "asm_gsm_history_inferred": false
+  },
+  "recent_sessions": [
+    {
+      "date": "2026-10-13",
+      "sources": {
+        "prices": {
+          "url": "https://nsearchives.nseindia.com/content/cm/BhavCopy_NSE_CM_0_0_0_20261013_F_0000.csv.zip",
+          "sha256": "b3aba7f1e20587e4c77a5de2b720cbcd5d8f4c8fe42e1b67f06f0d7deaabbf46",
+          "bytes": 204601
+        },
+        "independent": {
+          "url": "https://nsearchives.nseindia.com/products/content/sec_bhavdata_full_13102026.csv",
+          "sha256": "94494192a5657cc4854117bdca22a8f36d32080025dc24539c00553b340d2d38",
+          "bytes": 397688
+        },
+        "status": {
+          "url": "https://nsearchives.nseindia.com/content/cm/REG_IND131026.csv",
+          "sha256": "4e88eb79cd48320c24f71eafa7a97b3be0177e04f8251d2a1e557532aa659db7",
+          "bytes": 297162
+        }
+      },
+      "no_reported_bar_symbols": [
+        "ADL",
+        "APOORVA",
+        "BNALTD",
+        "KALYANI",
+        "LAKPRE",
+        "NEAGI",
+        "POLYSPIN",
+        "SAB",
+        "SHERVANI",
+        "SONAL",
+        "VASUPRADA",
+        "WHBRADY"
+      ],
+      "all_absent_from_both_reports": true
+    },
+    {
+      "date": "2026-10-14",
+      "sources": {
+        "prices": {
+          "url": "https://nsearchives.nseindia.com/content/cm/BhavCopy_NSE_CM_0_0_0_20261014_F_0000.csv.zip",
+          "sha256": "db0b3819da45da615d3aa5ac7888a2b0670189d73f8d33f1e377146c89d9c94f",
+          "bytes": 205416
+        },
+        "independent": {
+          "url": "https://nsearchives.nseindia.com/products/content/sec_bhavdata_full_14102026.csv",
+          "sha256": "b0972b00af6ee9521e584426973ed6e60ea73741df0fdff2135f0d83880bd9b3",
+          "bytes": 398299
+        },
+        "status": {
+          "url": "https://nsearchives.nseindia.com/content/cm/REG_IND141026.csv",
+          "sha256": "e5d9e30bd695afc8f5a4104e6d1a4b0c094d56fbcc2f33bc6af2a4f730b2336b",
+          "bytes": 297152
+        }
+      },
+      "no_reported_bar_symbols": [
+        "ALFREDHE",
+        "CURAA",
+        "ELCIDIN",
+        "KALYANI",
+        "NEAGI",
+        "SAMBANDAM",
+        "SHERVANI",
+        "SONAL",
+        "THAKDEV",
+        "VASUPRADA",
+        "WHBRADY"
+      ],
+      "all_absent_from_both_reports": true
+    },
+    {
+      "date": "2026-10-15",
+      "sources": {
+        "prices": {
+          "url": "https://nsearchives.nseindia.com/content/cm/BhavCopy_NSE_CM_0_0_0_20261015_F_0000.csv.zip",
+          "sha256": "3d1c7039e2c70868cc44b51d1f9e4b0f942afc0575fe8c4a524aed9e01eac3e8",
+          "bytes": 205668
+        },
+        "independent": {
+          "url": "https://nsearchives.nseindia.com/products/content/sec_bhavdata_full_15102026.csv",
+          "sha256": "b5fbd15541453902f01586042d1ccf5bba274a6d1842f315ff70e97b9e0186ed",
+          "bytes": 397333
+        },
+        "status": {
+          "url": "https://nsearchives.nseindia.com/content/cm/REG_IND151026.csv",
+          "sha256": "cda7f8ed06be6e3e357c77317c5c13bdffff1825c6915a7e634bed702525b27c",
+          "bytes": 297140
+        }
+      },
+      "no_reported_bar_symbols": [
+        "AHLEAST",
+        "ANKITMETAL",
+        "HALDER",
+        "KALYANI",
+        "NEAGI",
+        "PACIFICI",
+        "SHRIKRISH",
+        "SIMPLXREA",
+        "UPHOT",
+        "VIJSOLX",
+        "ZENITHEXPO"
+      ],
+      "all_absent_from_both_reports": true
+    },
+    {
+      "date": "2026-10-16",
+      "sources": {
+        "prices": {
+          "url": "https://nsearchives.nseindia.com/content/cm/BhavCopy_NSE_CM_0_0_0_20261016_F_0000.csv.zip",
+          "sha256": "d2c4406c1ecbfbcb9acdafa424f921caad7467d97da47c65973b34aa0aac70bc",
+          "bytes": 206122
+        },
+        "independent": {
+          "url": "https://nsearchives.nseindia.com/products/content/sec_bhavdata_full_16102026.csv",
+          "sha256": "8afbcce6d74f667f910213f8e1405092676f977f6e0693e1c082d7e13966a162",
+          "bytes": 397218
+        },
+        "status": {
+          "url": "https://nsearchives.nseindia.com/content/cm/REG_IND161026.csv",
+          "sha256": "00105bd598bd83435a58eaabe3934a4223f952a19fbb05c5568d5958cffdf9c1",
+          "bytes": 297181
+        }
+      },
+      "no_reported_bar_symbols": [
+        "APOORVA",
+        "BGLOBAL",
+        "CEREBRAINT",
+        "CLCIND",
+        "CMICABLES",
+        "EDUCOMP",
+        "IMPEXFERRO",
+        "KALYANI",
+        "LASA",
+        "NAGAFERT",
+        "ORTEL",
+        "RAJVIR",
+        "RSDFIN",
+        "SAB",
+        "SELMC",
+        "SHERVANI",
+        "SKIL",
+        "SPELS",
+        "THAKDEV",
+        "UNIVAFOODS",
+        "UPHOT",
+        "VASUPRADA",
+        "WHBRADY"
+      ],
+      "all_absent_from_both_reports": true
+    },
+    {
+      "date": "2026-10-19",
+      "sources": {
+        "prices": {
+          "url": "https://nsearchives.nseindia.com/content/cm/BhavCopy_NSE_CM_0_0_0_20261019_F_0000.csv.zip",
+          "sha256": "f0a2e9bf7cb185bb112704355772d2954d662abee3d7295414aabc26d6ecfbde",
+          "bytes": 205000
+        },
+        "independent": {
+          "url": "https://nsearchives.nseindia.com/products/content/sec_bhavdata_full_19102026.csv",
+          "sha256": "c9be4a9270c402f4b1296440d523fad34940a42a2b150ac3201b39dd54e93f44",
+          "bytes": 397312
+        },
+        "status": {
+          "url": "https://nsearchives.nseindia.com/content/cm/REG_IND191026.csv",
+          "sha256": "07a206c7c0014b6da1786bac61e92db7a1aba473b9abc844f93ab4b05ba0cb40",
+          "bytes": 297370
+        }
+      },
+      "no_reported_bar_symbols": [
+        "ABMINTLLTD",
+        "ASSAMENT",
+        "BNALTD",
+        "KALYANI",
+        "MODTHREAD",
+        "MPDL",
+        "MSL",
+        "MUKESHB",
+        "RRECL",
+        "SAB",
+        "SIMPLXREA",
+        "THAKDEV"
+      ],
+      "all_absent_from_both_reports": true
+    }
+  ],
+  "positive_report_reconciliation": {
+    "2026-10-13": 3404,
+    "2026-10-14": 3407,
+    "2026-10-15": 3400,
+    "2026-10-16": 3398,
+    "2026-10-19": 3405
+  },
+  "positive_report_reconciliation_meaning": "Every parsed eligible UDiFF bar has an exact symbol/series OHLC/volume match in the separate dated security-wise report."
 }
