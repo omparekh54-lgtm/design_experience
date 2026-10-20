@@ -447,6 +447,21 @@ def parse_surveillance(body):
 
 
 def paged_financials(http, start, end, *, max_pages=50):
+    # New disclosures can shift offset pages while they are being read. Restart
+    # the entire bounded snapshot; never combine pages from different versions.
+    for attempt in range(3):
+        try:
+            return _paged_financials_once(http, start, end, max_pages=max_pages)
+        except SourceError as exc:
+            if attempt == 2 or str(exc) not in {
+                'financial_pagination_changed',
+                'financial_duplicate_or_ignored_date_filter',
+                'financial_pagination_truncated',
+            }:
+                raise
+
+
+def _paged_financials_once(http, start, end, *, max_pages=50):
     from packages.data_layer.exchange_financials import NSEIntegratedFinancialsProvider
 
     parser = object.__new__(NSEIntegratedFinancialsProvider)

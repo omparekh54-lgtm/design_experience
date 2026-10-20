@@ -423,3 +423,12 @@ duplicate 2419 inactive with its provenance. No row was deleted. All 749,690
 price rows (747,098 legacy plus 2,592 cloud) remain; 2,619 active instruments
 have no duplicate active ISINs. PAPER remains locked. Local tests: 748 passed,
 5 skipped.
+
+Hosted run `39390092037` committed 12,980 price bars through 2026-10-19,
+then stopped at `financial_pagination_changed`. The database measured
+581,558,272 bytes. The financial endpoint changed snapshot metadata between
+pages during the read; no mixed page set was admitted. The parser now restarts
+the entire snapshot at most three times and still fails if it cannot obtain a
+consistent set. Regression tests cover both eventual stability and persistent
+change. Local suite: 750 passed, 5 skipped. Existing price exceptions remain
+PARTIAL and cannot be promoted by a successful reference stage.
