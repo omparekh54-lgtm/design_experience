@@ -1,0 +1,45 @@
+name: PMS initial cloud catch-up
+
+on:
+  workflow_dispatch:
+    inputs:
+      session_date:
+        description: Past completed exchange session within seven days (YYYY-MM-DD)
+        required: true
+        type: string
+
+concurrency:
+  group: pms-market-close-paper
+  cancel-in-progress: false
+
+jobs:
+  catch-up:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    env:
+      DATABASE_URL: ${{ secrets.NEON_PMS_DATABASE_URL }}
+      PMS_NEON_ARCHIVE_JSON: ${{ secrets.PMS_NEON_ARCHIVE_JSON }}
+      PMS_DATABASE_VERIFY_FULL: '1'
+      SSL_CERT_FILE: /etc/ssl/certs/ca-certificates.crt
+      EXECUTION_MODE: PAPER
+      LIVE_TRADING_ENABLED: 'false'
+      SESSION_DATE: ${{ inputs.session_date }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Catch up bounded data batches with private source archival
+        run: python scripts/bootstrap_cloud_collection.py --date "$SESSION_DATE" --passes 6 --output-dir catch-up
+      - name: Preserve sanitized receipts only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pms-initial-catch-up-${{ github.run_id }}
+          path: catch-up
+          if-no-files-found: warn
+          retention-days: 30
