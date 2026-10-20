@@ -1,0 +1,36 @@
+{
+  "status": "NOT_CERTIFIED",
+  "session": "2026-10-13",
+  "price_archive_sha256": "b3aba7f1e20587e4c77a5de2b720cbcd5d8f4c8fe42e1b67f06f0d7deaabbf46",
+  "independent_security_report_sha256": "94494192a5657cc4854117bdca22a8f36d32080025dc24539c00553b340d2d38",
+  "missing_from_both_price_reports": [
+    "ADL",
+    "APOORVA",
+    "BNALTD",
+    "KALYANI",
+    "LAKPRE",
+    "NEAGI",
+    "POLYSPIN",
+    "SAB",
+    "SHERVANI",
+    "SONAL",
+    "VASUPRADA",
+    "WHBRADY"
+  ],
+  "interpretation": "No reported bars observed; this is not an assertion of suspension or a fabricated zero-volume candle",
+  "dated_source_identities": [
+    {
+      "source_symbol": "GFSTEELS",
+      "database_symbol": "TIKONA",
+      "isin": "INE534A01028"
+    },
+    {
+      "source_symbol": "HEGAM",
+      "database_symbol": "HEG",
+      "isin": "INE545A01024"
+    }
+  ],
+  "remaining_uncovered_historical_symbol": "CCAVENUE",
+  "entries_unlocked": false,
+  "source_preserved": true
+}

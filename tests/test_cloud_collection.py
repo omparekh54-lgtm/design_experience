@@ -584,6 +584,13 @@ def test_master_isin_conflict_cannot_rewrite_identity():
     assert all(not q.startswith(("update", "insert")) for q, p in e.calls)
 
 
+def test_master_cannot_create_second_active_identity_for_same_isin():
+    s=CloudStore(None)
+    s.instruments=lambda:{'OLD':{'isin':'INE545A01024'}}
+    with pytest.raises(SourceError,match='symbol_change_requires_review'):
+        s.master({'NEW':{'isin':'INE545A01024'}},document('x'))
+
+
 def test_reviewed_old_price_identity_is_bounded_and_does_not_change_master_gate():
     from packages.data_layer.cloud_storage import reviewed_price_isin_matches
     r = dict(isin='INE0B9K01033',metadata={'reviewed_isin_history': [dict(
@@ -750,6 +757,30 @@ def test_initial_catch_up_does_not_backdate_current_reference_snapshots(monkeypa
     assert collector.collect(target, apply=True)['status'] == 'SUCCESS'
     assert seen == [('prices', target), ('references', NOW.date()),
                     ('classification', NOW.date(), 500)]
+
+
+def test_successful_references_never_promote_partial_price_coverage():
+    from packages.pms.cloud_collection import CloudCollector
+    store=SimpleNamespace(classifications=lambda *a,**k: {'remaining':0})
+    c=CloudCollector(store,now=NOW)
+    c.core=lambda *a,**k: {'status':'PARTIAL','stages':{'prices':{'complete':False}}}
+    c.references=lambda *a,**k: {'status':'SUCCESS','stages':{'financials':{'processed':1}}}
+    result=c.collect(DAY,apply=True)
+    assert result['status']=='PARTIAL'
+    assert result['stages']['financials']['processed']==1
+    assert result['stages']['prices']['complete'] is False
+
+
+def test_dated_source_symbol_maps_only_through_unique_isin():
+    s=CloudStore(None)
+    s.instruments=lambda: {'CURRENT':{'isin':'INE545A01024'}}
+    source={'OLD':{'status':'A','series':'EQ'}}
+    states,aliases=s.session_surveillance([{'symbol':'OLD','isin':'INE545A01024'}],source,DAY)
+    assert states['CURRENT']==source['OLD'] and source.keys()=={'OLD'}
+    assert aliases[0]['source_symbol']=='OLD' and aliases[0]['trade_date']==str(DAY)
+    s.instruments=lambda: {'CURRENT':{'isin':'INE545A01024'},'OTHER':{'isin':'INE545A01024'}}
+    with pytest.raises(SourceError,match='ambiguous'):
+        s.session_surveillance([{'symbol':'OLD','isin':'INE545A01024'}],source,DAY)
 
 
 def test_initial_catch_up_limits_are_explicit():

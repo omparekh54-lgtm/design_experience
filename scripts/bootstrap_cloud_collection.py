@@ -65,10 +65,15 @@ def main(argv=None):
                 json.dumps(result, default=str, indent=2) + '\n')
             report['passes'].append(dict(pass_number=i+1, status=result['status'],
                 stages=result.get('stages', {}), database_bytes=result['database_bytes_after'],
-                run_id=result.get('run_id')))
+                run_id=result.get('run_id'),error_code=result.get('error_code'),
+                error_type=result.get('error_type')))
             report['status'] = result['status']
             print(json.dumps(report['passes'][-1], default=str), flush=True)
             if result['status'] != 'PARTIAL':
+                break
+            stages = result.get('stages', {})
+            if all(stages.get(k, {}).get('remaining') == 0
+                   for k in ['financials','shareholding','classifications']):
                 break
         # SKIPPED, BUSY and partial data are never a completed deployment catch-up.
         report['full_universe_verified'] = report['status'] == 'SUCCESS'

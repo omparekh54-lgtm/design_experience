@@ -1,11 +1,11 @@
 {
   "date": "2026-10-20",
-  "updated_at_utc": "2026-10-20T07:13:29.555897+00:00",
-  "status": "SOURCE_PARSER_REPAIRED_RENDER_CUTOVER_BLOCKED",
+  "updated_at_utc": "2026-10-20T07:51:02.517372+00:00",
+  "status": "LIVE_NEON_STATUS_SERVICES_COLLECTION_ENABLED_CATCH_UP_PENDING",
   "campaign_started": false,
   "paper_enabled": false,
-  "collection_activated": false,
-  "service_cutover": false,
+  "collection_activated": true,
+  "service_cutover": true,
   "source_preserved": true,
   "project_id": "green-resonance-86147459",
   "branch_id": "br-twilight-sea-azumjkpc",
@@ -71,28 +71,27 @@
     "anonymous_read_denied": true
   },
   "tests_local": {
-    "passed": 739,
+    "passed": 748,
     "skipped": 5
   },
   "pending": [
-    "Explicit permission for read-only Neon credential transfer to Render",
-    "Guarded API build/start, readiness and controlled deploy settings",
-    "Actual API and SSR dashboard verification after Neon cutover",
-    "Repeat complete hosted preflight on repaired revision",
-    "Collection-only scheduler activation and full-universe catch-up",
-    "Measured collection growth and free workspace quotas; monitoring/rehearsal remain later phases"
+    "Run resumed catch-up with independent feed progress and dated ticker mapping",
+    "Resolve explicit price/surveillance exceptions without inventing candles",
+    "Verify all feed backlogs and measured collection growth",
+    "Confirm actual scheduled collection receipt; later monitoring/restore/rehearsal remain separate"
   ],
   "acceptance": "NOT_CERTIFIED",
   "hosted_preflight": {
-    "run_id": 39381649589,
-    "revision": "f04cac90d2887be6a0136b010e17f18d82552600",
-    "status": "BLOCKED",
-    "stage": "official_source_probe",
-    "error_code": "completed_source_session_not_verified",
-    "source_error": "LPDC: shareholding_fact_missing_or_ambiguous",
+    "run_id": 39386151246,
+    "revision": "76a6ba9d09b712a389814aa75d8e60679bfe599b",
+    "status": "INFRA_AND_SOURCE_PROBE_VERIFIED",
+    "database_bytes": 576036864,
     "database_tls_verified_full": true,
     "database_writes": false,
     "private_archive_verified": true,
+    "objects_verified": 17,
+    "archive_bytes": 50733841,
+    "anonymous_read_denied": true,
     "full_universe_verified": false
   },
   "shareholding_parser_repair": {
@@ -106,20 +105,30 @@
     "complete_hosted_preflight_after_repair": "NOT_RUN"
   },
   "render_cutover": {
-    "applied": false,
+    "applied": true,
     "read_only_role": "pms_status",
-    "credential_transfer_auto_review_rejected": true,
+    "credential_transfer_auto_review_rejected": false,
     "reason": "Explicit approval required to send the Neon read-only role password to the existing Render API DATABASE_URL secret",
-    "settings_ui": "SIGNED_IN_THEN_BROWSER_CONTROL_TIMED_OUT",
-    "actual_build": "pip install -r requirements.txt",
-    "actual_start": "uvicorn apps.api.main_exec:app --host 0.0.0.0 --port $PORT",
-    "actual_health_path": "",
-    "actual_auto_deploy": "yes",
+    "settings_ui": "RECOVERED_AND_SAVED",
+    "actual_build": "pip install -r requirements-ops.txt",
+    "actual_start": "python scripts/start_cloud_api.py",
+    "actual_health_path": "/ready",
+    "actual_auto_deploy": "no",
     "desired_build": "pip install -r requirements-ops.txt",
     "desired_start": "python scripts/start_cloud_api.py",
     "desired_health_path": "/ready",
     "desired_auto_deploy": "no",
-    "service_plan": "free"
+    "service_plan": "free",
+    "user_authorization": "Continue after explicit request to store read-only Neon credential in existing Render API",
+    "previous_rejection_resolved": true,
+    "deployment_id": "dep-dbbhd3m7bikc738j0g5g",
+    "revision": "76a6ba9d09b712a389814aa75d8e60679bfe599b",
+    "deployment_status": "live",
+    "health_http": 200,
+    "ready_http": 200,
+    "overview_http": 200,
+    "universe_http": 200,
+    "neon_status_role_sessions_observed": 2
   },
   "neon_idle_observation": {
     "checked_at_utc": "2026-10-20T07:11:47.871810+00:00",
@@ -289,5 +298,79 @@
         "observed_at": "2026-10-20T12:42:38.208058+05:30"
       }
     ]
+  },
+  "frontend_deployment": {
+    "status": "live",
+    "deployment_id": "dep-dbbhggnavr4c73dtcla0",
+    "revision": "ea1a154da67e50262ad481d303d0933d9943a471",
+    "url": "https://pms-status-dashboard.onrender.com",
+    "auto_deploy": "no",
+    "build": "cd apps/web && npm ci --no-audit --no-fund && npm run build",
+    "browser_verified": true,
+    "displayed_api_reachable": true,
+    "new_entries_locked": true,
+    "service_plan": "free"
+  },
+  "render_workspace_usage": {
+    "plan": "Hobby",
+    "card_on_file": false,
+    "free_instance_hours_used": 15.38,
+    "free_instance_hours_limit": 750,
+    "included_pipeline_minutes_used": 111,
+    "included_pipeline_minutes_limit": 500,
+    "bandwidth_used_mb": 17,
+    "included_bandwidth_gb": 5,
+    "current_services_usd": 0,
+    "current_datastores_usd": 0,
+    "current_pipeline_usd": 0,
+    "observation_only": true
+  },
+  "collection_scheduler": {
+    "enabled": true,
+    "activation_variable": "PMS_CLOUD_COLLECTION_ENABLED=true",
+    "paper_variable": "NOT_SET",
+    "attempts_ist": [
+      "19:07",
+      "19:27",
+      "19:47"
+    ],
+    "owner": "GitHub Actions",
+    "scheduled_delivery_verification": "PENDING",
+    "initial_catch_up_workflow": "pms-initial-catch-up.yml"
+  },
+  "initial_catch_up": {
+    "first_run_id": 39386729186,
+    "first_status": "FAILED",
+    "first_error_code": "master_isin_change_requires_review",
+    "first_worker_id": "80298ae4-515d-43ab-8fe4-c8cc19d90247",
+    "reviewed_identifier_repairs": 6,
+    "preserved_legacy_prices": 747098,
+    "old_isins_preserved": true,
+    "full_universe_verified": false,
+    "resumed_run": 39388234721,
+    "resumed_worker_id": "8fe8edbe-c625-4582-9f8c-fb0e65404e00",
+    "resumed_status": "FAILED",
+    "identity_repair_pr": 27,
+    "identity_repair_ci": 39387817266,
+    "identity_repair_merge": "cc769e305d29c330c0a93a7046aa532856acb589",
+    "identity_repair_applied": true,
+    "resumed_error_code": "price_universe_coverage_incomplete",
+    "instruments_after_master": 2620,
+    "cloud_prices_written": 2592,
+    "price_session": "2026-10-13",
+    "missing_prices": 12,
+    "uncovered_surveillance_before_symbol_mapping": 3
+  },
+  "hegam_identity_repair": {
+    "applied": true,
+    "legacy_instrument_id": 307,
+    "duplicate_id": 2419,
+    "duplicate_preserved_inactive": true,
+    "external_mapping_preserved": true,
+    "cloud_rows_preserved": 2592,
+    "all_price_rows_preserved": 749690,
+    "active_instruments": 2619,
+    "active_duplicate_isins": 0,
+    "rollback_rehearsal_passed": true
   }
 }
