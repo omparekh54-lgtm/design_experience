@@ -1131,3 +1131,20 @@ def test_reviewed_listing_day_context_keeps_actual_date_and_filing_time(monkeypa
     monkeypatch.setattr(shareholding_identity, 'reviews', lambda: [])
     with pytest.raises(SourceError):
         parse_shareholding(xml, record, expected_isin='INE000A01010')
+
+
+def test_empty_quote_envelope_does_not_block_verified_non_eq_fallback():
+    from packages.data_layer.cloud_sources import fetch_classification
+    class HTTP:
+        def api(self, path, **params):
+            if params['functionName'] == 'getMetaData':
+                return document({'symbol': 'TEST'})
+            if params['series'] == 'EQ':
+                return document({'equityResponse': [{'metaData': None, 'secInfo': None}]})
+            assert params['series'] == 'BE'
+            return document({'equityResponse': [{
+                'metaData': {'symbol': 'TEST', 'isinCode': 'INE000000001'},
+                'secInfo': {'sector': 'Services'}}]})
+    _, result = fetch_classification(HTTP(), 'TEST', 'INE000000001')
+    assert result['series'] == 'BE'
+    assert result['identity_basis'] == 'DETAILED_QUOTE'

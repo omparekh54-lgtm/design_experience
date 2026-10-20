@@ -154,5 +154,19 @@
     "master_sha256": "64bc3997cc8e6d67f77fec2d04e4f74c45d7f7cb712ffd55c0885fb5a56722d8",
     "quote_sha256": "f02071deced2f709f45f67f8864dc7867fe78a6afd77575207b8edabf77b7d04",
     "reviewed_on": "2026-10-20"
+  },
+  {
+    "symbol": "IMFA",
+    "current_isin": "INE919H01018",
+    "summary_isin": "INE919H01018",
+    "xml_symbol": "IMFA",
+    "xml_isin": "INR919H01018",
+    "source_url": "https://nsearchives.nseindia.com/corporate/xbrl/SHP_1733231_06102026103250_WEB.xml",
+    "period": "30-SEP-2026",
+    "xml_sha256": "2f7bbe53663637b65a31253f676589da6ef379b647e93f9c00cfe7fb20c82d88",
+    "reason": "REVIEWED_XML_ISIN_TYPO",
+    "master_sha256": "64bc3997cc8e6d67f77fec2d04e4f74c45d7f7cb712ffd55c0885fb5a56722d8",
+    "quote_sha256": "d1103f1a4c522d63243065cc8a9c67f341184e3e170c317a97a5c9c2ebe3b878",
+    "reviewed_on": "2026-10-20"
   }
 ]

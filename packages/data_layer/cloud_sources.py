@@ -393,6 +393,10 @@ def fetch_classification(http, symbol, isin):
         row = rows[0] if isinstance(rows, list) and rows else {}
         quote = row.get("metaData") or {}
         sec = row.get("secInfo") or {}
+        if not quote and not sec:
+            # Some unavailable series return a populated response envelope with
+            # null fields instead of 404. Continue to other official series.
+            continue
         if quote.get("symbol") != symbol:
             raise SourceError("classification_identity_mismatch")
         identity_basis = 'DETAILED_QUOTE'
