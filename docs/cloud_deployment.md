@@ -2,6 +2,22 @@
 
 Status: the existing free API and SSR dashboard are live on Neon. Guarded startup, database readiness, read-only API credentials and controlled releases are applied. The combined hosted preflight passed. Collection-only scheduling is enabled; initial full-universe catch-up is still being verified. No PAPER campaign has started.
 
+### Corporate-action identity repair (20 October)
+
+Catch-up run `39394319468` committed 350 financial and 58 shareholding records
+in total before stopping at `action_isin_mismatch`. Five dated corporate-action
+records carry older ISINs: SHIVAMAUTO, HINDCOMPOS, BANSALWIRE, ELECON and
+ANGELONE. Fresh NSE master and detailed quote checks confirmed each current
+identity and company. `packages/data_layer/reviewed_action_identities.json`
+records the original event payloads, exact record hashes and source hashes.
+The importer accepts only these exact reviewed event records against the exact
+current identifier. Different events, dates, revisions and unknown identifiers
+still fail the identity gate. Original source ISINs and event payloads remain
+unchanged; no generic historical alias, master rewrite or adjustment factor is
+inferred. The affected ELECON dividend's `Re 0.50` amount is parsed as INR 0.50.
+Failed runs now retain completed stage receipts and reference error counts,
+without granting collection success or PAPER permission.
+
 ### Dated price-exception review (20 October)
 
 The twelve original 13-October exceptions are absent from both official dated
