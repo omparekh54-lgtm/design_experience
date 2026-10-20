@@ -15,7 +15,7 @@ concurrency:
 jobs:
   catch-up:
     runs-on: ubuntu-24.04
-    timeout-minutes: 90
+    timeout-minutes: 360
     permissions:
       contents: read
     env:
@@ -34,7 +34,7 @@ jobs:
           cache: pip
       - run: pip install -r requirements.txt
       - name: Catch up bounded data batches with private source archival
-        run: python scripts/bootstrap_cloud_collection.py --date "$SESSION_DATE" --passes 6 --output-dir catch-up
+        run: python scripts/bootstrap_cloud_collection.py --date "$SESSION_DATE" --passes 24 --output-dir catch-up
       - name: Preserve sanitized receipts only
         if: always()
         uses: actions/upload-artifact@v4

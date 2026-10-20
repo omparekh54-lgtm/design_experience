@@ -815,9 +815,9 @@ def test_dated_source_symbol_maps_only_through_unique_isin():
 
 def test_initial_catch_up_limits_are_explicit():
     from scripts.bootstrap_cloud_collection import validate_target
-    validate_target(NOW.date() - timedelta(days=1), NOW, 6)
+    validate_target(NOW.date() - timedelta(days=1), NOW, 24)
     with pytest.raises(SourceError):
-        validate_target(NOW.date() - timedelta(days=1), NOW, 7)
+        validate_target(NOW.date() - timedelta(days=1), NOW, 25)
 
 
 def test_next_api_classification_discovers_non_eq_series():
