@@ -15,7 +15,7 @@ concurrency:
 jobs:
   source-preflight:
     runs-on: ubuntu-24.04
-    timeout-minutes: 55
+    timeout-minutes: 100
     permissions:
       contents: read
     env:

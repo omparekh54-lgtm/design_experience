@@ -75,7 +75,10 @@ class Document:
 
 class OfficialHTTP:
     def __init__(self, *, seconds=1500, opener=None, sleep=time.sleep, archive=None):
+        from packages.data_layer.source_pacing import PUBLIC_SOURCE_PACER
+
         self.deadline = time.monotonic() + seconds
+        self.pacer = PUBLIC_SOURCE_PACER if opener is None else None
         self.opener = opener or urllib.request.build_opener(SafeRedirect())
         self.sleep = sleep
         self.documents = []
@@ -89,6 +92,8 @@ class OfficialHTTP:
             if remaining <= 0:
                 raise SourceError("collection_deadline_exceeded")
             try:
+                if self.pacer is not None:
+                    self.pacer.wait(url, self.deadline)
                 request = urllib.request.Request(
                     url,
                     headers={

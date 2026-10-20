@@ -41,3 +41,19 @@ def test_preflight_requires_readonly_transaction_before_source_requests(monkeypa
         verify.verify(engine, date(2026, 10, 19),
                       now=verify.datetime(2026, 10, 20, 18, tzinfo=verify.IST))
 
+
+
+def test_repeated_source_denials_stop_new_downloads(monkeypatch):
+    budget = verify.SourceBudget()
+    calls = []
+    def denied(self, url):
+        calls.append(url)
+        raise SourceError('source_http_403')
+    monkeypatch.setattr(verify.OfficialHTTP, 'fetch', denied)
+    http = budget.http()
+    for i in range(3):
+        with pytest.raises(SourceError, match='source_http_403'):
+            http.fetch(f'https://nsearchives.nseindia.com/{i}.xml')
+    with pytest.raises(SourceError, match='preflight_source_access_denied'):
+        http.fetch('https://www.nseindia.com/api/next')
+    assert len(calls) == 3 and budget.blocked

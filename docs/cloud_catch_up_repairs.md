@@ -56,8 +56,26 @@ session's core source formats. Its connections enforce default transaction
 read-only before any query. It writes no database receipts, facts, permissions or
 orders and requires no storage credential. Its artifact contains counts, fixed
 error codes, issuer symbols and document hashes; raw XML is never published.
-Eight source workers, a 45-minute network deadline, a 1 GiB aggregate download
+Eight source workers, a 90-minute network deadline, a 1 GiB aggregate download
 budget and 9,000-record ceiling bound the review. A source-check pass is evidence
 for a fresh main catch-up dispatch, not proof of imported data, private archival,
 future source availability or campaign readiness. Review every reported exception
 before dispatching the writer workflow.
+
+Hosted preflight 39428651562 downloaded 154,844,880 bytes and checked 4,445
+required records: 764 passed; the other 3,681 received HTTP 403 (1,301 ownership
+documents and 2,380 classifications). There were no parser errors in that run.
+The parallel verifier sent unpaced bursts; successful responses followed by
+access denials indicate that source access needs a paced recheck, not an ingestion
+waiver. It wrote no database data. The exact remote rejection cause is not proven
+by the status code alone.
+
+All production `OfficialHTTP` clients now share a minimum 0.55-second request
+schedule per hostname, including across verifier threads and HTTP retries. The
+verifier stops queued downloads after three consecutive HTTP 403 responses from
+one host, reports BLOCKED and never turns an incomplete check into a pass. The
+manual initial catch-up workflow now runs `verify-sources` first; its writer job
+depends on that complete read-only check succeeding. This avoids another manual
+handoff while keeping imports blocked on real source errors. Its source-check
+budget is 90 minutes (100-minute job limit); the bounded import job follows only
+afterward. The standalone read-only preflight remains available for diagnostics.
