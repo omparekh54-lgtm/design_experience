@@ -1,6 +1,6 @@
 # Phase 3 — Cloud deployment
 
-Status: the existing free API and SSR dashboard are live on Neon. Guarded startup, database readiness, read-only API credentials and controlled releases are applied. The combined hosted preflight passed. Collection-only scheduling is enabled; initial full-universe catch-up is still being verified. No PAPER campaign has started.
+Status: the existing free API and SSR dashboard are live on Neon. Guarded startup, database readiness, read-only API credentials and controlled releases are applied. The combined hosted preflight passed. Collection-only scheduling is enabled; initial full-universe catch-up is still being verified. No PAPER campaign has started. Phase 5 monitoring and isolated recovery are now verified separately in [cloud_operations.md](cloud_operations.md); this does not clear the remaining collection source exceptions.
 
 ### Corporate-action identity repair (20 October)
 
