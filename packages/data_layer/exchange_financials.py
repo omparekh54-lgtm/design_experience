@@ -6,13 +6,13 @@ from dataclasses import dataclass, field
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Any, Iterable
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 
 import httpx
 from bs4 import BeautifulSoup
 
 from .models import FinancialFiling
-from .xbrl import extract_canonical_financials, parse_xbrl_facts
+from .xbrl import FACT_ALIASES, extract_canonical_financials, parse_xbrl_facts
 
 
 IST_FORMATS = (
@@ -365,8 +365,27 @@ def filing_from_exchange_record(
         "equity": None,
         "interest_expense": None,
     }
+    raw_payload = record.raw_payload
     if xbrl:
-        canonical.update(extract_canonical_financials(parse_xbrl_facts(xbrl), record.period_end))
+        aliases = dict(FACT_ALIASES)
+        source = urlparse(record.xbrl_uri or '')
+        profiles = {
+            'BANKING': ('Income', 'ProfitLossForThePeriod', 'BANK_TOTAL_INCOME'),
+            'GI': ('OperatingIncome', 'ProfitLossAfterTax', 'GENERAL_INSURANCE_OPERATING_INCOME'),
+            'LI': ('NetPremiumIncome', 'ProfitLossAfterTaxAndExtraordinaryItems', 'LIFE_INSURANCE_NET_PREMIUM'),
+        }
+        match = re.fullmatch(r'INTEGRATED_FILING_(BANKING|GI|LI)_[0-9]+_[0-9]+_WEB.xml',
+                             source.path.rsplit('/', 1)[-1])
+        if (record.exchange == 'NSE' and source.scheme == 'https'
+                and source.hostname == 'nsearchives.nseindia.com' and match):
+            revenue, pat, basis = profiles[match.group(1)]
+            aliases.update(sales=(revenue,), pat=(pat,))
+            # These are sector-specific income measures, not industrial sales.
+            # Preserve the basis; Module A excludes financial-sector issuers.
+            raw_payload = {**raw_payload, 'canonical_metric_basis': {
+                'sales': basis, 'sales_fact': revenue, 'pat_fact': pat}}
+        canonical.update(extract_canonical_financials(
+            parse_xbrl_facts(xbrl), record.period_end, aliases=aliases))
 
     return FinancialFiling(
         instrument_id=record.instrument_id,
@@ -385,7 +404,7 @@ def filing_from_exchange_record(
         external_id=record.external_id,
         details_uri=record.details_uri,
         xbrl_uri=record.xbrl_uri,
-        raw_payload=record.raw_payload,
+        raw_payload=raw_payload,
         **canonical,
     )
 

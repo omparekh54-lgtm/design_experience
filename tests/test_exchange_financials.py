@@ -1,5 +1,7 @@
 from datetime import date, datetime
 from decimal import Decimal
+from dataclasses import replace
+import pytest
 
 from packages.data_layer.exchange_financials import (
     BSEFinancialResultsProvider,
@@ -115,3 +117,27 @@ def test_bse_public_results_page_parser_reads_new_and_revised_rows():
     assert records[0].submission_type == "Original"
     assert records[1].statement_scope == "consolidated"
     assert records[1].submission_type == "Revised"
+
+
+@pytest.mark.parametrize('profile,revenue,pat,basis', [
+    ('BANKING', 'Income', 'ProfitLossForThePeriod', 'BANK_TOTAL_INCOME'),
+    ('GI', 'OperatingIncome', 'ProfitLossAfterTax', 'GENERAL_INSURANCE_OPERATING_INCOME'),
+    ('LI', 'NetPremiumIncome', 'ProfitLossAfterTaxAndExtraordinaryItems', 'LIFE_INSURANCE_NET_PREMIUM'),
+])
+def test_financial_sector_taxonomies_preserve_income_basis_and_quarter(profile, revenue, pat, basis):
+    xml = SAMPLE_XBRL.replace(b'RevenueFromOperations', revenue.encode()).replace(
+        b'ProfitLossForPeriod', pat.encode())
+    record = ExchangeFilingRecord(exchange='NSE', symbol='ABC', company_name='ABC',
+        period_end=date(2026, 6, 30), filed_at=datetime(2026, 8, 12),
+        statement_scope='standalone', submission_type='Original',
+        xbrl_uri=f'https://nsearchives.nseindia.com/corporate/xbrl/INTEGRATED_FILING_{profile}_123_12082026010000_WEB.xml',
+        raw_payload={'original': 'preserved'})
+    filing = filing_from_exchange_record(record, xml)
+    assert (filing.sales, filing.pat) == (Decimal('120'), Decimal('15'))
+    assert filing.raw_payload['canonical_metric_basis']['sales'] == basis
+    assert filing.raw_payload['original'] == 'preserved'
+    assert 'canonical_metric_basis' not in record.raw_payload
+    # Generic/foreign documents cannot activate a banking income alias.
+    generic = filing_from_exchange_record(replace(record, xbrl_uri='https://example.com/bank.xml'), xml)
+    assert generic.sales is None
+    assert 'canonical_metric_basis' not in generic.raw_payload

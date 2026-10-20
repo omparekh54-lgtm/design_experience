@@ -262,6 +262,17 @@ class CloudCollector:
         self.reference_stages = stages
         now = datetime.now(IST) if apply else self.now
         known = self.store.instruments() if apply else None
+        # Validate the entire cheap identity snapshot before spending the filing
+        # budget. Retain and use this exact document later in the same pass.
+        membership_doc = self.http.fetch(
+            "https://www.niftyindices.com/IndexConstituent/ind_nifty500list.csv")
+        members = rows_csv(membership_doc.body,
+            ["Company Name", "Industry", "Symbol", "Series", "ISIN Code"])
+        if len({r['Symbol'] for r in members}) < 490:
+            raise SourceError('index_snapshot_incomplete')
+        if apply:
+            from packages.data_layer.index_membership import equity_membership
+            equity_membership(members, known)
         # Lookback recovers overnight/recent revisions; historical backfill remains separate.
         records = paged_financials(
             self.http,
@@ -322,6 +333,8 @@ class CloudCollector:
                     )
                 written += 1
             except Exception as exc:
+                if apply:
+                    self.store.pending_failed('CLOUD_FINANCIAL_PENDING', record_key(r.raw_payload))
                 errors.append(
                     {
                         "symbol": r.symbol,
@@ -356,15 +369,16 @@ class CloudCollector:
             try:
                 if parse_stamp(r.get("broadcastDate")) > now:
                     raise SourceError("shareholding_filing_in_future")
-                if apply and r.get("isin") != known[r["symbol"]]["isin"]:
-                    raise SourceError("shareholding_isin_mismatch")
                 doc = self.http.fetch(r["xbrl"])
-                values = parse_shareholding(doc.body, r)
+                values = parse_shareholding(doc.body, r,
+                    expected_isin=known[r["symbol"]]["isin"] if apply else None)
                 if apply:
                     self.store.shareholding(r["symbol"], values, r, doc)
                     self.store.ack("CLOUD_SHAREHOLDING_XML", doc, record_key(r))
                 written += 1
             except Exception as exc:
+                if apply:
+                    self.store.pending_failed('CLOUD_SHAREHOLDING_PENDING', record_key(r))
                 shp_errors.append(
                     {
                         "symbol": r.get("symbol"),
@@ -409,14 +423,7 @@ class CloudCollector:
             else {"source_rows": len(actions)}
         )
         # Current constituent snapshots cannot be retroactively asserted as history.
-        doc = self.http.fetch(
-            "https://www.niftyindices.com/IndexConstituent/ind_nifty500list.csv"
-        )
-        members = rows_csv(
-            doc.body, ["Company Name", "Industry", "Symbol", "Series", "ISIN Code"]
-        )
-        if len({r["Symbol"] for r in members}) < 490:
-            raise SourceError("index_snapshot_incomplete")
+        doc = membership_doc
         if apply:
             stages["index_membership"] = self.store.membership(members, doc, day)
         else:

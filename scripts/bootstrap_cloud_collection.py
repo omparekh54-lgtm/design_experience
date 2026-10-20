@@ -57,7 +57,7 @@ def main(argv=None):
             before = check_database(engine)
             archive = PrivateArchive.from_env()
             result = run_collection(engine, now=datetime.now(IST), catch_up_date=a.date,
-                max_filings=100, max_classifications=100,
+                max_filings=100, max_classifications=150,
                 http=OfficialHTTP(archive=archive), require_archive=True)
             result['database_bytes_before'] = before
             result['database_bytes_after'] = check_database(engine)

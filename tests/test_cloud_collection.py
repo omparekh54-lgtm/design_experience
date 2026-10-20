@@ -420,6 +420,39 @@ def test_shareholding_bse_identity_requires_listing_isin():
         parse_shareholding(bse_shp_xml(), shp_record())
 
 
+def test_shareholding_current_xml_identity_can_resolve_stale_listing_isin():
+    record = dict(shp_record(), isin='INE111A01010')
+    assert parse_shareholding(bse_shp_xml(), record,
+        expected_isin='INE000A01010')['total_shares'] == 1000
+    # A matching summary symbol alone cannot admit an old or unrelated XML ISIN.
+    with pytest.raises(SourceError, match='shareholding_isin_mismatch'):
+        parse_shareholding(bse_shp_xml(isin='INE111A01010'), record,
+                          expected_isin='INE000A01010')
+
+
+def test_new_encumbrance_taxonomy_uses_promoter_count_not_percentage_of_issuer():
+    xml = shp_xml(pledged='50', zero_flag=None).replace(
+        b'NumberOfSharesPledgedOrOtherwiseEncumbered', b'NumberOfSharesEncumbered')
+    assert parse_shareholding(xml, shp_record())['promoter_pledge_pct'] == 10
+    conflicting = xml.replace(b'</root>',
+        b'<NumberOfSharesPledgedOrOtherwiseEncumbered contextRef="promoter">1'
+        b'</NumberOfSharesPledgedOrOtherwiseEncumbered></root>')
+    with pytest.raises(SourceError, match='pledge_ambiguous'):
+        parse_shareholding(conflicting, shp_record())
+
+
+def test_scrr_denominator_reconciles_equity_and_depository_receipts():
+    xml = shp_xml().replace(b'</root>',
+        b'<NumberOfFullyPaidUpEquityShares contextRef="total">900</NumberOfFullyPaidUpEquityShares>'
+        b'<NumberOfSharesUnderlyingOutstandingDepositoryReceipts contextRef="total">100'
+        b'</NumberOfSharesUnderlyingOutstandingDepositoryReceipts></root>')
+    result = parse_shareholding(xml, dict(shp_record(), pr_and_prgrp='55.56'))
+    assert result['total_shares'] == 900
+    assert abs(result['promoter_holding_pct'] - Decimal('55.56')) < Decimal('.01')
+    with pytest.raises(SourceError, match='totals_invalid'):
+        parse_shareholding(xml.replace(b'>900<', b'>899<'), shp_record())
+
+
 def test_shareholding_rejects_duplicate_context_ids():
     xml = shp_xml().replace(b'</root>',
         b'<context id="total"><entity><identifier>TEST</identifier></entity>'
@@ -993,3 +1026,108 @@ def test_discovery_watermark_catches_outages_instead_of_skipping_dates():
     e.discovery_day = DAY - timedelta(days=100)
     with pytest.raises(SourceError):
         CloudStore(e).financial_window(DAY)
+
+
+def category_fact(member, count, cid):
+    return (f'<context id="{cid}"><entity><identifier>TEST</identifier></entity>'
+        '<period><instant>2026-09-30</instant></period><scenario>'
+        f'<explicitMember dimension="CategoryOfShareholdersAxis">{member}</explicitMember>'
+        f'</scenario></context><NumberOfShares contextRef="{cid}">{count}</NumberOfShares>')
+
+
+def test_omitted_promoter_section_needs_explicit_zero_and_category_reconciliation():
+    xml = shp_xml().decode().replace('<NumberOfShares contextRef="promoter">500</NumberOfShares>', '')
+    categories = category_fact('PublicShareholdingMember', 900, 'public') + category_fact(
+        'SharesHeldByNonPromoterNonPublicShareholdersMember', 100, 'nonpublic')
+    xml = xml.replace('</root>', categories + '</root>').encode()
+    result = parse_shareholding(xml, dict(shp_record(), pr_and_prgrp='0'))
+    assert result['promoter_holding_pct'] == result['promoter_pledge_pct'] == 0
+    for bad, summary in [(xml.replace(b'>900<', b'>899<'), '0'), (xml, '1')]:
+        with pytest.raises(SourceError, match='promoter_zero_unverified'):
+            parse_shareholding(bad, dict(shp_record(), pr_and_prgrp=summary))
+
+
+@pytest.mark.parametrize('declared,summary', [('0.5', '50'), ('0.5556', '55.56')])
+def test_xml_percentage_selects_reconciled_table_basis(declared, summary):
+    extra = category_fact('PublicShareholdingMember', 400, 'public') + category_fact(
+        'SharesHeldByNonPromoterNonPublicShareholdersMember', 100, 'nonpublic')
+    extra += f'<ShareholdingAsAPercentageOfTotalNumberOfShares contextRef="promoter">{declared}</ShareholdingAsAPercentageOfTotalNumberOfShares>'
+    xml = shp_xml().replace(b'</root>', (extra + '</root>').encode())
+    result = parse_shareholding(xml, dict(shp_record(), pr_and_prgrp=summary))
+    assert abs(result['promoter_holding_pct'] - Decimal(summary)) < Decimal('.01')
+    assert result['total_shares'] == 1000
+    # A corrupted API summary cannot select another denominator against the XML.
+    with pytest.raises(SourceError, match='percentage_mismatch'):
+        parse_shareholding(xml, dict(shp_record(), pr_and_prgrp='50' if summary != '50' else '55.56'))
+    with pytest.raises(SourceError, match='xml_percentage_mismatch'):
+        parse_shareholding(xml.replace(f'>{declared}<'.encode(), b'>0.6<'),
+                          dict(shp_record(), pr_and_prgrp='60'))
+
+
+def test_reviewed_xml_identity_defect_is_document_bound(monkeypatch):
+    from hashlib import sha256
+    from packages.data_layer import shareholding_identity
+    xml = bse_shp_xml(isin='INE000A01011')
+    record = dict(shp_record(), isin='INE000A01010', xbrl='https://nsearchives.nseindia.com/corporate/xbrl/test.xml')
+    review = dict(xml_sha256=sha256(xml).hexdigest(), symbol='TEST',
+        current_isin='INE000A01010', summary_isin='INE000A01010',
+        xml_symbol='TEST', xml_isin='INE000A01011', source_url=record['xbrl'],
+        period=record['date'], reason='REVIEWED_XML_ISIN_TYPO', master_sha256='a'*64, quote_sha256='b'*64)
+    monkeypatch.setattr(shareholding_identity, 'reviews', lambda: [review])
+    result = parse_shareholding(xml, record, expected_isin='INE000A01010')
+    assert result['total_shares'] == 1000
+    assert result['identity_review']['xml_isin'] == 'INE000A01011'
+    assert record['isin'] == 'INE000A01010'
+    for body, row, expected in [
+        (xml+b' ', record, 'INE000A01010'),
+        (xml, {**record, 'xbrl': record['xbrl']+'?changed'}, 'INE000A01010'),
+        (xml, record, 'INE111A01010'),
+        (xml, {**record, 'isin': 'INE111A01010'}, 'INE000A01010'),
+    ]:
+        with pytest.raises(SourceError, match='shareholding_isin_mismatch'):
+            parse_shareholding(body, row, expected_isin=expected)
+
+
+@pytest.mark.parametrize('quote_isin,meta_isin,market,allowed', [
+    (None, 'INE000000001', 'G', True), ('', 'INE000000001', 'G', True),
+    ('INE999999999', 'INE000000001', 'G', False),
+    (None, 'INE999999999', 'G', False), (None, 'INE000000001', 'N', False),
+])
+def test_call_auction_classification_requires_independent_current_identity(quote_isin, meta_isin, market, allowed):
+    from packages.data_layer.cloud_sources import fetch_classification
+    class HTTP:
+        def api(self, path, **params):
+            if params['functionName'] == 'getMetaData':
+                return document({'symbol': 'TEST', 'isin': meta_isin,
+                                 'activeSeries': ['BE'], 'marketType': 'G'})
+            return document({'equityResponse': [{
+                'metaData': {'symbol': 'TEST', 'isinCode': quote_isin,
+                             'series': 'BE', 'marketType': market},
+                'secInfo': {'sector': 'Capital Goods'}}]})
+    if allowed:
+        _, result = fetch_classification(HTTP(), 'TEST', 'INE000000001')
+        assert result['identity_basis'] == 'METADATA_AND_QUOTE'
+        assert result['metadata_sha256'] == 'f'*64
+    else:
+        with pytest.raises(SourceError, match='classification_identity_mismatch'):
+            fetch_classification(HTTP(), 'TEST', 'INE000000001')
+
+
+def test_reviewed_listing_day_context_keeps_actual_date_and_filing_time(monkeypatch):
+    from hashlib import sha256
+    from packages.data_layer import shareholding_identity
+    xml = bse_shp_xml(header_period='2026-10-01').replace(b'2026-09-30', b'2026-10-01')
+    record = dict(shp_record(), isin='INE000A01010', xbrl='https://nsearchives.nseindia.com/corporate/xbrl/listing.xml')
+    review = dict(xml_sha256=sha256(xml).hexdigest(), symbol='TEST',
+        current_isin='INE000A01010', summary_isin='INE000A01010',
+        xml_symbol='TEST', xml_isin='INE000A01010', source_url=record['xbrl'],
+        period=record['date'], xml_period='2026-10-01',
+        reason='REVIEWED_LISTING_DATE_CONTEXT', master_sha256='a'*64, quote_sha256='b'*64)
+    monkeypatch.setattr(shareholding_identity, 'reviews', lambda: [review])
+    values = parse_shareholding(xml, record, expected_isin='INE000A01010')
+    assert values['period_end'] == date(2026, 10, 1)
+    assert values['filed_at'] == datetime(2026, 10, 16, 16, tzinfo=IST)
+    assert values['identity_review']['summary_period'] == record['date']
+    monkeypatch.setattr(shareholding_identity, 'reviews', lambda: [])
+    with pytest.raises(SourceError):
+        parse_shareholding(xml, record, expected_isin='INE000A01010')

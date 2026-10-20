@@ -200,13 +200,13 @@ def _normalize_value(key: str, fact: XbrlFact) -> Decimal:
 
 
 def extract_canonical_financials(
-    facts: Iterable[XbrlFact], period_end: date
+    facts: Iterable[XbrlFact], period_end: date, *, aliases=None
 ) -> dict[str, Decimal | None]:
     fact_list = list(facts)
     result: dict[str, Decimal | None] = {key: None for key in FACT_ALIASES}
 
-    for key, aliases in FACT_ALIASES.items():
-        candidates = [f for f in fact_list if f.name in aliases and _period_score(f, period_end) > 0]
+    for key, names in (aliases or FACT_ALIASES).items():
+        candidates = [f for f in fact_list if f.name in names and _period_score(f, period_end) > 0]
         if not candidates:
             continue
         candidates.sort(
