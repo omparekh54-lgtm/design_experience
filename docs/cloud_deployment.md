@@ -1,6 +1,6 @@
 # Phase 3 — Cloud deployment
 
-Status: the isolated Neon copy, derived share-view repair, writable collection overlay and read-only status role are verified. Private source archival is implemented and locally tested. Hosted source/archive verification, guarded service cutover and collection catch-up remain pending. No paper campaign has started. The dated sections below preserve earlier deployment evidence; the latest receipt is `docs/cloud_deployment_validation_2026-10-20.json`.
+Status: the isolated Neon copy, derived share-view repair, writable collection overlay and read-only status role are verified. Private source archival passed the actual hosted privacy and checksum checks. The shareholding parser defect found by that run is repaired and merged; the complete hosted preflight must be repeated. Guarded service cutover and collection catch-up remain pending. No paper campaign has started. The dated sections below preserve earlier deployment evidence; the latest receipt is `docs/cloud_deployment_validation_2026-10-20.json`.
 
 ## Prepared configuration
 
@@ -286,3 +286,46 @@ secrets, leaving the shared Supabase source secret intact. New manual workflow
 private archival without database writes. An optional past completed date probes
 official sources and archives their raw documents privately; it remains sampling,
 not proof of full-universe readiness. No broker key or PAPER permission is added.
+
+
+## Phase-3 continuation (2026-10-20 UTC)
+
+PR23 is merged at `f04cac90d2887be6a0136b010e17f18d82552600`. Its CI run
+`39381034111` passed all five jobs, including 730 Python tests and 23 real
+PostgreSQL copy/overlay tests. Actual hosted preflight `39381649589` verified
+Neon certificate/hostname validation, locked PAPER safety, all six writable
+collection targets and the private archive. Seventeen raw source objects were
+uploaded and downloaded with matching SHA-256; anonymous access was denied.
+The archive measured 48,659,293 bytes including the prior private backups.
+
+The overall preflight correctly remained BLOCKED because LPDC's shareholding
+XML identifies the company by BSE scrip code rather than NSE symbol. PR24,
+merged at `5b8e9afca7b4603421bd5c460ec2e4ec1895fd50`, now requires a same-period
+header to link that code, NSE symbol and listing ISIN before admitting its
+contexts. Mismatches, ambiguous identities and duplicate contexts fail closed.
+The private archived XML parses; nine synthetic regressions were added without
+committing individual shareholder disclosures. Local tests: 739 passed, 5
+skipped. All five CI jobs passed in run `39382844327`, but its source probe
+skipped the current exchange non-session; that is not a post-repair full
+source/preflight pass. Repeat the dated hosted preflight before activation.
+
+Render sign-in succeeded through the secure GitHub authentication handoff. The
+first settings edit and subsequent browser recovery timed out. A connector
+read confirmed no settings update: auto-deploy remains enabled, the build is
+`pip install -r requirements.txt`, the start command is direct Uvicorn and the
+health path is empty. The existing live deployment is still `3363104`.
+
+Automatic approval review rejected transferring the new `pms_status` Neon
+password to the existing Render API's `DATABASE_URL` because that specific
+credential disclosure was not explicitly authorized. No environment update or
+cutover occurred. Obtain explicit approval for that precise destination and
+read-only credential before retrying; do not route the secret through another
+channel. The earlier broad API writer-grant proposal remains unapplied. The
+read-only role is the intended status-API connection and does not authorize
+operational writes, collection or PAPER admission by itself.
+
+A management-API observation at 07:11 UTC found the Neon compute idle, with
+last activity at 06:40:16 and suspension at 06:45:17. Thus automatic suspension
+was observed despite the management timeout field reporting zero. Compute is
+limited to 0.25 CU; this observation does not certify monthly usage or
+three-month data growth. Collection remains disabled and no campaign started.

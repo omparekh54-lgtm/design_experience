@@ -1,7 +1,7 @@
 {
   "date": "2026-10-20",
-  "updated_at_utc": "2026-10-20T06:31:25.148333+00:00",
-  "status": "NEON_SCHEMA_AND_READ_ONLY_ROLE_VERIFIED_HOSTED_CHECKS_PENDING",
+  "updated_at_utc": "2026-10-20T07:11:47.871790+00:00",
+  "status": "SOURCE_PARSER_REPAIRED_RENDER_CUTOVER_BLOCKED",
   "campaign_started": false,
   "paper_enabled": false,
   "collection_activated": false,
@@ -58,23 +58,77 @@
   },
   "private_raw_archive": {
     "implemented": true,
-    "hosted_verification": "PENDING",
+    "hosted_verification": "VERIFIED_INFRASTRUCTURE",
     "quota_reserve_bytes": 4000000000,
     "startup_privacy_probe_required": true,
     "downloaded_sha256_verification_required": true,
     "raw_bodies_in_public_artifacts": false,
-    "automatic_deletions": false
+    "automatic_deletions": false,
+    "hosted_run_id": 39381649589,
+    "objects_verified": 17,
+    "objects_uploaded": 17,
+    "bucket_bytes": 48659293,
+    "anonymous_read_denied": true
   },
   "tests_local": {
-    "passed": 730,
+    "passed": 739,
     "skipped": 5
   },
   "pending": [
-    "Actual hosted archive and official source probe",
-    "Guarded API startup and readiness settings",
-    "API and dashboard cutover with read-only API role",
-    "Collection-only scheduler activation and actual catch-up",
-    "Measured capacity/growth, alerts and campaign rehearsal"
+    "Explicit permission for read-only Neon credential transfer to Render",
+    "Guarded API build/start, readiness and controlled deploy settings",
+    "Actual API and SSR dashboard verification after Neon cutover",
+    "Repeat complete hosted preflight on repaired revision",
+    "Collection-only scheduler activation and full-universe catch-up",
+    "Measured collection growth and free workspace quotas; monitoring/rehearsal remain later phases"
   ],
-  "acceptance": "NOT_CERTIFIED"
+  "acceptance": "NOT_CERTIFIED",
+  "hosted_preflight": {
+    "run_id": 39381649589,
+    "revision": "f04cac90d2887be6a0136b010e17f18d82552600",
+    "status": "BLOCKED",
+    "stage": "official_source_probe",
+    "error_code": "completed_source_session_not_verified",
+    "source_error": "LPDC: shareholding_fact_missing_or_ambiguous",
+    "database_tls_verified_full": true,
+    "database_writes": false,
+    "private_archive_verified": true,
+    "full_universe_verified": false
+  },
+  "shareholding_parser_repair": {
+    "pr": 24,
+    "merge_commit": "5b8e9afca7b4603421bd5c460ec2e4ec1895fd50",
+    "ci_run_id": 39382844327,
+    "all_five_ci_jobs_passed": true,
+    "ci_source_probe": "SKIPPED_EXCHANGE_NON_SESSION",
+    "archived_lpdc_xml_sha256": "01fe90f863bb39f7234e127fb9090bf8cd1cbc073f805c2bd2355c0979388086",
+    "archived_xml_parsed": true,
+    "complete_hosted_preflight_after_repair": "NOT_RUN"
+  },
+  "render_cutover": {
+    "applied": false,
+    "read_only_role": "pms_status",
+    "credential_transfer_auto_review_rejected": true,
+    "reason": "Explicit approval required to send the Neon read-only role password to the existing Render API DATABASE_URL secret",
+    "settings_ui": "SIGNED_IN_THEN_BROWSER_CONTROL_TIMED_OUT",
+    "actual_build": "pip install -r requirements.txt",
+    "actual_start": "uvicorn apps.api.main_exec:app --host 0.0.0.0 --port $PORT",
+    "actual_health_path": "",
+    "actual_auto_deploy": "yes",
+    "desired_build": "pip install -r requirements-ops.txt",
+    "desired_start": "python scripts/start_cloud_api.py",
+    "desired_health_path": "/ready",
+    "desired_auto_deploy": "no",
+    "service_plan": "free"
+  },
+  "neon_idle_observation": {
+    "checked_at_utc": "2026-10-20T07:11:47.871810+00:00",
+    "current_state": "idle",
+    "last_active": "2026-10-20T06:40:16Z",
+    "suspended_at": "2026-10-20T06:45:17Z",
+    "min_cu": 0.25,
+    "max_cu": 0.25,
+    "suspend_timeout_api_field": 0,
+    "observation": "Endpoint did suspend after inactivity; zero timeout field alone was not used to infer always-on compute"
+  }
 }
