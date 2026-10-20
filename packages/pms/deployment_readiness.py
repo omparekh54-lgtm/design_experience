@@ -91,7 +91,8 @@ def check(code, status, detail):
 
 
 def file_inventory(root: Path):
-    paths = sorted((root / "migrations").glob("*.sql"))
+    paths = sorted([*(root / "migrations").glob("*.sql"),
+                    *(root / "docs" / "deployment_sql").glob("*.sql")])
     return [
         dict(
             path=str(p.relative_to(root)),

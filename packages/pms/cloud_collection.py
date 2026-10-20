@@ -50,6 +50,9 @@ def collection_gate(conn, day, now):
         and details.get("version") == "CLOUD_COLLECTION_v1"
         and details.get("complete") is True
         and details.get("trade_date") == day.isoformat()
+        and isinstance(details.get("raw_archive"), dict)
+        and details["raw_archive"].get("status") == "VERIFIED"
+        and details["raw_archive"].get("anonymous_read_denied") is True
     )
 
 
@@ -429,7 +432,9 @@ class CloudCollector:
         return result
 
 
-def run_collection(engine, *, now=None, max_filings=200, http=None):
+def run_collection(engine, *, now=None, max_filings=200, http=None, require_archive=False):
+    if require_archive and (http is None or getattr(http, "archive", None) is None):
+        raise SourceError("private_archive_required")
     now = (now or datetime.now(IST)).astimezone(IST)
     run_id = str(uuid4())
     day = now.date()
@@ -484,13 +489,16 @@ def run_collection(engine, *, now=None, max_filings=200, http=None):
                     sha256=d.sha256,
                     observed_at=d.observed_at.isoformat(),
                     bytes=d.size,
+                    archive_key=d.archive_key,
                 )
                 for d in collector.http.documents
             ]
             report["finished_at"] = datetime.now(IST).isoformat()
-            report["raw_archive"] = (
-                "NOT_CONFIGURED_PRIVATE_DURABLE_STORAGE_REQUIRED_IN_PHASE_3"
-            )
+            archive = getattr(collector.http, "archive", None)
+            report["raw_archive"] = archive.summary() if archive is not None else {"status": "NOT_CONFIGURED"}
+            if require_archive and (report["raw_archive"]["status"] != "VERIFIED" or
+                                    any(not d.archive_key for d in collector.http.documents)):
+                report.update(status="FAILED", complete=False, error_code="private_archive_required")
             with engine.begin() as c:
                 c.execute(
                     text(

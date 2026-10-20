@@ -69,15 +69,17 @@ class Document:
     sha256: str
     observed_at: datetime
     size: int = 0
+    archive_key: str | None = None
 
 
 class OfficialHTTP:
-    def __init__(self, *, seconds=1500, opener=None, sleep=time.sleep):
+    def __init__(self, *, seconds=1500, opener=None, sleep=time.sleep, archive=None):
         self.deadline = time.monotonic() + seconds
         self.opener = opener or urllib.request.build_opener(SafeRedirect())
         self.sleep = sleep
         self.documents = []
         self.downloaded_bytes = 0
+        self.archive = archive
 
     def fetch(self, url):
         allowed_url(url)
@@ -113,9 +115,12 @@ class OfficialHTTP:
                     datetime.now(IST),
                     len(body),
                 )
+                if self.archive is not None:
+                    from dataclasses import replace
+                    doc = replace(doc, archive_key=self.archive.put(doc))
                 # Keep bounded metadata, not hundreds of XML bodies in memory.
                 self.documents.append(
-                    Document(url, b"", doc.sha256, doc.observed_at, len(body))
+                    Document(url, b"", doc.sha256, doc.observed_at, len(body), doc.archive_key)
                 )
                 return doc
             except urllib.error.HTTPError as exc:

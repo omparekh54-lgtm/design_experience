@@ -508,6 +508,7 @@ def test_missing_or_expired_collection_receipt_never_admits_entries():
                     version="CLOUD_COLLECTION_v1",
                     trade_date=str(DAY),
                     complete=complete,
+                    raw_archive={"status": "VERIFIED", "anonymous_read_denied": True},
                 ),
             )
         ]
@@ -518,11 +519,16 @@ def test_missing_or_expired_collection_receipt_never_admits_entries():
             started_at=NOW,
             finished_at=NOW,
             details=dict(
-                version="CLOUD_COLLECTION_v1", trade_date=str(DAY), complete=True
+                version="CLOUD_COLLECTION_v1", trade_date=str(DAY), complete=True,
+                raw_archive={"status": "VERIFIED", "anonymous_read_denied": True}
             ),
         )
     ]
     assert collection_gate(c, DAY, NOW)
+    e.gate_rows[0]["details"]["raw_archive"]["anonymous_read_denied"] = False
+    assert not collection_gate(c, DAY, NOW)
+    e.gate_rows[0]["details"].pop("raw_archive")
+    assert not collection_gate(c, DAY, NOW)
 
 
 def test_master_isin_conflict_cannot_rewrite_identity():

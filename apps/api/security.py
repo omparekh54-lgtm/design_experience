@@ -89,6 +89,9 @@ class APISecurityMiddleware:
                 and not authorized(headers)
             ):
                 return await reject(401, "operator authentication required")
+            if (registered and scope["path"] not in CALCULATIONS
+                    and os.getenv("PMS_API_READ_ONLY", "0") == "1"):
+                return await reject(503, "This deployment is read-only; operational writes are not enabled")
             try:
                 content_length = int(headers.get("content-length", "0"))
                 if content_length < 0:

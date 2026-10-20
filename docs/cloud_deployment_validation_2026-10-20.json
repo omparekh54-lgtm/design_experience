@@ -1,0 +1,80 @@
+{
+  "date": "2026-10-20",
+  "updated_at_utc": "2026-10-20T06:31:25.148333+00:00",
+  "status": "NEON_SCHEMA_AND_READ_ONLY_ROLE_VERIFIED_HOSTED_CHECKS_PENDING",
+  "campaign_started": false,
+  "paper_enabled": false,
+  "collection_activated": false,
+  "service_cutover": false,
+  "source_preserved": true,
+  "project_id": "green-resonance-86147459",
+  "branch_id": "br-twilight-sea-azumjkpc",
+  "database": "pms",
+  "database_bytes_after_collection_schema": 576036864,
+  "database_limit_bytes": 1073741824,
+  "share_view_repair": {
+    "applied": true,
+    "migration_id": "c07b91cd-6314-4cc1-a954-84256c32be6b",
+    "rows": 44579,
+    "distinct_ids": 44579,
+    "full_hash_both_plans": "78acaada051f06554b9aa71db443cfd9",
+    "payload_hash": "e7ecd55bb58a6812cf238301428bd74c",
+    "local_differences": 0,
+    "temporary_branch_deleted": true
+  },
+  "collection_schema": {
+    "applied": true,
+    "file": "docs/deployment_sql/010_neon_collection.sql",
+    "migration_id": "2d5199d5-f637-4689-97b0-cb9723de0222",
+    "legacy_prices_before_and_after": 747098,
+    "cloud_rows": 0,
+    "branch_insert_visible": true,
+    "branch_fixture_rolled_back": true,
+    "rls_enabled": true,
+    "public_select": false,
+    "queue_index_verified": true,
+    "temporary_branch_deleted": true
+  },
+  "status_role": {
+    "name": "pms_status",
+    "applied": true,
+    "migration_id": "e5b37b86-3fc3-40b9-808d-882547f50f37",
+    "readable_instruments": 2302,
+    "readable_prices": 747098,
+    "schema_create": false,
+    "database_create": false,
+    "pms_insert": false,
+    "safety_update": false,
+    "source_insert": false,
+    "owner_membership": false,
+    "temporary_branch_deleted": true
+  },
+  "api_writer_role": {
+    "applied": false,
+    "auto_review_rejected": true,
+    "reason": "Broad INSERT/UPDATE/DELETE on all PMS tables and EXECUTE on all PMS functions was not specifically authorized",
+    "proposal": "docs/proposals/api_writer_grants.sql",
+    "test_branch_deleted": true
+  },
+  "private_raw_archive": {
+    "implemented": true,
+    "hosted_verification": "PENDING",
+    "quota_reserve_bytes": 4000000000,
+    "startup_privacy_probe_required": true,
+    "downloaded_sha256_verification_required": true,
+    "raw_bodies_in_public_artifacts": false,
+    "automatic_deletions": false
+  },
+  "tests_local": {
+    "passed": 730,
+    "skipped": 5
+  },
+  "pending": [
+    "Actual hosted archive and official source probe",
+    "Guarded API startup and readiness settings",
+    "API and dashboard cutover with read-only API role",
+    "Collection-only scheduler activation and actual catch-up",
+    "Measured capacity/growth, alerts and campaign rehearsal"
+  ],
+  "acceptance": "NOT_CERTIFIED"
+}

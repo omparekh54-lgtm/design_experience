@@ -505,3 +505,12 @@ def test_restore_refuses_source_or_nonempty_target_and_requires_manifest_match(
     args, kw = calls[-1]
     assert "private" not in str(args) and kw["env"]["PGPASSWORD"] == "private-target"
     assert "--single-transaction" in args and "--clean" not in args
+
+
+def test_read_only_deployment_blocks_operational_mutations_but_keeps_calculations(client, monkeypatch):
+    monkeypatch.setenv('PMS_API_READ_ONLY','1')
+    response = client.post('/v1/execution/disable-orders',headers={'x-ops-key':'test-only-operator-key'})
+    assert response.status_code==503 and 'read-only' in response.json()['detail']
+    assert client.get('/health').status_code==200
+    response = client.post('/v1/risk/position-size',json={'capital':100000,'entry':100,'signal_low':96})
+    assert response.status_code==200

@@ -16,5 +16,6 @@ lxml==6.0.2
 openpyxl==3.1.5
 pypdf==6.1.1
 python-dotenv==1.2.4
+boto3==1.43.114
 nse==5.1.0
 finstack @ git+https://github.com/omparekh54-lgtm/Finstack.git@4b336cbdf3750834f67787c8eaf7d311e8b4e9d7

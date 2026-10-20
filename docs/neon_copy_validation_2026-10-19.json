@@ -59,7 +59,7 @@
     "project": "green-resonance-86147459",
     "temporary_branch": "br-lucky-lab-azr3ohss",
     "parent_branch": "br-twilight-sea-azumjkpc",
-    "main_applied": false,
+    "main_applied": true,
     "branch_rows": 44579,
     "branch_distinct_ids": 44579,
     "branch_full_hash_both_plans": "78acaada051f06554b9aa71db443cfd9",
@@ -67,6 +67,14 @@
     "local_id_payload_differences": 0,
     "owner_acl_unchanged": true,
     "paper_safety_unchanged": true,
-    "note": "Deterministic for the same input set; ordinal IDs can still shift when new source rows are added."
-  }
+    "note": "Deterministic for the same input set; ordinal IDs can still shift when new source rows are added.",
+    "temporary_branch_deleted": true,
+    "main_verified_at": "2026-10-20T06:31:25.148333+00:00",
+    "main_rows": 44579,
+    "main_distinct_ids": 44579,
+    "main_full_hash_both_plans": "78acaada051f06554b9aa71db443cfd9",
+    "main_payload_hash": "e7ecd55bb58a6812cf238301428bd74c",
+    "main_local_id_payload_differences": 0
+  },
+  "stored_copy_verified_after_view_repair": true
 }
