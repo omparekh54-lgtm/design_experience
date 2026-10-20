@@ -23,7 +23,7 @@ private archive probe and GitHub incident updates. A failed import, restore or
 access check never enables orders or automatically changes credentials.
 
 Alerts go to one deduplicated `[PMS watchdog] Operational incident` issue in this
-repository. Public issue bodies contain fixed error codes and a workflow link,
+repository, assigned to its owner `omparekh54-lgtm`. Public issue bodies contain fixed error codes and a workflow link,
 never balances, holdings, source XML, passwords or database connection strings.
 Recovery closes the incident only when all configured checks pass. A separate
 manual drill creates and closes an explicitly named test issue and cannot close

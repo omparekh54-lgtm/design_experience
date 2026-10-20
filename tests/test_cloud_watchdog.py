@@ -49,6 +49,7 @@ class Issues:
 def test_alert_is_deduplicated_and_recovery_closes_it():
     api=Issues()
     assert route_incident(['COLLECTION_MISSED'],api=api)['status']=='INCIDENT_OPEN'
+    assert api.rows[0]['assignees']==['omparekh54-lgtm']
     route_incident(['COLLECTION_STALE'],api=api)
     assert len(api.rows)==1 and 'COLLECTION_STALE' in api.rows[0]['body']
     assert route_incident([],api=api)['closed_issues']==1

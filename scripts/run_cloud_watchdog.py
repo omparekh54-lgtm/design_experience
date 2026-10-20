@@ -51,7 +51,8 @@ def route_incident(codes, *, drill=False, api=github):
         if issues:
             issue = api('PATCH',f"/issues/{issues[0]['number']}",{'body':body})
         else:
-            issue = api('POST','/issues',{'title':title,'body':body})
+            issue = api('POST','/issues',{'title':title,'body':body,
+                                        'assignees':['omparekh54-lgtm']})
         # A drill proves issue delivery and the recovery-close path without
         # falsely closing a real incident or changing the application.
         if drill:
