@@ -329,3 +329,11 @@ last activity at 06:40:16 and suspension at 06:45:17. Thus automatic suspension
 was observed despite the management timeout field reporting zero. Compute is
 limited to 0.25 CU; this observation does not certify monthly usage or
 three-month data growth. Collection remains disabled and no campaign started.
+
+A separate read-only source probe at 12:42:38 IST on the repaired main revision
+returned SUCCESS for the completed 2026-10-19 session: 3,405 equity price rows,
+all four benchmark/VIX codes, 3,203 surveillance rows and successful financial,
+shareholding and classification samples. The receipt includes source hashes
+and observation times. This ran in the Codex runtime without database writes
+or private archival; it does not replace the pending combined hosted preflight
+or full-universe ingestion and catch-up evidence.
