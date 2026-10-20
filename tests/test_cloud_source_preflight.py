@@ -38,4 +38,6 @@ def test_preflight_requires_readonly_transaction_before_source_requests(monkeypa
     monkeypatch.setattr(verify, 'check_database', lambda e: None)
     monkeypatch.setattr(verify.CloudStore, 'instruments', lambda self: {})
     with pytest.raises(SourceError, match='preflight_read_only_required'):
-        verify.verify(engine, date(2026, 10, 19))
+        verify.verify(engine, date(2026, 10, 19),
+                      now=verify.datetime(2026, 10, 20, 18, tzinfo=verify.IST))
+

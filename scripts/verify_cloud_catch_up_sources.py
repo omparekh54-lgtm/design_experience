@@ -13,7 +13,8 @@ import threading
 import time
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from sqlalchemy import event, text
+from sqlalchemy import text
+from packages.data_layer.read_only import readonly_connections
 from packages.data_layer.cloud_sources import (IST, OfficialHTTP, SourceError,
     rows_csv, json_rows, paged_financials, parse_shareholding, parse_stamp,
     fetch_classification, parse_master)
@@ -32,14 +33,6 @@ where p.provider='NSE' and p.dataset=:pending and not exists(
 select 1 from pms.provider_snapshots a where a.provider='NSE' and a.dataset=:ack
 and a.metadata->>'complete'='true' and a.metadata->>'record_key'=p.metadata->>'record_key')
 order by p.observed_at,p.id"""
-
-
-def readonly_connections(engine):
-    @event.listens_for(engine, 'connect')
-    def pin_readonly(dbapi, _):
-        with dbapi.cursor() as cursor:
-            cursor.execute('SET default_transaction_read_only=on')
-        dbapi.commit()
 
 
 def merge_pending(pending, discovered):

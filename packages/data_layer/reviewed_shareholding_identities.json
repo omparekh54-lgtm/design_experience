@@ -111,5 +111,48 @@
     "master_sha256": "64bc3997cc8e6d67f77fec2d04e4f74c45d7f7cb712ffd55c0885fb5a56722d8",
     "quote_sha256": "436fc6f37f6085d395c60455118234c2b9481ee73de110e06b21d36356b661f8",
     "reviewed_on": "2026-10-20"
+  },
+  {
+    "symbol": "PLAZACABLE",
+    "current_isin": "INE0INJ01017",
+    "summary_isin": "INE0INJ01017",
+    "xml_symbol": "PLAZACABLE",
+    "xml_isin": "INEOINJ01017",
+    "source_url": "https://nsearchives.nseindia.com/corporate/xbrl/SHP_1736540_13102026105751_WEB.xml",
+    "period": "30-SEP-2026",
+    "xml_sha256": "a190fa8b9c3243f65893150a2da7ea7b47c5b7516cb752697d0d46dc585f6ddf",
+    "reason": "REVIEWED_XML_ISIN_TYPO",
+    "master_sha256": "64bc3997cc8e6d67f77fec2d04e4f74c45d7f7cb712ffd55c0885fb5a56722d8",
+    "quote_sha256": "33d45a91d17dbc55613385d168069f0415aa2813f0728bef5d7bbc93afa99061",
+    "reviewed_on": "2026-10-20"
+  },
+  {
+    "symbol": "MONEYVIEW",
+    "current_isin": "INE0PTN01011",
+    "summary_isin": "INE0PTN01011",
+    "xml_symbol": "MONEYVIEW",
+    "xml_isin": "INE0PTN01011",
+    "source_url": "https://nsearchives.nseindia.com/corporate/xbrl/SHP_1731922_01102026015706_WEB.xml",
+    "period": "30-SEP-2026",
+    "xml_sha256": "fb0b88dbd0815460806309806050380cc00b6a928e14b8daae092fed83ea3b72",
+    "reason": "REVIEWED_LISTING_DATE_CONTEXT",
+    "master_sha256": "64bc3997cc8e6d67f77fec2d04e4f74c45d7f7cb712ffd55c0885fb5a56722d8",
+    "quote_sha256": "1c04116da3ec2df086185457ee23fdb81070f0b53fb5cea867e1082b6d53f9b9",
+    "reviewed_on": "2026-10-20",
+    "xml_period": "2026-10-01"
+  },
+  {
+    "symbol": "GULPOLY",
+    "current_isin": "INE255D01024",
+    "summary_isin": "INE255D01024",
+    "xml_symbol": "GULPOLY",
+    "xml_isin": "INE255DO1024",
+    "source_url": "https://nsearchives.nseindia.com/corporate/xbrl/SHP_1737015_13102026044809_WEB.xml",
+    "period": "30-SEP-2026",
+    "xml_sha256": "0bcf004f2dd83a3f98de65d6d44b7c6dd03cf3c0b89610e2638e5b5f7b5fe461",
+    "reason": "REVIEWED_XML_ISIN_TYPO",
+    "master_sha256": "64bc3997cc8e6d67f77fec2d04e4f74c45d7f7cb712ffd55c0885fb5a56722d8",
+    "quote_sha256": "f02071deced2f709f45f67f8864dc7867fe78a6afd77575207b8edabf77b7d04",
+    "reviewed_on": "2026-10-20"
   }
 ]
