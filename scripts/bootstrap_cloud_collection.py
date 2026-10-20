@@ -20,7 +20,7 @@ from scripts.copy_pms_to_neon import connection_url, LIMIT
 def validate_target(target, now, passes):
     if not 1 <= (now.date() - target).days <= 7:
         raise SourceError('past_completed_session_required')
-    if not 1 <= passes <= 6:
+    if not 1 <= passes <= 24:
         raise SourceError('catch_up_pass_limit_invalid')
 
 
@@ -40,7 +40,7 @@ def check_database(engine):
 def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--date', type=date.fromisoformat, required=True)
-    p.add_argument('--passes', type=int, default=6)
+    p.add_argument('--passes', type=int, default=24)
     p.add_argument('--output-dir', type=Path, required=True)
     a = p.parse_args(argv)
     now = datetime.now(IST)
@@ -57,7 +57,7 @@ def main(argv=None):
             before = check_database(engine)
             archive = PrivateArchive.from_env()
             result = run_collection(engine, now=datetime.now(IST), catch_up_date=a.date,
-                max_filings=500, max_classifications=500,
+                max_filings=100, max_classifications=100,
                 http=OfficialHTTP(archive=archive), require_archive=True)
             result['database_bytes_before'] = before
             result['database_bytes_after'] = check_database(engine)

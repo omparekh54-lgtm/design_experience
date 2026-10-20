@@ -388,10 +388,19 @@ Repository variable `PMS_CLOUD_COLLECTION_ENABLED=true` is applied.
 19:47 IST cannot start the PAPER lifecycle. Shared source Supabase is untouched.
 
 PR26 adds manual, Neon-pinned initial catch-up for a past completed session
-within seven days, at most six resumable batches. Current reference snapshots
+within seven days, initially at most six resumable batches. Current reference snapshots
 retain today's observation date. Each batch checks locked safety, database
 reserve and private archival; it never calls PAPER execution. All five CI jobs
 passed (`39386404904`); local tests then passed 744 with 5 skipped.
+
+The initial reference backlog contains hundreds of financial filings and nearly
+two thousand shareholding index records. Initial catch-up now uses up to 24
+smaller passes (100 filings per feed and 100 classifications per pass), with a
+six-hour maximum hosted job. This is a one-time, manually launched free GitHub
+runner, not an additional recurring scheduler or paid service. Every pass keeps
+the original 25-minute source, byte, database-reserve and locked-safety bounds.
+It stops on a failed pass; committed facts and acknowledgements remain resumable.
+An in-progress or partial job is not Phase-3 acceptance.
 
 The actual first catch-up `39386729186` stopped at the master ISIN guard before
 market imports. Official master and detailed quotes independently confirmed six
