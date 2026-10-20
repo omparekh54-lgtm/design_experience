@@ -29,6 +29,9 @@ from packages.data_layer.cloud_sources import (
     paged_financials,
 )
 from packages.data_layer.cloud_storage import CloudStore, encoded
+from packages.data_layer.price_observations import (
+    reviewed_suspensions, security_report_url, parse_security_report,
+)
 from packages.pms.market_calendar import parse_holiday_calendar
 
 JOB = "cloud_collection"
@@ -228,7 +231,13 @@ class CloudCollector:
                 states, aliases = self.store.session_surveillance(prices, states, d)
                 if aliases:
                     stages['identity_aliases_' + d.isoformat()] = aliases
-                coverage = self.store.prices(prices, price_doc, d, states)
+                secondary_doc = http.fetch(security_report_url(d))
+                secondary = parse_security_report(secondary_doc.body, d)
+                suspensions, suspension_docs = reviewed_suspensions(
+                    http, d, self.store.instruments())
+                coverage = self.store.prices(prices, price_doc, d, states,
+                    secondary=secondary, secondary_doc=secondary_doc,
+                    suspensions=suspensions, suspension_docs=suspension_docs)
                 stages["prices_" + d.isoformat()] = coverage
                 if not coverage["complete"]:
                     coverage_complete = False
