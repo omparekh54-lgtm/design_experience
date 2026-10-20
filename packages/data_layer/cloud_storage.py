@@ -115,7 +115,8 @@ class CloudStore:
                     sha=doc.sha256,
                     uri=doc.url,
                     metadata=encoded(
-                        {**metadata, "fetched_at": doc.observed_at.isoformat()}
+                        {**metadata, "fetched_at": doc.observed_at.isoformat(),
+                         "archive_key": doc.archive_key}
                     ),
                 ),
             )

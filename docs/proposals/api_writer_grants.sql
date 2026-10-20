@@ -1,0 +1,9 @@
+-- NOT APPROVED OR APPLIED. Automatic review rejected these broad privileges.
+-- Backend API role. Password provisioned privately after branch validation.
+CREATE ROLE pms_api LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
+GRANT CONNECT ON DATABASE pms TO pms_api;
+GRANT USAGE ON SCHEMA pms,public TO pms_api;
+GRANT SELECT ON ALL TABLES IN SCHEMA pms,public TO pms_api;
+GRANT INSERT,UPDATE,DELETE ON ALL TABLES IN SCHEMA pms TO pms_api;
+GRANT USAGE,SELECT ON ALL SEQUENCES IN SCHEMA pms TO pms_api;
+GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA pms TO pms_api;

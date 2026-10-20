@@ -122,3 +122,40 @@ def test_share_view_ties_keep_values_and_local_ids_across_storage_and_plan_chang
             assert c.execute(text('SELECT id FROM pms.shares_outstanding_history_local')).scalar_one() == 7
     finally:
         engine.dispose(); admin.dispose()
+
+
+@pytest.mark.skipif(not os.getenv('PMS_COPY_TEST_PG_URL'), reason='isolated PostgreSQL17 service required')
+def test_collection_overlay_preserves_backfill_and_enforces_price_constraints():
+    url = make_url(os.environ['PMS_COPY_TEST_PG_URL'])
+    assert url.host in {'localhost','127.0.0.1'}
+    admin = create_engine(url, isolation_level='AUTOCOMMIT')
+    name = 'collection_overlay_' + uuid4().hex
+    with admin.connect() as c: c.execute(text('CREATE DATABASE '+name))
+    engine = create_engine(url.set(database=name))
+    sql = Path('docs/deployment_sql/010_neon_collection.sql').read_text()
+    try:
+        with engine.begin() as c:
+            c.execute(text('CREATE SCHEMA pms'))
+            c.execute(text('CREATE TABLE pms.instruments(id bigint PRIMARY KEY,external_security_id bigint)'))
+            c.execute(text('INSERT INTO pms.instruments VALUES(1,100)'))
+            c.execute(text('''CREATE TABLE public.market_bars(security_id bigint,ts timestamptz,
+                open numeric,high numeric,low numeric,close numeric,volume numeric,provider text,"interval" text)'''))
+            c.execute(text("""INSERT INTO public.market_bars VALUES
+                (100,'2026-10-16T10:00:00Z',100,102,99,101,10,'ORIGINAL','1d')"""))
+            c.execute(text('CREATE TABLE pms.provider_snapshots(provider text,dataset text,metadata jsonb)'))
+            c.execute(text(sql))
+            before = list(c.execute(text('SELECT * FROM pms.daily_prices')))
+            assert len(before)==1 and before[0]._mapping['source']=='ORIGINAL'
+            c.execute(text("""INSERT INTO pms.cloud_daily_prices VALUES
+                (1,'2026-10-19',102,105,100,104,12,1248,'NSE_UDIFF',now())"""))
+            assert c.execute(text('SELECT count(*) FROM pms.daily_prices')).scalar_one()==2
+            assert list(c.execute(text("SELECT * FROM pms.daily_prices WHERE source='ORIGINAL'")))==before
+            assert c.execute(text('SELECT count(*) FROM public.market_bars')).scalar_one()==1
+            assert c.execute(text("SELECT relrowsecurity FROM pg_class WHERE oid='pms.cloud_daily_prices'::regclass")).scalar_one()
+            for bad in ("'NaN'",'-1'):
+                with pytest.raises(Exception):
+                    with c.begin_nested():
+                        c.execute(text(f"""INSERT INTO pms.cloud_daily_prices VALUES
+                            (1,'2026-10-20',{bad},105,100,104,12,1248,'NSE_UDIFF',now())"""))
+    finally:
+        engine.dispose(); admin.dispose()

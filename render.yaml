@@ -26,6 +26,10 @@ services:
         value: '0'
       - key: PMS_CLOUD_COLLECTION_REQUIRED
         value: '1'
+      - key: PMS_API_READ_ONLY
+        value: '1'
+      - key: SSL_CERT_FILE
+        value: /etc/ssl/certs/ca-certificates.crt
       - key: PMS_DATABASE_VERIFY_FULL
         value: '1'
       - key: DATABASE_URL

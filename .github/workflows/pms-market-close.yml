@@ -18,7 +18,9 @@ jobs:
     permissions:
       contents: read
     env:
-      DATABASE_URL: ${{ secrets.PMS_DATABASE_URL }}
+      DATABASE_URL: ${{ secrets.NEON_PMS_DATABASE_URL }}
+      PMS_NEON_ARCHIVE_JSON: ${{ secrets.PMS_NEON_ARCHIVE_JSON }}
+      SSL_CERT_FILE: /etc/ssl/certs/ca-certificates.crt
       COLLECTION_ENABLED: ${{ vars.PMS_CLOUD_COLLECTION_ENABLED }}
       PAPER_ENABLED: ${{ vars.PMS_CLOUD_PAPER_ENABLED }}
       PMS_CLOUD_COLLECTION_REQUIRED: '1'
@@ -35,7 +37,10 @@ jobs:
             echo '::warning::Cloud collection is DISABLED pending deployment configuration; campaign has not started.'
             echo 'enabled=false' >> "$GITHUB_OUTPUT"
           elif [ -z "$DATABASE_URL" ]; then
-            echo '::error::Enabled collection has no PMS_DATABASE_URL secret.'
+            echo '::error::Enabled collection has no NEON_PMS_DATABASE_URL secret.'
+            exit 1
+          elif [ -z "$PMS_NEON_ARCHIVE_JSON" ]; then
+            echo '::error::Enabled collection has no private archive credential.'
             exit 1
           else
             echo 'enabled=true' >> "$GITHUB_OUTPUT"
@@ -63,7 +68,7 @@ jobs:
       - name: Preserve collection failure as workflow failure
         if: always() && steps.guard.outputs.enabled == 'true' && steps.collect.outcome != 'success'
         run: exit 1
-      - name: Save reports (raw XML requires separate private archival)
+      - name: Save sanitized reports only (raw files stay in private storage)
         if: always() && steps.guard.outputs.enabled == 'true'
         uses: actions/upload-artifact@v4
         with:

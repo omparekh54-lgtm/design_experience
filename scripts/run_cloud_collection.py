@@ -65,7 +65,7 @@ def main(argv=None):
             limitations=[
                 "Probe samples XML; it is not full-universe verification",
                 "Initial XML/classification backlogs remain PARTIAL until processed",
-                "Private durable raw archive and operational alerts require later phases",
+                "Actual private archive access and operational alerts require deployment verification",
             ],
         )
     elif a.probe:
@@ -115,7 +115,11 @@ def main(argv=None):
             if not raw:
                 raise SourceError("database_secret_missing")
             engine = online_engine(_render_safe_database_url(raw), worker=True)
-            report = run_collection(engine, max_filings=a.max_filings)
+            from packages.data_layer.private_archive import PrivateArchive
+            from packages.data_layer.cloud_sources import OfficialHTTP
+            archive = PrivateArchive.from_env()
+            report = run_collection(engine, max_filings=a.max_filings,
+                                    http=OfficialHTTP(archive=archive), require_archive=True)
         except Exception as exc:
             report = dict(
                 status="FAILED",

@@ -1,0 +1,50 @@
+name: PMS cloud deployment preflight
+
+on:
+  workflow_dispatch:
+    inputs:
+      probe_date:
+        type: string
+        default: ''
+        description: Optional past completed session to probe official sources
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pms-market-close-paper
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    env:
+      NEON_PMS_DATABASE_URL: ${{ secrets.NEON_PMS_DATABASE_URL }}
+      PMS_NEON_ARCHIVE_JSON: ${{ secrets.PMS_NEON_ARCHIVE_JSON }}
+      PMS_DATABASE_VERIFY_FULL: '1'
+      SSL_CERT_FILE: /etc/ssl/certs/ca-certificates.crt
+      PROBE_DATE: ${{ inputs.probe_date }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Verify copied schema, locked safety, capacity and private archive
+        shell: bash
+        run: |
+          if [ -n "$PROBE_DATE" ]; then
+            python scripts/check_neon_collection.py --probe-date "$PROBE_DATE" --output deployment-preflight.json
+          else
+            python scripts/check_neon_collection.py --output deployment-preflight.json
+          fi
+      - name: Preserve sanitized receipt only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pms-cloud-deployment-preflight
+          path: deployment-preflight.json
+          if-no-files-found: warn
+          retention-days: 14

@@ -1,7 +1,7 @@
 {
   "date": "2026-10-19",
   "phase": "3 cloud deployment",
-  "status": "NEON_RESTORED_STORED_DATA_VERIFIED_DERIVED_VIEW_FIX_PENDING",
+  "status": "COPY_REPAIR_AND_COLLECTION_SCHEMA_APPLIED_HOSTED_CHECKS_PENDING",
   "checks": {
     "python_tests": {
       "passed": 732,
@@ -23,12 +23,12 @@
   },
   "live_api_verified": true,
   "live_frontend_verified": true,
-  "migration_010_applied": false,
+  "migration_010_applied": true,
   "collection_activated": false,
   "paper_activated": false,
   "campaign_started": false,
   "pending": [
-    "Apply the tested deterministic share-view ordering fix after explicit Neon migration confirmation",
+    "Hosted raw-archive/source verification, guarded service cutover and collection activation",
     "Guarded startup/platform readiness-check adoption",
     "Backup and reviewed migration/grants",
     "Private raw-source archive",
@@ -100,7 +100,7 @@
     "source_view_fk_dependency_bytes": 626384896,
     "complete_object_dependency_review": false,
     "backup_created": true,
-    "restore_verified": false,
+    "restore_verified": true,
     "destination_github_secret_verified": true,
     "source_github_secret_error": null,
     "preflight_run": 39314574277,
@@ -142,8 +142,12 @@
     "derived_share_view_payloads_match": true,
     "derived_share_view_rows": 44579,
     "view_repair_prepared": true,
-    "view_repair_applied_to_main": false,
+    "view_repair_applied_to_main": true,
     "view_repair_migration_id": "c07b91cd-6314-4cc1-a954-84256c32be6b",
-    "view_repair_branch_id": "br-lucky-lab-azr3ohss"
+    "view_repair_branch_id": "br-lucky-lab-azr3ohss",
+    "view_repair_temporary_branch_deleted": true,
+    "collection_schema_applied": true,
+    "status_role": "pms_status",
+    "status_role_read_only_verified": true
   }
 }

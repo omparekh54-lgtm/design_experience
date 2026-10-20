@@ -1,6 +1,6 @@
 # Phase 3 — Cloud deployment
 
-Status: API database connection and certificate/hostname verification restored and verified; quota, backup, migration and private archival remain blocked. Cloud deployment is not complete. No campaign has started.
+Status: the isolated Neon copy, derived share-view repair, writable collection overlay and read-only status role are verified. Private source archival is implemented and locally tested. Hosted source/archive verification, guarded service cutover and collection catch-up remain pending. No paper campaign has started. The dated sections below preserve earlier deployment evidence; the latest receipt is `docs/cloud_deployment_validation_2026-10-20.json`.
 
 ## Prepared configuration
 
@@ -242,3 +242,47 @@ The private dumps and row-level hash buckets remain outside GitHub. Supabase
 is preserved. Migration010, application grants, service cutover, raw-source
 archival, collector catch-up and capacity/operational acceptance remain pending.
 No campaign or new orders were enabled.
+
+
+## 2026-10-20: repaired copy and collection deployment preparation
+
+The user instructed continuation. Prepared migration011 was applied through Neon
+and rechecked on main: 44,579 unique derived share IDs, matching hashes across
+planner settings, identical payloads/local IDs/ACL, locked PAPER safety. The test
+branch was removed. Supabase was not modified. The original strict-copy run
+remains a historical BLOCKED receipt; subsequent independent checks and the
+recorded view-only repair establish the copied dataset's integrity.
+
+The reviewed expansion of migration010 (`docs/deployment_sql/010_neon_collection.sql`)
+was tested on a copy-on-write branch and applied to main. All 747,098 backfilled
+prices remain visible, with an empty separate cloud-write table, RLS and no
+PUBLIC access. A test insert was visible through the combined view and rolled
+back before committing. The ingestion queue index is present.
+
+A read-only `pms_status` login role was tested and applied for the existing public
+status API. It can read the copied views but has no database/schema creation,
+PMS writes, source writes, owner membership or RLS bypass. Its password is managed
+privately and never stored in these files. `PMS_API_READ_ONLY=1` rejects operational
+mutations clearly while retaining public stateless calculations and read views.
+
+Automatic review rejected the proposed `pms_api` writer role because of its broad
+DML and function privileges. It was NOT applied; its test branch was discarded.
+The exact unapproved proposal remains in `docs/proposals/api_writer_grants.sql`.
+Operational API writes require explicit approval/review before enabling. The
+scheduled collector is independent of the status API and remains disabled until
+hosted checks pass. PAPER activation remains a separate later phase.
+
+`PrivateArchive` saves raw source bytes in the existing private bucket under
+content-addressed date keys. It validates privacy using a non-sensitive probe
+before any raw upload, verifies actual downloaded SHA-256, deduplicates content,
+refuses conflicting existing objects and stops below a 4GB reserve. It performs
+no automatic deletion. Provider receipts retain archive keys, not raw bodies or
+signed links. A fresh collection receipt without verified private archival and
+anonymous-read denial cannot open the PAPER entry gate.
+
+The cloud workflow now uses the existing `NEON_PMS_DATABASE_URL` and storage JSON
+secrets, leaving the shared Supabase source secret intact. New manual workflow
+**PMS cloud deployment preflight** checks actual TLS, safety, schema, capacity and
+private archival without database writes. An optional past completed date probes
+official sources and archives their raw documents privately; it remains sampling,
+not proof of full-universe readiness. No broker key or PAPER permission is added.
