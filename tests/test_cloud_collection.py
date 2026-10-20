@@ -584,6 +584,19 @@ def test_master_isin_conflict_cannot_rewrite_identity():
     assert all(not q.startswith(("update", "insert")) for q, p in e.calls)
 
 
+def test_reviewed_old_price_identity_is_bounded_and_does_not_change_master_gate():
+    from packages.data_layer.cloud_storage import reviewed_price_isin_matches
+    r = dict(isin='INE0B9K01033',metadata={'reviewed_isin_history': [dict(
+        previous_isin='INE0B9K01025',current_isin='INE0B9K01033',reviewed=True,
+        observed_on='2026-10-20',allow_previous_through='2026-10-19',
+        master_sha256='a'*64,quote_sha256='b'*64)]})
+    assert reviewed_price_isin_matches(r,'INE0B9K01025',date(2026,10,13))
+    assert not reviewed_price_isin_matches(r,'INE0B9K01025',date(2026,10,20))
+    assert not reviewed_price_isin_matches(r,'INE999999999',date(2026,10,13))
+    r['metadata']['reviewed_isin_history'][0]['reviewed'] = False
+    assert not reviewed_price_isin_matches(r,'INE0B9K01025',date(2026,10,13))
+
+
 def test_incomplete_price_universe_stays_partial_even_when_rows_are_stored():
     e = Engine()
     s = CloudStore(e)

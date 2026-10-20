@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import re
 from contextlib import contextmanager
-from datetime import datetime, time, timedelta
+from datetime import date, datetime, time, timedelta
 from sqlalchemy import text
 from packages.data_layer.cloud_sources import IST, SourceError
 
@@ -38,6 +38,32 @@ and c.relname in ('daily_prices','cloud_daily_prices','financial_filings','finan
 
 def encoded(value):
     return json.dumps(value, default=str, allow_nan=False)
+
+
+def reviewed_price_isin_matches(instrument, isin, day):
+    if instrument['isin'] == isin:
+        return True
+    # Only explicitly reviewed same-instrument history, bounded to already
+    # completed archives. Unknown changes still fail the master identity gate.
+    history = (instrument.get('metadata') or {}).get('reviewed_isin_history', [])
+    if not isinstance(history, list):
+        return False
+    for review in history:
+        if not isinstance(review, dict) or review.get('reviewed') is not True:
+            continue
+        if review.get('current_isin') != instrument['isin'] or review.get('previous_isin') != isin:
+            continue
+        if not all(re.fullmatch(r'[0-9a-f]{64}', review.get(k, ''))
+                   for k in ['quote_sha256', 'master_sha256']):
+            continue
+        try:
+            through = date.fromisoformat(review['allow_previous_through'])
+            observed = date.fromisoformat(review['observed_on'])
+        except (KeyError, ValueError, TypeError):
+            continue
+        if day <= through < observed:
+            return True
+    return False
 
 
 class CloudStore:
@@ -194,7 +220,7 @@ class CloudStore:
                     symbol = aliases[0]
             if symbol not in known:
                 continue
-            if known[symbol]["isin"] != r["isin"] or symbol in by_symbol:
+            if not reviewed_price_isin_matches(known[symbol], r['isin'], day) or symbol in by_symbol:
                 raise SourceError("price_identity_or_series_ambiguity")
             by_symbol[symbol] = r
         expected = {
