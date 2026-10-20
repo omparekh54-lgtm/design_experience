@@ -109,7 +109,7 @@ def parse_actions(doc, now):
             raise SourceError("action_ratio_unverified")
         cash = None
         if kind == "DIVIDEND":
-            m = re.search(r"(?:RS\.?|INR)\s*(\d+(?:\.\d+)?)", subject.upper())
+            m = re.search(r"\b(?:RS|RE|INR)\.?\s*(\d+(?:\.\d+)?)", subject.upper())
             cash = float(m.group(1)) if m else None
         # Do not invent historical announcement times from an ex-date.
         announcement = (
@@ -190,6 +190,7 @@ class CloudCollector:
         master_doc = http.fetch(ARCHIVE + "/content/equities/EQUITY_L.csv")
         master = parse_master(master_doc.body)
         stages = {}
+        self.core_stages = stages
         coverage_complete = True
         if apply:
             stages["master"] = self.store.master(master, master_doc)
@@ -258,6 +259,7 @@ class CloudCollector:
 
     def references(self, day, *, apply=False):
         stages = {}
+        self.reference_stages = stages
         now = datetime.now(IST) if apply else self.now
         known = self.store.instruments() if apply else None
         # Lookback recovers overnight/recent revisions; historical backfill remains separate.
@@ -398,11 +400,9 @@ class CloudCollector:
             to_date=end,
         )
         actions = parse_actions(doc, now)
-        if apply and any(
-            r["symbol"] in known and r["isin"] != known[r["symbol"]]["isin"]
-            for r in actions
-        ):
-            raise SourceError("action_isin_mismatch")
+        if apply:
+            from packages.data_layer.action_identity import validate_action_identities
+            stages['action_identity_reviews'] = validate_action_identities(actions, known)
         stages["corporate_actions"] = (
             self.store.events("CLOUD_ACTIONS", actions, doc)
             if apply
@@ -510,6 +510,8 @@ def run_collection(engine, *, now=None, max_filings=200, http=None, require_arch
             except Exception as exc:
                 report.update(
                     status="FAILED",
+                    stages={**getattr(collector, 'core_stages', {}),
+                            **getattr(collector, 'reference_stages', {})},
                     error_type=type(exc).__name__,
                     error_code=(
                         str(exc)
