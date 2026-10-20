@@ -1,8 +1,8 @@
 # Phase 5 — monitoring and recovery
 
-Status: implemented; actual watchdog delivery, isolated restore and live access
-results must be recorded below before marking this phase verified. This work
-does not grant Phase-3 data acceptance or start the paper campaign.
+Status: **Phase 5 implemented and verified**, with the existing Phase-3 collection
+incident still open. This does not grant Phase-3 data acceptance or start the
+paper campaign.
 
 ## Independent watchdog
 
@@ -85,4 +85,28 @@ required for the campaign, storage/retention must be revised before activation.
 
 ## Verification record
 
-Pending hosted run IDs and measured restoration result.
+- Implementation merged at `168a7ec2b03daadb061f29c4c2b41d4f73a22fe7`; all five
+  CI jobs passed (`39420923482`), with 773 Python tests and the real PG17
+  integration checks passing.
+- Actual backup/download/restore run `39421303419` passed in **145.77 seconds**.
+  All **64 relations and 26 sequences** matched, including schema, constraints,
+  indexes, functions, triggers and RLS checks. Read-only role read succeeded;
+  mutation was denied; PAPER safety stayed locked. Private dump: 44,453,047 bytes.
+- Alert drill `39421490311` created owner-assigned issue **#34** and closed it
+  through the tested recovery path.
+- Backup completion automatically triggered watchdog `39421752083` in its
+  independent concurrency group. API, dashboard, authorization, role, TLS,
+  archive and backup-freshness checks passed. Its sole code was
+  `COLLECTION_INCOMPLETE` for 19 October, correctly creating owner-assigned
+  incident **#35**. The nonzero watchdog exit is expected for this real data
+  incident; it is not a failed monitoring installation.
+- The failed initial collection's most recent hard stop is
+  `index_membership_identity_unresolved`; financial and shareholding exceptions
+  also remain. These are Phase-3 repair work. No collection fact is waived by
+  this Phase-5 result.
+
+Machine-readable evidence and archive hashes are in
+`cloud_operations_verification_2026-10-20.json`. Actual scheduled delivery and
+consecutive unattended sessions remain Phase 6. The API's older static
+restore-evidence label is not wired to these private recovery receipts; the
+verified workflow receipt and this runbook are the Phase-5 evidence boundary.

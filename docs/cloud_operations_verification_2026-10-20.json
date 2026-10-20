@@ -1,0 +1,66 @@
+{
+  "phase": 5,
+  "status": "PHASE5_VERIFIED_WITH_PHASE3_INCIDENT",
+  "date": "2026-10-20",
+  "implementation_revision": "168a7ec2b03daadb061f29c4c2b41d4f73a22fe7",
+  "ci_run": 39420923482,
+  "python_tests_passed": 773,
+  "python_tests_skipped": 6,
+  "all_five_ci_jobs_passed": true,
+  "restore": {
+    "run_id": 39421303419,
+    "status": "RESTORE_VERIFIED",
+    "snapshot_at": "2026-10-20T12:19:53.491934+00:00",
+    "verified_at": "2026-10-20T12:22:19.261237+00:00",
+    "elapsed_seconds": 145.77,
+    "relations_verified": 64,
+    "sequences_verified": 26,
+    "schema_and_constraints_matched": true,
+    "role_read_verified": true,
+    "role_write_denied": true,
+    "safety_locked": true,
+    "archive_sha256": "159ebad406c1ff7e31f9d80444e2b064d3fee9b618e37eff034d0439d436e3b5",
+    "archive_bytes": 44453047,
+    "manifest_sha256": "919029a86a82b5dec5a3fd984a8816ad372222cfab6e797a02810e002425242d",
+    "source_writes": false,
+    "production_restore": false,
+    "backup_storage": "private Neon bucket",
+    "rpo_policy_hours": 168,
+    "rehearsal_objective_seconds": 3600
+  },
+  "alert_drill": {
+    "run_id": 39421490311,
+    "issue_number": 34,
+    "status": "DRILL_DELIVERED_AND_CLOSED",
+    "assignee": "omparekh54-lgtm",
+    "real_incidents_closed": false
+  },
+  "live_watchdog": {
+    "run_id": 39421752083,
+    "status": "ATTENTION",
+    "codes": [
+      "COLLECTION_INCOMPLETE"
+    ],
+    "expected_session": "2026-10-19",
+    "issue_number": 35,
+    "assignee": "omparekh54-lgtm",
+    "database_bytes": 591192064,
+    "database_read_only": true,
+    "status_role_verified": true,
+    "tls_verified_full": true,
+    "archive_privacy_verified": true,
+    "backup_freshness_verified": true,
+    "api_and_dashboard_checks_passed": true,
+    "unauthenticated_mutation_denied": true,
+    "note": "Workflow exits nonzero intentionally for the real Phase3 data incident; monitoring and routing operated correctly."
+  },
+  "paper_activated": false,
+  "paid_resources_added": false,
+  "limitations": [
+    "Weekly full backup recovery point is up to seven days; daily full recovery is not certified.",
+    "Isolated restoration time does not certify full production service cutover time.",
+    "GitHub issue assignment and creation are demonstrated; email/push preferences are not inspected.",
+    "A complete GitHub provider outage can delay both collection and watchdog scheduling.",
+    "Phase3 still has unresolved source-data exceptions; Phase6 must demonstrate real scheduled sessions."
+  ]
+}
