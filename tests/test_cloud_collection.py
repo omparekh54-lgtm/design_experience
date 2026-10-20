@@ -353,6 +353,51 @@ def test_zero_pledge_requires_explicit_disclosure():
         parse_shareholding(shp_xml(zero_flag=None), shp_record())
 
 
+def bse_shp_xml(*, symbol="TEST", isin="INE000A01010", code="533012",
+                scheme="http://www.bseindia.com/in-bse-shp/ScripCode",
+                header_context="header", header_period="2026-09-30"):
+    # Minimal synthetic reproduction of the official LPDC identity structure;
+    # no individual shareholder disclosures are included in the fixture.
+    xml = shp_xml().decode().replace(
+        "<identifier>TEST</identifier>",
+        f'<identifier scheme="{scheme}">{code}</identifier>')
+    header = (f'<context id="header"><entity><identifier scheme="{scheme}">{code}'
+              f'</identifier></entity><period><startDate>2026-07-01</startDate>'
+              f'<endDate>{header_period}</endDate></period></context>'
+              f'<Symbol contextRef="{header_context}">{symbol}</Symbol>'
+              f'<ISIN contextRef="{header_context}">{isin}</ISIN>'
+              f'<ScripCode contextRef="{header_context}">{code}</ScripCode>')
+    return xml.replace("</root>", header + "</root>").encode()
+
+
+def test_shareholding_accepts_bse_code_only_with_linked_symbol_and_isin():
+    record = dict(shp_record(), isin="INE000A01010")
+    assert parse_shareholding(bse_shp_xml(), record)["total_shares"] == 1000
+
+
+@pytest.mark.parametrize("changes", [
+    {"symbol": "OTHER"}, {"isin": "INE111A01010"}, {"code": "TEST"},
+    {"scheme": "https://untrusted.example/ScripCode"},
+    {"header_context": "missing"}, {"header_period": "2026-06-30"},
+])
+def test_shareholding_rejects_unlinked_bse_identity(changes):
+    with pytest.raises(SourceError):
+        parse_shareholding(bse_shp_xml(**changes), dict(shp_record(), isin="INE000A01010"))
+
+
+def test_shareholding_bse_identity_requires_listing_isin():
+    with pytest.raises(SourceError):
+        parse_shareholding(bse_shp_xml(), shp_record())
+
+
+def test_shareholding_rejects_duplicate_context_ids():
+    xml = shp_xml().replace(b'</root>',
+        b'<context id="total"><entity><identifier>TEST</identifier></entity>'
+        b'<period><instant>2026-09-30</instant></period></context></root>')
+    with pytest.raises(SourceError, match="duplicate_context"):
+        parse_shareholding(xml, shp_record())
+
+
 @pytest.mark.parametrize(
     "changes",
     [

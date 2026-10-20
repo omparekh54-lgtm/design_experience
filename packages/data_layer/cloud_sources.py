@@ -10,6 +10,7 @@ import hashlib
 import io
 import json
 import math
+import re
 import time
 import urllib.error
 import urllib.parse
@@ -494,6 +495,34 @@ def parse_shareholding(xml, record):
     root = ET.fromstring(xml)
     local = lambda s: s.rsplit("}", 1)[-1].split(":")[-1]
     period = parse_day(record["date"])
+    # Dual-listed issuers may use BSE's numeric ScripCode as the XBRL entity
+    # identifier even though NSE publishes the document. Admit that identity only
+    # when one undimensioned header context links the same code, NSE symbol and
+    # listing ISIN for the requested reporting period.
+    bse_scheme = "http://www.bseindia.com/in-bse-shp/ScripCode"
+    linked_entities = set()
+    for c in root:
+        if local(c.tag) != "context":
+            continue
+        if any(local(e.tag) in {"explicitMember", "typedMember"} for e in c.iter()):
+            continue
+        ends = [e.text for e in c.iter() if local(e.tag) in {"instant", "endDate"}]
+        identifiers = [(e.attrib.get("scheme", ""), e.text) for e in c.iter()
+                       if local(e.tag) == "identifier"]
+        if ends != [period.isoformat()] or len(identifiers) != 1:
+            continue
+        scheme, code = identifiers[0]
+        if scheme != bse_scheme or not code or not re.fullmatch(r"[0-9]{6}", code):
+            continue
+        def header_values(name):
+            return {e.text for e in root if local(e.tag) == name
+                    and e.attrib.get("contextRef") == c.attrib.get("id")}
+        if (record.get("isin") and header_values("Symbol") == {record["symbol"]}
+                and header_values("ISIN") == {record["isin"]}
+                and header_values("ScripCode") == {code}):
+            linked_entities.add((scheme, code))
+    if len(linked_entities) > 1:
+        raise SourceError("shareholding_entity_ambiguous")
     contexts = {}
     for c in root:
         if local(c.tag) != "context":
@@ -506,9 +535,15 @@ def parse_shareholding(xml, record):
             for e in c.iter()
             if local(e.tag) in {"explicitMember", "typedMember"}
         ]
-        identifiers = [e.text for e in c.iter() if local(e.tag) == "identifier"]
-        if record["symbol"] not in identifiers:
+        identifiers = [(e.attrib.get("scheme", ""), e.text) for e in c.iter()
+                       if local(e.tag) == "identifier"]
+        if len(identifiers) != 1 or not (
+            (identifiers[0][1] == record["symbol"] and identifiers[0][0] != bse_scheme)
+            or identifiers[0] in linked_entities
+        ):
             continue
+        if c.attrib["id"] in contexts:
+            raise SourceError("shareholding_duplicate_context")
         contexts[c.attrib["id"]] = members
 
     def fact(name, members, *, optional=False):
