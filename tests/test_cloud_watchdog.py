@@ -42,7 +42,7 @@ class Issues:
         self.calls.append((method,path,data))
         if method=='GET':return [r for r in self.rows if r['state']=='open']
         if method=='POST':
-            r={'number':len(self.rows)+1,'state':'open',**data};self.rows.append(r);return r
+            r={'number':len(self.rows)+1,'state':'open','user':{'login':'github-actions[bot]'},**data};self.rows.append(r);return r
         r=self.rows[int(path.rsplit('/',1)[-1])-1];r.update(data);return r
 
 
@@ -59,6 +59,15 @@ def test_drill_delivery_cannot_close_real_incident():
     api=Issues();route_incident(['REAL_FAILURE'],api=api)
     assert route_incident(['SIMULATED_COLLECTION_FAILURE'],drill=True,api=api)['status']=='DRILL_DELIVERED_AND_CLOSED'
     assert api.rows[0]['state']=='open' and api.rows[1]['state']=='closed'
+
+
+def test_alert_cannot_modify_someone_elses_issue_with_the_same_title():
+    api=Issues();route_incident(['REAL_FAILURE'],api=api)
+    api.rows[0]['user']['login']='outside-contributor'
+    route_incident([],api=api)
+    assert api.rows[0]['state']=='open'
+    route_incident(['REAL_FAILURE'],api=api)
+    assert len(api.rows)==2
 
 
 @pytest.mark.parametrize('url',[

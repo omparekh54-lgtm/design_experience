@@ -1,5 +1,6 @@
 """Independent watchdog and deduplicated GitHub incident routing. Never trades."""
 import argparse
+import hashlib
 from datetime import datetime, timedelta
 import json
 import os
@@ -34,12 +35,14 @@ def route_incident(codes, *, drill=False, api=github):
     issues = []
     for page in range(1,11):
         batch = api('GET',f'/issues?state=open&per_page=100&page={page}')
-        issues.extend(i for i in batch if i.get('title')==title and 'pull_request' not in i)
+        issues.extend(i for i in batch if i.get('title')==title and 'pull_request' not in i
+                      and i.get('user',{}).get('login')=='github-actions[bot]'
+                      and '<!-- pms-watchdog-v1 -->' in (i.get('body') or ''))
         if len(batch)<100:
             break
     else:
         raise RuntimeError('incident_search_limit')
-    body = 'Operational checks require attention.\n\nCodes: '+', '.join(sorted(set(codes)))
+    body = '<!-- pms-watchdog-v1 -->\nOperational checks require attention.\n\nCodes: '+', '.join(sorted(set(codes)))
     run_id = os.getenv('GITHUB_RUN_ID','')
     if run_id.isdigit():
         body += '\n\nEvidence: https://github.com/'+REPO+'/actions/runs/'+run_id
@@ -57,7 +60,7 @@ def route_incident(codes, *, drill=False, api=github):
                 'issue_number':issue['number']}
     for issue in issues:
         api('PATCH',f"/issues/{issue['number']}",{'state':'closed','state_reason':'completed',
-            'body':'All configured watchdog checks passed. Recovery does not authorize trading.'})
+            'body':'<!-- pms-watchdog-v1 -->\nAll configured watchdog checks passed. Recovery does not authorize trading.'})
     return {'status':'HEALTHY','closed_issues':len(issues)}
 
 
@@ -101,12 +104,13 @@ def backup_check(archive, now):
                 newest=obj
     if newest is None:
         return 'BACKUP_RESTORE_NOT_VERIFIED'
-    body=archive.client.get_object(Bucket=BUCKET,Key=newest['Key'])['Body']
+    response=archive.client.get_object(Bucket=BUCKET,Key=newest['Key'])
+    body=response['Body']
     try:
         raw=body.read(16385)
     finally:
         body.close()
-    if len(raw)>16384:
+    if len(raw)>16384 or hashlib.sha256(raw).hexdigest()!=response.get('Metadata',{}).get('sha256'):
         return 'BACKUP_EVIDENCE_INVALID'
     r=json.loads(raw)
     if r.get('status')!='RESTORE_VERIFIED':
@@ -154,6 +158,12 @@ def main(argv=None):
         event=json.loads(Path(os.environ['GITHUB_EVENT_PATH']).read_text()) if os.getenv('GITHUB_EVENT_PATH') else {}
         if event.get('workflow_run',{}).get('conclusion') not in (None,'success','skipped','neutral'):
             r['codes'].append('PIPELINE_FAILURE')
+        try:
+            runs=github('GET','/actions/workflows/pms-recovery-backup.yml/runs?per_page=1&branch=main')['workflow_runs']
+            if runs and runs[0]['status']=='completed' and runs[0]['conclusion']!='success':
+                r['codes'].append('BACKUP_PIPELINE_FAILED')
+        except Exception:
+            r['codes'].append('BACKUP_PIPELINE_STATUS_UNAVAILABLE')
     r['codes']=sorted(set(r['codes']))
     try:
         r['routing']=route_incident(r['codes'],drill=a.drill)

@@ -105,6 +105,10 @@ def rehearse(source,target,archive,root):
                           receipts[1]['sha256'],receipts[1]['bytes'])
         expected=json.loads(checked_manifest.read_text())
         toc=root/'restore.list';filtered_toc(restored,toc)
+        # initdb already owns the empty public schema. Never drop it or use
+        # --clean; omit only its CREATE entry, retaining every contained object.
+        toc.write_text('\n'.join(line for line in toc.read_text().splitlines()
+                                 if ' SCHEMA - public ' not in line)+'\n')
         env,dsn=pg_environment(target)
         command(['pg_restore','--exit-on-error','--single-transaction','--no-owner',
                  '--no-privileges','--use-list',str(toc),'--dbname',dsn,str(restored)],env=env)
