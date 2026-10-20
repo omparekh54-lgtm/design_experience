@@ -716,6 +716,36 @@ def test_run_date_override_is_forbidden():
         cli.main(["--run", "--date", str(DAY)])
 
 
+@pytest.mark.parametrize('offset', [0, -1, 8])
+def test_initial_catch_up_refuses_current_future_and_old_dates_before_db(offset):
+    with pytest.raises(SourceError, match='past_completed_session'):
+        run_collection(None, now=NOW, catch_up_date=NOW.date() - timedelta(days=offset))
+
+
+def test_initial_catch_up_does_not_backdate_current_reference_snapshots(monkeypatch):
+    import packages.pms.cloud_collection as module
+    target = NOW.date() - timedelta(days=1)
+    seen = []
+    store = SimpleNamespace(classifications=lambda http, day, limit:
+        seen.append(('classification', day, limit)) or {'remaining': 0})
+    collector = module.CloudCollector(store, now=NOW, catch_up_date=target,
+                                      max_classifications=500)
+    collector.core = lambda day, apply: seen.append(('prices', day)) or {
+        'status': 'SUCCESS', 'stages': {}}
+    collector.references = lambda day, apply: seen.append(('references', day)) or {
+        'status': 'SUCCESS', 'stages': {}}
+    assert collector.collect(target, apply=True)['status'] == 'SUCCESS'
+    assert seen == [('prices', target), ('references', NOW.date()),
+                    ('classification', NOW.date(), 500)]
+
+
+def test_initial_catch_up_limits_are_explicit():
+    from scripts.bootstrap_cloud_collection import validate_target
+    validate_target(NOW.date() - timedelta(days=1), NOW, 6)
+    with pytest.raises(SourceError):
+        validate_target(NOW.date() - timedelta(days=1), NOW, 7)
+
+
 def test_next_api_classification_discovers_non_eq_series():
     from packages.data_layer.cloud_sources import fetch_classification
 

@@ -136,13 +136,18 @@ def parse_actions(doc, now):
 
 
 class CloudCollector:
-    def __init__(self, store=None, http=None, *, now=None, max_filings=200):
+    def __init__(self, store=None, http=None, *, now=None, max_filings=200,
+                 catch_up_date=None, max_classifications=100):
         if not 1 <= max_filings <= 500:
             raise ValueError("max_filings must be 1..500")
         self.store = store
         self.http = http or OfficialHTTP()
         self.now = now or datetime.now(IST)
         self.max_filings = max_filings
+        self.catch_up_date = catch_up_date
+        if not 1 <= max_classifications <= 500:
+            raise ValueError("max_classifications must be 1..500")
+        self.max_classifications = max_classifications
 
     def core(self, day, *, apply=False):
         http = self.http
@@ -172,10 +177,13 @@ class CloudCollector:
         ):
             # A real special weekend requires explicit sourced configuration, never guessing.
             return {"status": "SKIPPED", "reason": "exchange_non_session", "stages": {}}
-        if apply and (
-            day != self.now.date() or (self.now.hour, self.now.minute) < (15, 30)
-        ):
-            raise SourceError("current_completed_session_required")
+        if apply:
+            historical = self.catch_up_date is not None
+            if historical:
+                if day != self.catch_up_date or not 1 <= (self.now.date() - day).days <= 7:
+                    raise SourceError("past_completed_session_required")
+            elif day != self.now.date() or (self.now.hour, self.now.minute) < (15, 30):
+                raise SourceError("current_completed_session_required")
         master_doc = http.fetch(ARCHIVE + "/content/equities/EQUITY_L.csv")
         master = parse_master(master_doc.body)
         stages = {}
@@ -420,24 +428,30 @@ class CloudCollector:
         result = self.core(day, apply=apply)
         if result["status"] == "SKIPPED":
             return result
-        ref = self.references(day, apply=apply)
+        # Live reference snapshots are observed today even when the price archives
+        # are being caught up. Never backdate current membership/classification.
+        reference_day = self.now.date() if apply and self.catch_up_date else day
+        ref = self.references(reference_day, apply=apply)
         result["stages"].update(ref["stages"])
         result["status"] = ref["status"]
         if apply:
             result["stages"]["classifications"] = self.store.classifications(
-                self.http, day, limit=100
+                self.http, reference_day, limit=self.max_classifications
             )
             if result["stages"]["classifications"]["remaining"]:
                 result["status"] = "PARTIAL"
         return result
 
 
-def run_collection(engine, *, now=None, max_filings=200, http=None, require_archive=False):
+def run_collection(engine, *, now=None, max_filings=200, http=None, require_archive=False,
+                   catch_up_date=None, max_classifications=100):
     if require_archive and (http is None or getattr(http, "archive", None) is None):
         raise SourceError("private_archive_required")
     now = (now or datetime.now(IST)).astimezone(IST)
     run_id = str(uuid4())
-    day = now.date()
+    if catch_up_date is not None and not 1 <= (now.date() - catch_up_date).days <= 7:
+        raise SourceError("past_completed_session_required")
+    day = catch_up_date or now.date()
     report = dict(
         version="CLOUD_COLLECTION_v1",
         run_id=run_id,
@@ -448,6 +462,8 @@ def run_collection(engine, *, now=None, max_filings=200, http=None, require_arch
         campaign_started=False,
         stages={},
     )
+    if catch_up_date is not None:
+        report.update(mode="INITIAL_CATCH_UP", reference_observation_date=str(now.date()))
     # Session lock covers all stage commits and all invokers, including manual runs.
     with engine.connect() as guard:
         acquired = guard.execute(
@@ -466,7 +482,8 @@ def run_collection(engine, *, now=None, max_filings=200, http=None, require_arch
                     {"id": run_id, "started": now, "details": encoded(report)},
                 )
             collector = CloudCollector(
-                CloudStore(engine), http, now=now, max_filings=max_filings
+                CloudStore(engine), http, now=now, max_filings=max_filings,
+                catch_up_date=catch_up_date, max_classifications=max_classifications
             )
             try:
                 collector.store.resolve_tables()
