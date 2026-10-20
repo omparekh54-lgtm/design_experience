@@ -1,7 +1,7 @@
 {
   "date": "2026-10-20",
-  "updated_at_utc": "2026-10-20T06:31:25.148333+00:00",
-  "status": "NEON_SCHEMA_AND_READ_ONLY_ROLE_VERIFIED_HOSTED_CHECKS_PENDING",
+  "updated_at_utc": "2026-10-20T07:13:29.555897+00:00",
+  "status": "SOURCE_PARSER_REPAIRED_RENDER_CUTOVER_BLOCKED",
   "campaign_started": false,
   "paper_enabled": false,
   "collection_activated": false,
@@ -58,23 +58,236 @@
   },
   "private_raw_archive": {
     "implemented": true,
-    "hosted_verification": "PENDING",
+    "hosted_verification": "VERIFIED_INFRASTRUCTURE",
     "quota_reserve_bytes": 4000000000,
     "startup_privacy_probe_required": true,
     "downloaded_sha256_verification_required": true,
     "raw_bodies_in_public_artifacts": false,
-    "automatic_deletions": false
+    "automatic_deletions": false,
+    "hosted_run_id": 39381649589,
+    "objects_verified": 17,
+    "objects_uploaded": 17,
+    "bucket_bytes": 48659293,
+    "anonymous_read_denied": true
   },
   "tests_local": {
-    "passed": 730,
+    "passed": 739,
     "skipped": 5
   },
   "pending": [
-    "Actual hosted archive and official source probe",
-    "Guarded API startup and readiness settings",
-    "API and dashboard cutover with read-only API role",
-    "Collection-only scheduler activation and actual catch-up",
-    "Measured capacity/growth, alerts and campaign rehearsal"
+    "Explicit permission for read-only Neon credential transfer to Render",
+    "Guarded API build/start, readiness and controlled deploy settings",
+    "Actual API and SSR dashboard verification after Neon cutover",
+    "Repeat complete hosted preflight on repaired revision",
+    "Collection-only scheduler activation and full-universe catch-up",
+    "Measured collection growth and free workspace quotas; monitoring/rehearsal remain later phases"
   ],
-  "acceptance": "NOT_CERTIFIED"
+  "acceptance": "NOT_CERTIFIED",
+  "hosted_preflight": {
+    "run_id": 39381649589,
+    "revision": "f04cac90d2887be6a0136b010e17f18d82552600",
+    "status": "BLOCKED",
+    "stage": "official_source_probe",
+    "error_code": "completed_source_session_not_verified",
+    "source_error": "LPDC: shareholding_fact_missing_or_ambiguous",
+    "database_tls_verified_full": true,
+    "database_writes": false,
+    "private_archive_verified": true,
+    "full_universe_verified": false
+  },
+  "shareholding_parser_repair": {
+    "pr": 24,
+    "merge_commit": "5b8e9afca7b4603421bd5c460ec2e4ec1895fd50",
+    "ci_run_id": 39382844327,
+    "all_five_ci_jobs_passed": true,
+    "ci_source_probe": "SKIPPED_EXCHANGE_NON_SESSION",
+    "archived_lpdc_xml_sha256": "01fe90f863bb39f7234e127fb9090bf8cd1cbc073f805c2bd2355c0979388086",
+    "archived_xml_parsed": true,
+    "complete_hosted_preflight_after_repair": "NOT_RUN"
+  },
+  "render_cutover": {
+    "applied": false,
+    "read_only_role": "pms_status",
+    "credential_transfer_auto_review_rejected": true,
+    "reason": "Explicit approval required to send the Neon read-only role password to the existing Render API DATABASE_URL secret",
+    "settings_ui": "SIGNED_IN_THEN_BROWSER_CONTROL_TIMED_OUT",
+    "actual_build": "pip install -r requirements.txt",
+    "actual_start": "uvicorn apps.api.main_exec:app --host 0.0.0.0 --port $PORT",
+    "actual_health_path": "",
+    "actual_auto_deploy": "yes",
+    "desired_build": "pip install -r requirements-ops.txt",
+    "desired_start": "python scripts/start_cloud_api.py",
+    "desired_health_path": "/ready",
+    "desired_auto_deploy": "no",
+    "service_plan": "free"
+  },
+  "neon_idle_observation": {
+    "checked_at_utc": "2026-10-20T07:11:47.871810+00:00",
+    "current_state": "idle",
+    "last_active": "2026-10-20T06:40:16Z",
+    "suspended_at": "2026-10-20T06:45:17Z",
+    "min_cu": 0.25,
+    "max_cu": 0.25,
+    "suspend_timeout_api_field": 0,
+    "observation": "Endpoint did suspend after inactivity; zero timeout field alone was not used to infer always-on compute"
+  },
+  "post_repair_source_probe": {
+    "status": "SUCCESS",
+    "environment": "Codex runtime, not GitHub runner",
+    "trade_date": "2026-10-19",
+    "observed_at": "2026-10-20T12:42:38.209805+05:30",
+    "database_writes": false,
+    "full_universe_verified": false,
+    "private_archival_in_this_probe": false,
+    "stages": {
+      "master": {
+        "source_rows": 2619
+      },
+      "prices": {
+        "source_rows": 3405,
+        "date": "2026-10-19"
+      },
+      "benchmarks": {
+        "codes": [
+          "INDIAVIX",
+          "NIFTY50",
+          "NIFTY500",
+          "NIFTYMIDSMALLCAP400"
+        ],
+        "date": "2026-10-19"
+      },
+      "surveillance": {
+        "source_rows": 3203
+      },
+      "financials": {
+        "discovered": 300,
+        "processed": 1,
+        "remaining": null,
+        "errors": []
+      },
+      "shareholding": {
+        "discovered": 1947,
+        "processed": 1,
+        "remaining": null,
+        "errors": []
+      },
+      "earnings": {
+        "source_rows": 1301
+      },
+      "corporate_actions": {
+        "source_rows": 18
+      },
+      "index_membership": {
+        "source_rows": 501
+      },
+      "classifications": {
+        "sampled": 1,
+        "full_universe_verified": false
+      }
+    },
+    "documents": [
+      {
+        "url": "https://www.nseindia.com/api/holiday-master?type=trading",
+        "sha256": "933cf5dc6dd4efe3b8db8ce6ecd6ecb2582929f5e0b4faffdb88e11cf4efdfbe",
+        "bytes": 34022,
+        "observed_at": "2026-10-20T12:40:49.739529+05:30"
+      },
+      {
+        "url": "https://nsearchives.nseindia.com/content/equities/EQUITY_L.csv",
+        "sha256": "64bc3997cc8e6d67f77fec2d04e4f74c45d7f7cb712ffd55c0885fb5a56722d8",
+        "bytes": 184984,
+        "observed_at": "2026-10-20T12:40:56.263321+05:30"
+      },
+      {
+        "url": "https://nsearchives.nseindia.com/content/cm/REG_IND191026.csv",
+        "sha256": "07a206c7c0014b6da1786bac61e92db7a1aba473b9abc844f93ab4b05ba0cb40",
+        "bytes": 297370,
+        "observed_at": "2026-10-20T12:41:03.219511+05:30"
+      },
+      {
+        "url": "https://nsearchives.nseindia.com/content/cm/REG1_IND191026.csv",
+        "sha256": "ba80d9b1b0f8febbc26baed86bd8b59374e2e5a2360d26c46b091c621fc55bc8",
+        "bytes": 621803,
+        "observed_at": "2026-10-20T12:41:10.608131+05:30"
+      },
+      {
+        "url": "https://nsearchives.nseindia.com/content/cm/BhavCopy_NSE_CM_0_0_0_20261019_F_0000.csv.zip",
+        "sha256": "f0a2e9bf7cb185bb112704355772d2954d662abee3d7295414aabc26d6ecfbde",
+        "bytes": 205000,
+        "observed_at": "2026-10-20T12:41:17.051263+05:30"
+      },
+      {
+        "url": "https://nsearchives.nseindia.com/content/indices/ind_close_all_19102026.csv",
+        "sha256": "ebff93c77dc6cdf82f1536a92c36a611a644fa6f87e267aa7c2ed5edfcf46502",
+        "bytes": 17825,
+        "observed_at": "2026-10-20T12:41:23.403315+05:30"
+      },
+      {
+        "url": "https://www.nseindia.com/api/integrated-filing-results?type=Integrated+Filing-+Financials&index=equities&from_date=12-10-2026&to_date=19-10-2026&page=1&size=100",
+        "sha256": "e1ec7f936ab3272084a81c2ab96e560391912d8dd1a413d2033d2041d812e9dd",
+        "bytes": 77350,
+        "observed_at": "2026-10-20T12:41:30.059177+05:30"
+      },
+      {
+        "url": "https://www.nseindia.com/api/integrated-filing-results?type=Integrated+Filing-+Financials&index=equities&from_date=12-10-2026&to_date=19-10-2026&page=2&size=100",
+        "sha256": "7c89189d5a4283a561836bb325c27a08fda32e1741adb26afd65053d820f3d1d",
+        "bytes": 77288,
+        "observed_at": "2026-10-20T12:41:36.911975+05:30"
+      },
+      {
+        "url": "https://www.nseindia.com/api/integrated-filing-results?type=Integrated+Filing-+Financials&index=equities&from_date=12-10-2026&to_date=19-10-2026&page=3&size=100",
+        "sha256": "99d080e8acb1e29bf04cd47dc1c569ece90ff6ae1cfb2b6362439dc5e82d620b",
+        "bytes": 79495,
+        "observed_at": "2026-10-20T12:41:44.431141+05:30"
+      },
+      {
+        "url": "https://nsearchives.nseindia.com/corporate/xbrl/INTEGRATED_FILING_INDAS_1742135_19102026112026_WEB.xml",
+        "sha256": "a1b7bfaf2e0bb04faf30f4a5bd3f5e69bb4a023a287ee2dff9599519f61196ab",
+        "bytes": 18496,
+        "observed_at": "2026-10-20T12:41:50.783080+05:30"
+      },
+      {
+        "url": "https://www.nseindia.com/api/corporate-share-holdings-master?index=equities",
+        "sha256": "f4024b5cd0a81e93bf0c1f700d51f9759e80f7fa887af95938dd28700d3df254",
+        "bytes": 2067481,
+        "observed_at": "2026-10-20T12:41:57.478641+05:30"
+      },
+      {
+        "url": "https://nsearchives.nseindia.com/corporate/xbrl/SHP_1742159_20102026081113_WEB.xml",
+        "sha256": "01fe90f863bb39f7234e127fb9090bf8cd1cbc073f805c2bd2355c0979388086",
+        "bytes": 166500,
+        "observed_at": "2026-10-20T12:42:04.003257+05:30"
+      },
+      {
+        "url": "https://www.nseindia.com/api/corporate-board-meetings?index=equities&from_date=12-10-2026&to_date=03-12-2026",
+        "sha256": "3b479ea64cde5e264617f6759ab8a4d633c2e5734306db15e2cb1b0d5e724f52",
+        "bytes": 1078392,
+        "observed_at": "2026-10-20T12:42:11.040769+05:30"
+      },
+      {
+        "url": "https://www.nseindia.com/api/corporates-corporateActions?index=equities&from_date=12-10-2026&to_date=03-12-2026",
+        "sha256": "8804b7982f5b324518ce670fa92f8ffcef2274e9a0c6367e707c3a4eebbadb0e",
+        "bytes": 5581,
+        "observed_at": "2026-10-20T12:42:17.815329+05:30"
+      },
+      {
+        "url": "https://www.niftyindices.com/IndexConstituent/ind_nifty500list.csv",
+        "sha256": "c263cbf8e8e51b4a167a34b65ed4890e750b85ba7e012dd18e870bb7ad46f906",
+        "bytes": 32785,
+        "observed_at": "2026-10-20T12:42:24.883436+05:30"
+      },
+      {
+        "url": "https://www.nseindia.com/api/NextApi/apiClient/GetQuoteApi?functionName=getMetaData&symbol=360ONE",
+        "sha256": "992cace3df50659a01766938e9bea99ce7581e908511512aa3fc5ac095208634",
+        "bytes": 385,
+        "observed_at": "2026-10-20T12:42:31.298654+05:30"
+      },
+      {
+        "url": "https://www.nseindia.com/api/NextApi/apiClient/GetQuoteApi?functionName=getSymbolData&marketType=N&series=EQ&symbol=360ONE",
+        "sha256": "e24bed1124f9bf789603cbf3110ef9ea771da9b2468df481d4452e4d3d840ccd",
+        "bytes": 2988,
+        "observed_at": "2026-10-20T12:42:38.208058+05:30"
+      }
+    ]
+  }
 }
