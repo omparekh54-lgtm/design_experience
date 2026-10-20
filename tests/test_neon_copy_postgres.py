@@ -12,6 +12,49 @@ from scripts import copy_pms_to_neon as module
 
 
 @pytest.mark.skipif(not os.getenv('PMS_COPY_TEST_PG_URL'), reason='isolated PostgreSQL17 service required')
+def test_current_backup_download_restore_and_role_denial(tmp_path):
+    from scripts.rehearse_cloud_recovery import rehearse
+    from packages.data_layer.private_archive import PrivateArchive
+    url=make_url(os.environ['PMS_COPY_TEST_PG_URL'])
+    assert url.host in {'localhost','127.0.0.1'}
+    admin=create_engine(url,isolation_level='AUTOCOMMIT')
+    name='recovery_src_'+uuid4().hex
+    with admin.connect() as c:
+        c.execute(text('CREATE DATABASE '+name))
+        # This is an empty, dedicated test target, never an application database.
+        c.execute(text('CREATE DATABASE pms_recovery'))
+    source=url.set(database=name).render_as_string(hide_password=False)
+    target=url.set(database='pms_recovery').render_as_string(hide_password=False)
+    src=create_engine(source)
+    with src.begin() as c:
+        c.execute(text('CREATE SCHEMA pms'))
+        for table in sorted(module.PUBLIC):
+            c.execute(text(f'CREATE TABLE public.{table}(id bigserial PRIMARY KEY,payload jsonb)'))
+            c.execute(text(f"INSERT INTO public.{table}(payload) VALUES (cast(:payload as jsonb))"), {'payload':'{"a":1}'})
+            c.execute(text(f'CREATE VIEW pms.v_{table} AS SELECT * FROM public.{table}'))
+        c.execute(text('CREATE TABLE pms.instruments(id bigserial PRIMARY KEY,security_id bigint REFERENCES public.securities(id))'))
+        c.execute(text('INSERT INTO pms.instruments(security_id) VALUES(1)'))
+        c.execute(text('CREATE TABLE pms.safety_state(execution_mode text,new_orders_enabled boolean)'))
+        c.execute(text("INSERT INTO pms.safety_state VALUES('PAPER',false)"))
+    class Store:
+        blobs={}
+        def put_object(self,Bucket,Key,Body,**kw):self.blobs[Key]=Body
+        def get_object(self,Bucket,Key):return {'Body':io.BytesIO(self.blobs[Key])}
+        def upload_file(self,path,bucket,key,**kw):self.blobs[key]=Path(path).read_bytes()
+        def get_paginator(self,name):return self
+        def paginate(self,**kw):return [{'Contents':[{'Key':k,'Size':len(v)} for k,v in self.blobs.items()]}]
+    archive=PrivateArchive(Store(),privacy_check=lambda url:True)
+    try:
+        result=rehearse(source,target,archive,tmp_path)
+        assert result['status']=='RESTORE_VERIFIED' and result['role_write_denied']
+        assert result['relations_verified']==16 and result['sequences_verified']==8
+        with pytest.raises(module.CopyBlocked,match='RESTORE_TARGET_NOT_EMPTY'):
+            rehearse(source,target,archive,tmp_path)
+    finally:
+        src.dispose();admin.dispose()
+
+
+@pytest.mark.skipif(not os.getenv('PMS_COPY_TEST_PG_URL'), reason='isolated PostgreSQL17 service required')
 def test_real_snapshot_archives_restore_views_constraints_sequences_and_locked_safety(monkeypatch):
     require_url = make_url(os.environ['PMS_COPY_TEST_PG_URL'])
     assert require_url.host in {'localhost', '127.0.0.1'}

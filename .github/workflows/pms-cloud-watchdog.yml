@@ -1,0 +1,58 @@
+name: PMS cloud watchdog
+on:
+  schedule:
+    - cron: '23 0,6,12,18 * * *'
+    - cron: '53 14 * * *'
+  workflow_run:
+    workflows: [PMS Cloud Collection and PAPER, PMS initial cloud catch-up, PMS verified recovery backup]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      alert_drill:
+        description: Create and close a clearly marked alert drill issue
+        type: boolean
+        default: false
+permissions:
+  contents: read
+  actions: read
+  issues: write
+concurrency:
+  group: pms-independent-watchdog
+  cancel-in-progress: false
+jobs:
+  inspect:
+    if: github.event_name != 'workflow_run' || (github.event.workflow_run.head_repository.full_name == github.repository && github.event.workflow_run.head_branch == 'main')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    env:
+      NEON_PMS_DATABASE_URL: ${{ secrets.NEON_PMS_DATABASE_URL }}
+      PMS_NEON_ARCHIVE_JSON: ${{ secrets.PMS_NEON_ARCHIVE_JSON }}
+      SSL_CERT_FILE: /etc/ssl/certs/ca-certificates.crt
+      PMS_DATABASE_VERIFY_FULL: '1'
+      GITHUB_TOKEN: ${{ github.token }}
+      ALERT_DRILL: ${{ inputs.alert_drill }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Inspect deployment or demonstrate alert routing
+        shell: bash
+        run: |
+          if [ "$ALERT_DRILL" = 'true' ]; then
+            python scripts/run_cloud_watchdog.py --drill --output watchdog.json
+          else
+            python scripts/run_cloud_watchdog.py --output watchdog.json
+          fi
+      - name: Preserve sanitized evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pms-watchdog-${{ github.run_id }}
+          path: watchdog.json
+          retention-days: 90
