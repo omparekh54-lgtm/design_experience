@@ -214,8 +214,10 @@ class CloudStore:
                 aliases = [
                     s
                     for s, i in known.items()
-                    if i.get("canonical_symbol") == symbol and i["isin"] == r["isin"]
+                    if reviewed_price_isin_matches(i, r['isin'], day)
                 ]
+                if len(aliases) > 1:
+                    raise SourceError('price_isin_mapping_ambiguous')
                 if len(aliases) == 1:
                     symbol = aliases[0]
             if symbol not in known:
@@ -273,6 +275,29 @@ class CloudStore:
             "uncovered_symbols": sorted(uncovered),
             "complete": bool(expected) and not missing and not uncovered,
         }
+
+    def session_surveillance(self, rows, states, day):
+        """Link dated source tickers only through a unique verified ISIN."""
+        known = self.instruments()
+        normalized = dict(states)
+        aliases = []
+        for row in rows:
+            old = row['symbol']
+            if old in known or old not in states:
+                continue
+            matches = [s for s,i in known.items()
+                       if reviewed_price_isin_matches(i, row['isin'], day)]
+            if len(matches) > 1:
+                raise SourceError('price_isin_mapping_ambiguous')
+            if len(matches) != 1:
+                continue
+            current = matches[0]
+            if current in states and states[current] != states[old]:
+                raise SourceError('surveillance_symbol_mapping_conflict')
+            normalized[current] = states[old]
+            aliases.append(dict(source_symbol=old, database_symbol=current,
+                                isin=row['isin'], trade_date=str(day)))
+        return normalized, aliases
 
     def benchmarks(self, rows, doc):
         with self.engine.begin() as c:

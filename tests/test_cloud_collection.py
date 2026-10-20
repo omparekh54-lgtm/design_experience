@@ -752,6 +752,30 @@ def test_initial_catch_up_does_not_backdate_current_reference_snapshots(monkeypa
                     ('classification', NOW.date(), 500)]
 
 
+def test_successful_references_never_promote_partial_price_coverage():
+    from packages.pms.cloud_collection import CloudCollector
+    store=SimpleNamespace(classifications=lambda *a,**k: {'remaining':0})
+    c=CloudCollector(store,now=NOW)
+    c.core=lambda *a,**k: {'status':'PARTIAL','stages':{'prices':{'complete':False}}}
+    c.references=lambda *a,**k: {'status':'SUCCESS','stages':{'financials':{'processed':1}}}
+    result=c.collect(DAY,apply=True)
+    assert result['status']=='PARTIAL'
+    assert result['stages']['financials']['processed']==1
+    assert result['stages']['prices']['complete'] is False
+
+
+def test_dated_source_symbol_maps_only_through_unique_isin():
+    s=CloudStore(None)
+    s.instruments=lambda: {'CURRENT':{'isin':'INE545A01024'}}
+    source={'OLD':{'status':'A','series':'EQ'}}
+    states,aliases=s.session_surveillance([{'symbol':'OLD','isin':'INE545A01024'}],source,DAY)
+    assert states['CURRENT']==source['OLD'] and source.keys()=={'OLD'}
+    assert aliases[0]['source_symbol']=='OLD' and aliases[0]['trade_date']==str(DAY)
+    s.instruments=lambda: {'CURRENT':{'isin':'INE545A01024'},'OTHER':{'isin':'INE545A01024'}}
+    with pytest.raises(SourceError,match='ambiguous'):
+        s.session_surveillance([{'symbol':'OLD','isin':'INE545A01024'}],source,DAY)
+
+
 def test_initial_catch_up_limits_are_explicit():
     from scripts.bootstrap_cloud_collection import validate_target
     validate_target(NOW.date() - timedelta(days=1), NOW, 6)

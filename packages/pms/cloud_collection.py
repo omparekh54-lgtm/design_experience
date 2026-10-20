@@ -187,6 +187,7 @@ class CloudCollector:
         master_doc = http.fetch(ARCHIVE + "/content/equities/EQUITY_L.csv")
         master = parse_master(master_doc.body)
         stages = {}
+        coverage_complete = True
         if apply:
             stages["master"] = self.store.master(master, master_doc)
         else:
@@ -224,12 +225,19 @@ class CloudCollector:
             indices = parse_indices(index_doc.body, d)
             if apply:
                 self.store.benchmarks(indices, index_doc)
+                states, aliases = self.store.session_surveillance(prices, states, d)
+                if aliases:
+                    stages['identity_aliases_' + d.isoformat()] = aliases
                 coverage = self.store.prices(prices, price_doc, d, states)
                 stages["prices_" + d.isoformat()] = coverage
                 if not coverage["complete"]:
-                    raise SourceError("price_universe_coverage_incomplete")
+                    coverage_complete = False
                 if d == day:
-                    stages["surveillance"] = self.store.surveillance(states, docs, d)
+                    if coverage['uncovered_symbols']:
+                        stages['surveillance'] = dict(status='BLOCKED',
+                            uncovered_symbols=coverage['uncovered_symbols'])
+                    else:
+                        stages["surveillance"] = self.store.surveillance(states, docs, d)
             else:
                 stages["prices"] = {"source_rows": len(prices), "date": str(d)}
                 stages["benchmarks"] = {
@@ -237,7 +245,7 @@ class CloudCollector:
                     "date": str(d),
                 }
                 stages["surveillance"] = {"source_rows": len(states)}
-        return {"status": "SUCCESS", "stages": stages}
+        return {"status": "SUCCESS" if coverage_complete else "PARTIAL", "stages": stages}
 
     def references(self, day, *, apply=False):
         stages = {}
@@ -433,7 +441,7 @@ class CloudCollector:
         reference_day = self.now.date() if apply and self.catch_up_date else day
         ref = self.references(reference_day, apply=apply)
         result["stages"].update(ref["stages"])
-        result["status"] = ref["status"]
+        result["status"] = 'SUCCESS' if result['status'] == ref['status'] == 'SUCCESS' else 'PARTIAL'
         if apply:
             result["stages"]["classifications"] = self.store.classifications(
                 self.http, reference_day, limit=self.max_classifications

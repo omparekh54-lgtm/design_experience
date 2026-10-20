@@ -1,6 +1,6 @@
 # Phase 3 — Cloud deployment
 
-Status: the isolated Neon copy, derived share-view repair, writable collection overlay and read-only status role are verified. Private source archival passed the actual hosted privacy and checksum checks. The shareholding parser defect found by that run is repaired and merged; the complete hosted preflight must be repeated. Guarded service cutover and collection catch-up remain pending. No paper campaign has started. The dated sections below preserve earlier deployment evidence; the latest receipt is `docs/cloud_deployment_validation_2026-10-20.json`.
+Status: the existing free API and SSR dashboard are live on Neon. Guarded startup, database readiness, read-only API credentials and controlled releases are applied. The combined hosted preflight passed. Collection-only scheduling is enabled; initial full-universe catch-up is still being verified. No PAPER campaign has started.
 
 ## Prepared configuration
 
@@ -337,3 +337,78 @@ shareholding and classification samples. The receipt includes source hashes
 and observation times. This ran in the Codex runtime without database writes
 or private archival; it does not replace the pending combined hosted preflight
 or full-universe ingestion and catch-up evidence.
+
+
+## Live Neon cutover and collection activation (2026-10-20 UTC)
+
+The user authorized the specific read-only Neon credential transfer by asking to
+continue after the explicit approval request. The Render environment merge
+succeeded without printing or persisting credentials in this repository. The
+API uses `pms_status`, `PMS_API_READ_ONLY=1` and verified TLS. Database activity
+confirmed two sessions from that role. No writer role or owner credential was
+given to the public API.
+
+The API settings are applied: `pip install -r requirements-ops.txt`,
+`python scripts/start_cloud_api.py`, health path `/ready`, auto-deploy off.
+Deploy `dep-dbbhd3m7bikc738j0g5g` is live at revision `76a6ba9`. Health, readiness,
+overview and stock-list HTTP reads returned 200. The dashboard uses `npm ci`,
+has auto-deploy off, and deploy `dep-dbbhggnavr4c73dtcla0` is live at `ea1a154`.
+Browser verification shows the API reachable and new entries locked.
+
+Combined hosted preflight `39386151246` passed database/TLS, private archive
+privacy/checksums and the completed 2026-10-19 official source sample. It is not
+full-universe ingestion evidence. The private bucket measured 50,733,841 bytes.
+Render billing showed Hobby, no card on file, 15.38/750 free instance hours,
+111/500 included pipeline minutes, 17MB/5GB bandwidth, and zero current service,
+datastore and pipeline charges. These are current observations, not future
+uptime or growth guarantees.
+
+Repository variable `PMS_CLOUD_COLLECTION_ENABLED=true` is applied.
+`PMS_CLOUD_PAPER_ENABLED` is absent, so daily data attempts at 19:07, 19:27 and
+19:47 IST cannot start the PAPER lifecycle. Shared source Supabase is untouched.
+
+PR26 adds manual, Neon-pinned initial catch-up for a past completed session
+within seven days, at most six resumable batches. Current reference snapshots
+retain today's observation date. Each batch checks locked safety, database
+reserve and private archival; it never calls PAPER execution. All five CI jobs
+passed (`39386404904`); local tests then passed 744 with 5 skipped.
+
+The actual first catch-up `39386729186` stopped at the master ISIN guard before
+market imports. Official master and detailed quotes independently confirmed six
+current identifiers. The scoped repair in `docs/deployment_sql/013_reviewed_isin_refresh.sql`
+was rehearsed with a savepoint/rollback, then applied only in the isolated PMS
+copy. It preserves old ISINs, stable instrument IDs, external security links
+and all 747,098 prior prices. The review and source hashes are recorded in
+`docs/isin_identity_review_2026-10-20.json`. Event effective dates and corporate
+action adjustment factors are not inferred by this current-identity review.
+Explicitly reviewed prior identifiers may be used only in completed price
+archives through 2026-10-19; unknown master changes still fail closed.
+
+Full-universe catch-up, remaining source exceptions and measured data growth
+must pass before Phase 3 can be marked complete. The old failed receipts above
+are preserved as historical evidence.
+
+PR27's historical-price identity handling passed all five CI jobs in run
+`39387817266` (745 local tests passed, 5 skipped) and merged at `cc769e3`.
+Initial catch-up resumed in hosted run `39388234721`, worker journal
+`8fe8edbe-c625-4582-9f8c-fb0e65404e00`. Its result, not dispatch alone, determines
+catch-up completion. The source guard was retained and the exact reviewed
+current-identifier refresh is applied; no additional API privileges were given.
+
+The resumed run `39388234721` stopped on explicit 2026-10-13 price coverage
+after committing 2,592 sourced bars and expanding the master to 2,620
+instruments. Twelve active symbols were absent from both the official UDiFF
+archive and the independent security-wise daily report. No zero-volume candles
+or suspension states were fabricated. Raw source evidence also linked GFSTEELS
+to TIKONA and HEGAM to HEG by unique ISIN, with matching dated surveillance
+records. CCAVENUE's historical surveillance identity remains unverified.
+Details and hashes are in `docs/cloud_price_exceptions_2026-10-20.json`.
+
+The collector now retains PARTIAL coverage while proceeding with independent
+reference feeds and the remaining dated archives. Successful references cannot
+promote incomplete price coverage to SUCCESS. Dated ticker mappings require an
+unambiguous current or explicitly reviewed ISIN and reject conflicting source
+statuses. Catch-up stops repeating batches once all reference queues are empty
+even if a historical price exception remains; its exit status still fails.
+This enables useful unattended repair without hiding the acceptance blocker.
+Local suite: 747 passed, 5 skipped. Full Phase-3 acceptance is still pending.
