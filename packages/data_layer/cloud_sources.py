@@ -405,16 +405,22 @@ def fetch_classification(http, symbol, isin):
         if quote.get("symbol") != symbol:
             raise SourceError("classification_identity_mismatch")
         identity_basis = 'DETAILED_QUOTE'
+        identity_review = None
         if quote.get("isinCode") != isin:
             # Call-auction quotes can omit the ISIN. Only accept an absent value
             # when the separate official metadata binds this exact current ISIN,
             # symbol, series and market. An explicit conflicting ISIN still fails.
             if (quote.get('isinCode') not in {None, ''}
-                    or metadata.get('symbol') != symbol or metadata.get('isin') != isin
+                    or metadata.get('symbol') != symbol
                     or quote.get('series') != item
                     or quote.get('marketType') != metadata.get('marketType')):
                 raise SourceError("classification_identity_mismatch")
             identity_basis = 'METADATA_AND_QUOTE'
+            if metadata.get('isin') != isin:
+                from packages.data_layer.classification_identity import reviewed_classification_identity
+                identity_review = reviewed_classification_identity(
+                    http, metadata_doc, metadata, symbol, isin, item)
+                identity_basis = 'REVIEWED_METADATA_LIVE_MASTER_AND_QUOTE'
         sector = sec.get("sector") or sec.get("macro")
         if isinstance(sector, str) and sector.upper() not in {
             "",
@@ -431,6 +437,7 @@ def fetch_classification(http, symbol, isin):
                 series=item,
                 identity_basis=identity_basis,
                 metadata_sha256=metadata_doc.sha256,
+                identity_review=identity_review,
                 is_suspended=str(sec.get("isSuspended")).lower()
                 in {"true", "suspended"},
             )

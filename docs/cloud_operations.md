@@ -110,3 +110,25 @@ Machine-readable evidence and archive hashes are in
 consecutive unattended sessions remain Phase 6. The API's older static
 restore-evidence label is not wired to these private recovery receipts; the
 verified workflow receipt and this runbook are the Phase-5 evidence boundary.
+
+## Catch-up source verification follow-up (20 October)
+
+Read-only run `39430574188` checked all 4,447 required source items with no
+HTTP access failures. It passed 4,445 and blocked two current classifications:
+SUPREMEENG and TIRUPATIFL. The import job was skipped, so this run did not
+write collection data or enable PAPER.
+
+Their Next API metadata contains former ISINs while the live official equity
+master identifies the same company and series with the current ISIN. The
+call-auction detailed quotes omit ISINs. The two exact metadata payload hashes
+are reviewed in `reviewed_classification_identities.json`. Only those payloads
+can use the live-master fallback, which independently checks current ISIN,
+symbol, company name and series; the detailed quote must still match symbol,
+series and market and have no explicit conflicting ISIN. Changed metadata or
+master identity blocks. Evidence is retained in classification provenance.
+This authorizes current classifications only, with the existing next-day
+effective date. It does not authorize historical prices, filings, trading,
+instrument identity changes, or historical sector reconstruction.
+
+A subsequent full successful verification and actual import receipt are still
+required to finish Phase 3. The prior run is not a completed import.
