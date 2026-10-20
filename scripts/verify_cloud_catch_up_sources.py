@@ -11,6 +11,7 @@ from pathlib import Path
 import sys
 import threading
 import time
+from urllib.parse import urlparse
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from sqlalchemy import text
@@ -47,17 +48,32 @@ def classification_due(row, day):
 
 class SourceBudget:
     def __init__(self):
-        self.deadline = time.monotonic() + 45 * 60
+        self.deadline = time.monotonic() + 90 * 60
         self.bytes = 0
         self.lock = threading.Lock()
+        self.denials = {}
+        self.blocked = False
 
     def http(self):
         budget = self
         class BoundedHTTP(OfficialHTTP):
             def fetch(self, url):
-                self.deadline = min(self.deadline, budget.deadline)
-                doc = super().fetch(url)
                 with budget.lock:
+                    if budget.blocked:
+                        raise SourceError('preflight_source_access_denied')
+                self.deadline = min(self.deadline, budget.deadline)
+                host = urlparse(url).hostname
+                try:
+                    doc = super().fetch(url)
+                except SourceError as exc:
+                    if str(exc) == 'source_http_403':
+                        with budget.lock:
+                            budget.denials[host] = budget.denials.get(host, 0) + 1
+                            if budget.denials[host] >= 3:
+                                budget.blocked = True
+                    raise
+                with budget.lock:
+                    budget.denials[host] = 0
                     budget.bytes += doc.size
                     if budget.bytes > 1024 * 1024 * 1024:
                         raise SourceError('preflight_download_budget_exceeded')
@@ -158,8 +174,13 @@ def verify(engine, target, *, now=None, workers=8):
             if len(report['checks']) % 100 == 0:
                 print(json.dumps({'checked': len(report['checks']), 'required': len(tasks),
                                   'codes': dict(Counter(r['code'] for r in report['checks']))}), flush=True)
+            if budget.blocked:
+                for queued in futures:
+                    queued.cancel()
+                report['error_code'] = 'preflight_source_access_denied'
+                break
     errors = [r for r in report['checks'] if r['code'] != 'OK']
-    report.update(status='BLOCKED' if errors else 'SOURCE_CHECKS_PASSED',
+    report.update(status='BLOCKED' if errors or len(report['checks']) != len(tasks) else 'SOURCE_CHECKS_PASSED',
                   errors=errors, downloaded_bytes=budget.bytes, finished_at=datetime.now(IST).isoformat(),
                   limitations=['Read-only source verification; not a completed data import or PAPER permission'])
     return report
