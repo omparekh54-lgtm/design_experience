@@ -30,7 +30,7 @@ def test_current_backup_download_restore_and_role_denial(tmp_path):
         c.execute(text('CREATE SCHEMA pms'))
         for table in sorted(module.PUBLIC):
             c.execute(text(f'CREATE TABLE public.{table}(id bigserial PRIMARY KEY,payload jsonb)'))
-            c.execute(text(f"INSERT INTO public.{table}(payload) VALUES ('{{\"a\":1}}')"))
+            c.execute(text(f"INSERT INTO public.{table}(payload) VALUES (cast(:payload as jsonb))"), {'payload':'{"a":1}'})
             c.execute(text(f'CREATE VIEW pms.v_{table} AS SELECT * FROM public.{table}'))
         c.execute(text('CREATE TABLE pms.instruments(id bigserial PRIMARY KEY,security_id bigint REFERENCES public.securities(id))'))
         c.execute(text('INSERT INTO pms.instruments(security_id) VALUES(1)'))
