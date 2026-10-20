@@ -740,6 +740,7 @@ class CloudStore:
                     "is_suspended": classification["is_suspended"],
                     "identity_basis": classification.get('identity_basis', 'DETAILED_QUOTE'),
                     "metadata_sha256": classification.get('metadata_sha256'),
+                    "identity_review": classification.get('identity_review'),
                 }
                 with self.engine.begin() as c:
                     self.execute(
