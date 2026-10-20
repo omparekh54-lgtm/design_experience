@@ -307,6 +307,36 @@ def test_financial_truncation_and_ignored_filters_block(kind):
         paged_financials(HTTP(), DAY, DAY, max_pages=3)
 
 
+def test_financial_pagination_restarts_whole_snapshot_after_live_count_changes():
+    class HTTP:
+        def __init__(self):
+            self.snapshot=0
+            self.calls=[]
+        def api(self,*a,**k):
+            page=k['page']
+            if page==1:self.snapshot+=1
+            self.calls.append((self.snapshot,page))
+            return document({'data':[financial_row(str(page))],
+                'totalCount':3 if self.snapshot==1 and page==2 else 2,'page':page-1})
+    h=HTTP()
+    rows=paged_financials(h,DAY,DAY,max_pages=3)
+    assert len(rows)==2 and h.calls==[(1,1),(1,2),(2,1),(2,2)]
+
+
+def test_financial_pagination_continuous_changes_remain_blocked_after_three_attempts():
+    class HTTP:
+        def __init__(self):self.calls=0
+        def api(self,*a,**k):
+            self.calls+=1
+            page=k['page']
+            return document({'data':[financial_row(str(page))],
+                'totalCount':2 if page==1 else 3,'page':page-1})
+    h=HTTP()
+    with pytest.raises(SourceError,match='pagination_changed'):
+        paged_financials(h,DAY,DAY,max_pages=3)
+    assert h.calls==6
+
+
 def shp_xml(
     *,
     pledged=None,

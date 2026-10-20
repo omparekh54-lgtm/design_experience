@@ -1,6 +1,6 @@
 {
   "date": "2026-10-20",
-  "updated_at_utc": "2026-10-20T07:51:02.517372+00:00",
+  "updated_at_utc": "2026-10-20T08:02:33.737588+00:00",
   "status": "LIVE_NEON_STATUS_SERVICES_COLLECTION_ENABLED_CATCH_UP_PENDING",
   "campaign_started": false,
   "paper_enabled": false,
@@ -71,7 +71,7 @@
     "anonymous_read_denied": true
   },
   "tests_local": {
-    "passed": 748,
+    "passed": 750,
     "skipped": 5
   },
   "pending": [
@@ -356,10 +356,16 @@
     "identity_repair_applied": true,
     "resumed_error_code": "price_universe_coverage_incomplete",
     "instruments_after_master": 2620,
-    "cloud_prices_written": 2592,
+    "cloud_prices_written": 12980,
     "price_session": "2026-10-13",
     "missing_prices": 12,
-    "uncovered_surveillance_before_symbol_mapping": 3
+    "uncovered_surveillance_before_symbol_mapping": 3,
+    "independent_feeds_run": 39390092037,
+    "independent_feeds_worker": "6321b248-4f3b-4090-9e33-e79b2d5e83ee",
+    "independent_feeds_result": "FAILED",
+    "independent_feeds_error": "financial_pagination_changed",
+    "latest_cloud_date": "2026-10-19",
+    "database_bytes": 581558272
   },
   "hegam_identity_repair": {
     "applied": true,
