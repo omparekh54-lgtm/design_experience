@@ -584,6 +584,13 @@ def test_master_isin_conflict_cannot_rewrite_identity():
     assert all(not q.startswith(("update", "insert")) for q, p in e.calls)
 
 
+def test_master_cannot_create_second_active_identity_for_same_isin():
+    s=CloudStore(None)
+    s.instruments=lambda:{'OLD':{'isin':'INE545A01024'}}
+    with pytest.raises(SourceError,match='symbol_change_requires_review'):
+        s.master({'NEW':{'isin':'INE545A01024'}},document('x'))
+
+
 def test_reviewed_old_price_identity_is_bounded_and_does_not_change_master_gate():
     from packages.data_layer.cloud_storage import reviewed_price_isin_matches
     r = dict(isin='INE0B9K01033',metadata={'reviewed_isin_history': [dict(

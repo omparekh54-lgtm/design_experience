@@ -161,6 +161,9 @@ class CloudStore:
         ]
         if conflicts:
             raise SourceError("master_isin_change_requires_review")
+        if any(s not in known and any(i['isin'] == r['isin'] for i in known.values())
+               for s,r in rows.items()):
+            raise SourceError('master_symbol_change_requires_review')
         with self.engine.begin() as c:
             for symbol, r in rows.items():
                 if symbol in known:

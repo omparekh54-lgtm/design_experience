@@ -412,3 +412,14 @@ statuses. Catch-up stops repeating batches once all reference queues are empty
 even if a historical price exception remains; its exit status still fails.
 This enables useful unattended repair without hiding the acceptance blocker.
 Local suite: 747 passed, 5 skipped. Full Phase-3 acceptance is still pending.
+
+The live master pass had also created a second HEG/HEGAM instrument for the same
+ISIN. This is an ingestion defect: the master now refuses a new symbol that
+would duplicate an existing active ISIN pending review. The reviewed repair
+`014_reviewed_hegam_identity.sql` was rehearsed and applied: preserve original
+instrument 307 and its external history link, update its current source symbol
+to HEGAM, move the cloud bar to that original ID, and retain the ingestion-only
+duplicate 2419 inactive with its provenance. No row was deleted. All 749,690
+price rows (747,098 legacy plus 2,592 cloud) remain; 2,619 active instruments
+have no duplicate active ISINs. PAPER remains locked. Local tests: 748 passed,
+5 skipped.

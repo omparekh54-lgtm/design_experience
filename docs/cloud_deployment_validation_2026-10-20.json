@@ -71,7 +71,7 @@
     "anonymous_read_denied": true
   },
   "tests_local": {
-    "passed": 747,
+    "passed": 748,
     "skipped": 5
   },
   "pending": [
@@ -360,5 +360,17 @@
     "price_session": "2026-10-13",
     "missing_prices": 12,
     "uncovered_surveillance_before_symbol_mapping": 3
+  },
+  "hegam_identity_repair": {
+    "applied": true,
+    "legacy_instrument_id": 307,
+    "duplicate_id": 2419,
+    "duplicate_preserved_inactive": true,
+    "external_mapping_preserved": true,
+    "cloud_rows_preserved": 2592,
+    "all_price_rows_preserved": 749690,
+    "active_instruments": 2619,
+    "active_duplicate_isins": 0,
+    "rollback_rehearsal_passed": true
   }
 }
