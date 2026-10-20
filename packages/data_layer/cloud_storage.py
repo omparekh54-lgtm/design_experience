@@ -483,7 +483,8 @@ class CloudStore:
             where p.provider='NSE' and p.dataset=:pending and not exists(
             select 1 from pms.provider_snapshots a where a.provider='NSE' and a.dataset=:ack
             and a.metadata->>'record_key'=p.metadata->>'record_key' and a.metadata->>'complete'='true')
-            order by p.observed_at,p.id"""
+            order by coalesce((p.metadata->>'last_attempted_at')::timestamptz,
+                              '-infinity'::timestamptz),p.observed_at,p.id"""
                     ),
                     {"pending": pending_dataset, "ack": ack_dataset},
                 )
@@ -491,6 +492,18 @@ class CloudStore:
                 .all()
             )
         return [r["record"] for r in rows]
+
+    def pending_failed(self, dataset, key):
+        # Move failed records behind untouched discoveries without acknowledging
+        # them or losing the original source record. Remaining still includes all
+        # failures; a retry is never a completion waiver.
+        if dataset not in {'CLOUD_FINANCIAL_PENDING', 'CLOUD_SHAREHOLDING_PENDING'}:
+            raise SourceError('unsupported_pending_dataset')
+        with self.engine.begin() as c:
+            self.execute(c, """update pms.provider_snapshots
+                set metadata=metadata || jsonb_build_object('last_attempted_at',now())
+                where provider='NSE' and dataset=:dataset and metadata->>'record_key'=:key""",
+                {'dataset': dataset, 'key': key})
 
     def financial_window(self, day):
         with self.engine.connect() as c:
@@ -524,7 +537,8 @@ class CloudStore:
             params = {
                 **values,
                 "id": known[symbol]["id"],
-                "raw": encoded({**raw, "official_xml_sha256": doc.sha256}),
+                "raw": encoded({**raw, "official_xml_sha256": doc.sha256,
+                                "identity_review": values.get('identity_review')}),
             }
             self.execute(
                 c,
@@ -623,12 +637,11 @@ class CloudStore:
             ]
 
     def membership(self, members, doc, day):
+        from packages.data_layer.index_membership import equity_membership
+
         known = self.instruments()
-        if any(
-            r["Symbol"] not in known or known[r["Symbol"]]["isin"] != r["ISIN Code"]
-            for r in members
-        ):
-            raise SourceError("index_membership_identity_unresolved")
+        source_members = members
+        members, excluded = equity_membership(members, known)
         # Current snapshots are knowable now, not at past index inclusion dates.
         effective = doc.observed_at.date() + timedelta(days=1)
         with self.engine.begin() as c:
@@ -673,12 +686,15 @@ class CloudStore:
                 {
                     "observed_on": day,
                     "effective_from": effective,
-                    "source_rows": len(members),
+                    "source_rows": len(source_members),
+                    "equity_members": len(members),
+                    "excluded_from_equity_universe": excluded,
                     "historical_reconstruction": False,
-                    "members": members,
+                    "members": source_members,
                 },
             )
-        return {"source_rows": len(members), "effective_from": str(effective)}
+        return {"source_rows": len(source_members), "equity_members": len(members),
+                "excluded_from_equity_universe": excluded, "effective_from": str(effective)}
 
     def classifications(self, http, day, *, limit):
         from packages.data_layer.cloud_sources import fetch_classification
@@ -706,6 +722,9 @@ class CloudStore:
                 overdue.add(s)
             if due:
                 candidates.append((s, r))
+        candidates.sort(key=lambda item: (
+            (item[1].get('metadata') or {}).get('classification_last_attempted_at', ''),
+            item[1]['id']))
         errors = []
         written = 0
         for s, r in candidates[:limit]:
@@ -719,6 +738,8 @@ class CloudStore:
                     "industry": classification["industry"],
                     "series": classification["series"],
                     "is_suspended": classification["is_suspended"],
+                    "identity_basis": classification.get('identity_basis', 'DETAILED_QUOTE'),
+                    "metadata_sha256": classification.get('metadata_sha256'),
                 }
                 with self.engine.begin() as c:
                     self.execute(
@@ -778,7 +799,12 @@ class CloudStore:
                 written += 1
                 overdue.discard(s)
             except Exception as exc:
-                errors.append(type(exc).__name__)
+                with self.engine.begin() as c:
+                    self.execute(c, """update pms.instruments
+                        set metadata=metadata || jsonb_build_object('classification_last_attempted_at',now())
+                        where id=:id""", {'id': r['id']})
+                errors.append({'symbol': s, 'code': str(exc) if isinstance(exc, SourceError)
+                               else 'classification_unavailable', 'error_type': type(exc).__name__})
         return {
             "due": len(candidates),
             "written": written,

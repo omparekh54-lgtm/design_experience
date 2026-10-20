@@ -1,0 +1,42 @@
+name: PMS catch-up source preflight
+
+on:
+  workflow_dispatch:
+    inputs:
+      session_date:
+        description: Past completed session to verify (YYYY-MM-DD)
+        required: true
+        type: string
+
+concurrency:
+  group: pms-catch-up-source-preflight
+  cancel-in-progress: false
+
+jobs:
+  source-preflight:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 55
+    permissions:
+      contents: read
+    env:
+      DATABASE_URL: ${{ secrets.NEON_PMS_DATABASE_URL }}
+      PMS_DATABASE_VERIFY_FULL: '1'
+      SSL_CERT_FILE: /etc/ssl/certs/ca-certificates.crt
+      SESSION_DATE: ${{ inputs.session_date }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Verify full source backlog without database writes
+        run: python scripts/verify_cloud_catch_up_sources.py --date "$SESSION_DATE" --output source-preflight/receipt.json
+      - name: Preserve sanitized verification receipt
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pms-catch-up-source-preflight-${{ github.run_id }}
+          path: source-preflight
+          if-no-files-found: warn
+          retention-days: 14

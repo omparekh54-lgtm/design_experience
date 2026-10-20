@@ -362,9 +362,8 @@ def parse_master(body):
 
 def fetch_classification(http, symbol, isin):
     path = "NextApi/apiClient/GetQuoteApi"
-    metadata = json.loads(
-        http.api(path, functionName="getMetaData", symbol=symbol).body
-    )
+    metadata_doc = http.api(path, functionName="getMetaData", symbol=symbol)
+    metadata = json.loads(metadata_doc.body)
     if not isinstance(metadata, dict) or (
         metadata.get("symbol") and metadata["symbol"] != symbol
     ):
@@ -394,8 +393,23 @@ def fetch_classification(http, symbol, isin):
         row = rows[0] if isinstance(rows, list) and rows else {}
         quote = row.get("metaData") or {}
         sec = row.get("secInfo") or {}
-        if quote.get("symbol") != symbol or quote.get("isinCode") != isin:
+        if not quote and not sec:
+            # Some unavailable series return a populated response envelope with
+            # null fields instead of 404. Continue to other official series.
+            continue
+        if quote.get("symbol") != symbol:
             raise SourceError("classification_identity_mismatch")
+        identity_basis = 'DETAILED_QUOTE'
+        if quote.get("isinCode") != isin:
+            # Call-auction quotes can omit the ISIN. Only accept an absent value
+            # when the separate official metadata binds this exact current ISIN,
+            # symbol, series and market. An explicit conflicting ISIN still fails.
+            if (quote.get('isinCode') not in {None, ''}
+                    or metadata.get('symbol') != symbol or metadata.get('isin') != isin
+                    or quote.get('series') != item
+                    or quote.get('marketType') != metadata.get('marketType')):
+                raise SourceError("classification_identity_mismatch")
+            identity_basis = 'METADATA_AND_QUOTE'
         sector = sec.get("sector") or sec.get("macro")
         if isinstance(sector, str) and sector.upper() not in {
             "",
@@ -410,6 +424,8 @@ def fetch_classification(http, symbol, isin):
                 or sec.get("industry")
                 or sec.get("basicIndustry"),
                 series=item,
+                identity_basis=identity_basis,
+                metadata_sha256=metadata_doc.sha256,
                 is_suspended=str(sec.get("isSuspended")).lower()
                 in {"true", "suspended"},
             )
@@ -504,12 +520,38 @@ def _paged_financials_once(http, start, end, *, max_pages=50):
     raise SourceError("financial_page_budget_exceeded")
 
 
-def parse_shareholding(xml, record):
+def parse_shareholding(xml, record, *, expected_isin=None):
     if b"<!DOCTYPE" in xml.upper() or b"<!ENTITY" in xml.upper():
         raise SourceError("xbrl_entities_forbidden")
     root = ET.fromstring(xml)
     local = lambda s: s.rsplit("}", 1)[-1].split(":")[-1]
     period = parse_day(record["date"])
+    identity_review = None
+    if expected_isin is not None:
+        from packages.data_layer.shareholding_identity import reviewed_identity
+        record, expected_isin, identity_review = reviewed_identity(xml, record, expected_isin)
+        if identity_review and identity_review.get('xml_period'):
+            # Retain the actual XML context date, never backdate listing-day
+            # share counts to the API summary's earlier quarter-end.
+            period = parse_day(identity_review['xml_period'])
+        # The API listing can retain a pre-split ISIN. The filing itself must
+        # bind the current listing identity in a single period-matched header.
+        headers = []
+        for c in root:
+            if local(c.tag) != "context" or any(
+                local(e.tag) in {"explicitMember", "typedMember"} for e in c.iter()
+            ):
+                continue
+            ends = [e.text for e in c.iter() if local(e.tag) in {"instant", "endDate"}]
+            if ends != [period.isoformat()]:
+                continue
+            values = lambda name: {e.text for e in root if local(e.tag) == name
+                                   and e.attrib.get("contextRef") == c.attrib.get("id")}
+            if values("Symbol") == {record["symbol"]} and values("ISIN") == {expected_isin}:
+                headers.append(c)
+        if not headers:
+            raise SourceError("shareholding_isin_mismatch")
+        record = {**record, "isin": expected_isin}
     # Dual-listed issuers may use BSE's numeric ScripCode as the XBRL entity
     # identifier even though NSE publishes the document. Admit that identity only
     # when one undimensioned header context links the same code, NSE symbol and
@@ -581,16 +623,71 @@ def parse_shareholding(xml, record):
     ]
     total = [("CategoryOfShareholdersAxis", "ShareholdingPatternMember")]
     shares = number(fact("NumberOfShares", total), integer=True, minimum=1)
-    promoter_shares = number(fact("NumberOfShares", promoter), integer=True)
+    reported_shares = shares
+    drs = fact("NumberOfSharesUnderlyingOutstandingDepositoryReceipts", total, optional=True)
+    if drs is not None and number(drs, integer=True):
+        # SCRR shareholding excludes depository receipts. Reconcile all reported
+        # counts before using the equity denominator; never relax the percentage gate.
+        paid = number(fact("NumberOfFullyPaidUpEquityShares", total), integer=True)
+        partly = fact("NumberOfPartlyPaidUpEquityShares", total, optional=True)
+        equity = paid + (number(partly, integer=True) if partly is not None else 0)
+        if equity <= 0 or equity + number(drs, integer=True) != shares:
+            raise SourceError("shareholding_totals_invalid")
+        shares = equity
+    public = fact("NumberOfShares", [
+        ("CategoryOfShareholdersAxis", "PublicShareholdingMember")], optional=True)
+    nonpublic = fact("NumberOfShares", [
+        ("CategoryOfShareholdersAxis", "SharesHeldByNonPromoterNonPublicShareholdersMember")],
+        optional=True)
+    nonpublic_count = number(nonpublic, integer=True) if nonpublic is not None else 0
+    promoter_count = fact("NumberOfShares", promoter, optional=True)
+    if promoter_count is None:
+        # Professionally managed issuers can omit the empty promoter section.
+        # Require an explicit zero summary and a full reconciliation of the
+        # non-overlapping public/non-public categories before deriving zero.
+        if (number(record["pr_and_prgrp"]) != 0 or public is None
+                or number(public, integer=True) + nonpublic_count != reported_shares):
+            raise SourceError("shareholding_promoter_zero_unverified")
+        promoter_shares = Decimal(0)
+    else:
+        promoter_shares = number(promoter_count, integer=True)
     if promoter_shares > shares:
         raise SourceError("shareholding_totals_invalid")
-    percentage = Decimal(100) * promoter_shares / shares
+    denominator = shares
+    if public is not None:
+        if promoter_shares + number(public, integer=True) + nonpublic_count != reported_shares:
+            raise SourceError("shareholding_totals_invalid")
+    declared = fact('ShareholdingAsAPercentageOfTotalNumberOfShares', promoter, optional=True)
+    if declared is not None:
+        declared_pct = Decimal(100) * number(declared)
+        if declared_pct > 100:
+            raise SourceError('shareholding_xml_percentage_mismatch')
+        # Exchange taxonomies report percentages on different table bases.
+        # Resolve the base from the XML's own percentage and reconciled category
+        # totals, never by selecting a base that happens to fit the API summary.
+        bases = {shares, reported_shares}
+        if public is not None:
+            bases.add(promoter_shares + number(public, integer=True))
+        bases.discard(0)
+        denominator = min(bases, key=lambda n: abs(Decimal(100) * promoter_shares / n - declared_pct))
+        rounding = min(Decimal('.1'), max(Decimal('.005'),
+            Decimal(50).scaleb(Decimal(declared).as_tuple().exponent)))
+        if abs(Decimal(100) * promoter_shares / denominator - declared_pct) > rounding:
+            raise SourceError('shareholding_xml_percentage_mismatch')
+    if denominator <= 0:
+        raise SourceError("shareholding_totals_invalid")
+    percentage = Decimal(100) * promoter_shares / denominator
     # Listing percentage is rounded; compare within 0.1 percentage point.
     if abs(percentage - number(record["pr_and_prgrp"])) > Decimal("0.1"):
         raise SourceError("shareholding_percentage_mismatch")
     pledged = fact(
         "NumberOfSharesPledgedOrOtherwiseEncumbered", promoter, optional=True
     )
+    encumbered = fact("NumberOfSharesEncumbered", promoter, optional=True)
+    if pledged is not None and encumbered is not None and number(pledged) != number(encumbered):
+        raise SourceError("shareholding_pledge_ambiguous")
+    if pledged is None:
+        pledged = encumbered
     if pledged is not None:
         pledge_count = number(pledged, integer=True)
         if pledge_count > promoter_shares or (not promoter_shares and pledge_count):
@@ -612,5 +709,6 @@ def parse_shareholding(xml, record):
         promoter_holding_pct=percentage,
         promoter_pledge_pct=pledge,
         total_shares=shares,
+        identity_review=identity_review,
         revision_number=1 if record.get("revisedData") == "Y" else 0,
     )

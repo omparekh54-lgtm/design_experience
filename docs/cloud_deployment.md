@@ -411,7 +411,7 @@ passed (`39386404904`); local tests then passed 744 with 5 skipped.
 
 The initial reference backlog contains hundreds of financial filings and nearly
 two thousand shareholding index records. Initial catch-up now uses up to 24
-smaller passes (100 filings per feed and 100 classifications per pass), with a
+smaller passes (100 filings per feed and 150 classifications per pass), with a
 six-hour maximum hosted job. This is a one-time, manually launched free GitHub
 runner, not an additional recurring scheduler or paid service. Every pass keeps
 the original 25-minute source, byte, database-reserve and locked-safety bounds.
