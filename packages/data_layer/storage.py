@@ -13,7 +13,7 @@ class InMemoryStorage:
     def __init__(self) -> None:
         self.instruments: dict[str, Instrument] = {}
         self.candles: dict[tuple[str, str, str], Candle] = {}
-        self.filings: dict[tuple[str, datetime, int, str], FinancialFiling] = {}
+        self.filings: dict[tuple, FinancialFiling] = {}
         self.surveillance: list[SurveillanceState] = []
 
     def upsert_instruments(self, instruments: Iterable[Instrument]) -> int:
@@ -40,6 +40,9 @@ class InMemoryStorage:
         for filing in filings:
             key = (
                 filing.instrument_id,
+                filing.period_end,
+                filing.filing_kind,
+                filing.statement_scope,
                 filing.filed_at,
                 filing.version,
                 filing.source,

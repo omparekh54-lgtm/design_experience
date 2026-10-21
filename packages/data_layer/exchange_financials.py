@@ -2,17 +2,21 @@ from __future__ import annotations
 
 import os
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Any, Iterable
 from urllib.parse import urljoin, urlparse
+from zoneinfo import ZoneInfo
 
 import httpx
 from bs4 import BeautifulSoup
 
 from .models import FinancialFiling
-from .xbrl import FACT_ALIASES, extract_canonical_financials, parse_xbrl_facts
+from .xbrl import EXTRACTION_VERSION, FACT_ALIASES, extract_canonical_financials, parse_xbrl_facts
+
+
+FINANCIAL_ACK_DATASET = "CLOUD_FINANCIAL_XML_V2"
 
 
 IST_FORMATS = (
@@ -70,15 +74,15 @@ def _parse_datetime(value: Any) -> datetime | None:
     if value in (None, "", "-"):
         return None
     if isinstance(value, datetime):
-        return value
+        return value.astimezone(ZoneInfo("Asia/Kolkata")).replace(tzinfo=None) if value.tzinfo else value
     text = str(value).strip().replace("  ", " ")
     if text.endswith("Z"):
         try:
-            return datetime.fromisoformat(text.replace("Z", "+00:00")).replace(tzinfo=None)
+            return _parse_datetime(datetime.fromisoformat(text.replace("Z", "+00:00")))
         except ValueError:
             pass
     try:
-        return datetime.fromisoformat(text).replace(tzinfo=None)
+        return _parse_datetime(datetime.fromisoformat(text))
     except ValueError:
         pass
     for fmt in IST_FORMATS:
@@ -108,6 +112,20 @@ def _parse_date(value: Any) -> date | None:
 def _scope(value: Any) -> str:
     text = str(value or "Standalone").strip().lower()
     return "consolidated" if "consol" in text else "standalone"
+
+
+def _filing_kind(row: dict[str, Any]) -> str:
+    value = _pick(row, "filing_kind", "filingKind", "periodType", "typeOfResult", "resultType", "period_type")
+    label = _norm_key(str(value or "quarter"))
+    if label in {"annual", "annually", "year", "yearly", "fullyear", "yearended", "financialyear"}:
+        return "annual"
+    if label in {"halfyear", "halfyearly", "sixmonths"}:
+        return "half_year"
+    if label == "ninemonths":
+        return "nine_months"
+    # Audited status, the month March, and a fiscal-year label do not prove
+    # annual duration. XML must supply a full-year context for an annual record.
+    return "quarter"
 
 
 def _submission_version(submission_type: str) -> int:
@@ -208,11 +226,14 @@ class NSEIntegratedFinancialsProvider:
         )
         if not symbol or period_end is None or filed_at is None:
             return None
-        if 'creation_Date' in row:
-            # Modern integrated payload: never date a revised/disseminated filing
-            # earlier than its latest explicit exchange publication timestamp.
-            filed_at=max(t for t in (filed_at,_parse_datetime(row.get('creation_Date')),
-                                    _parse_datetime(row.get('revised_Date'))) if t is not None)
+        publication_times = [filed_at]
+        for names in (("creation_Date", "exchangeDisseminationTime", "exchange_dissemination_time"),
+                      ("exchangeReceivedTime", "exchange_received_time"),
+                      ("revisedDateTime", "revised_date_time", "revisedAt", "revised_Date")):
+            parsed = _parse_datetime(_pick(row, *names))
+            if parsed:
+                publication_times.append(parsed)
+        filed_at = max(publication_times)
 
         submission_type = str(_pick(row, "typeOfSubmission", "submissionType", "type_of_submission", "type_Sub") or "Original")
         return ExchangeFilingRecord(
@@ -231,6 +252,7 @@ class NSEIntegratedFinancialsProvider:
             external_id=str(_pick(row, "id", "filingId", "seqId", "sequenceNo") or "") or None,
             details_uri=_absolute(self.BASE_URL, _pick(row, "details", "detailsLink", "attachment", "attchmntFile")),
             xbrl_uri=_absolute(self.BASE_URL, _pick(row, "xbrl", "xbrlLink", "xbrlFile", "xbrl_file_link")),
+            filing_kind=_filing_kind(row),
             raw_payload=row,
         )
 
@@ -282,6 +304,9 @@ class BSEFinancialResultsProvider:
         filed_at = _parse_datetime(_pick(row, "filingDateTime", "filing_date_time", "broadcastDateTime"))
         if period_end is None or filed_at is None:
             return None
+        revised_at = _parse_datetime(_pick(row, "revisedDateTime", "revised_date_time"))
+        if revised_at:
+            filed_at = max(filed_at, revised_at)
         status = str(_pick(row, "status", "submissionType") or "New")
         return ExchangeFilingRecord(
             exchange="BSE",
@@ -295,6 +320,7 @@ class BSEFinancialResultsProvider:
             revision_remarks=_pick(row, "revisionReason", "revision_reason"),
             xbrl_uri=_absolute(self.BASE_URL, _pick(row, "xbrl", "xbrlLink")),
             external_id=str(_pick(row, "id", "resultId") or "") or None,
+            filing_kind=_filing_kind(row),
             raw_payload=row,
         )
 
@@ -335,6 +361,7 @@ class BSEFinancialResultsProvider:
                     revised_at=None,
                     revision_remarks=None,
                     xbrl_uri=xbrl_links[0] if xbrl_links else None,
+                    filing_kind="annual" if re.search(r"\b(?:Annual|Yearly|Year Ended)\b", joined, re.I) and not re.search(r"\bQuarter\b", joined, re.I) else "quarter",
                     raw_payload={"cells": cells, "links": links},
                 )
             )
@@ -365,7 +392,7 @@ def filing_from_exchange_record(
         "equity": None,
         "interest_expense": None,
     }
-    raw_payload = record.raw_payload
+    raw_payload = dict(record.raw_payload)
     if xbrl:
         aliases = dict(FACT_ALIASES)
         source = urlparse(record.xbrl_uri or '')
@@ -389,8 +416,14 @@ def filing_from_exchange_record(
             # Preserve the basis; Module A excludes financial-sector issuers.
             raw_payload = {**raw_payload, 'canonical_metric_basis': {
                 'sales': basis, 'sales_fact': revenue, 'pat_fact': pat}}
+        diagnostics = {}
         canonical.update(extract_canonical_financials(
-            parse_xbrl_facts(xbrl), record.period_end, aliases=aliases))
+            parse_xbrl_facts(xbrl), record.period_end, aliases=aliases,
+            filing_kind=record.filing_kind, statement_scope=record.statement_scope,
+            diagnostics=diagnostics))
+        raw_payload["financial_extraction"] = dict(version=EXTRACTION_VERSION,
+            filing_kind=record.filing_kind, statement_scope=record.statement_scope,
+            fields=diagnostics)
 
     return FinancialFiling(
         instrument_id=record.instrument_id,
@@ -414,6 +447,32 @@ def filing_from_exchange_record(
     )
 
 
+def filings_from_exchange_record(
+    record: ExchangeFilingRecord, xbrl: bytes | str | None = None,
+) -> list[FinancialFiling]:
+    """Preserve quarter and full-year observations from a single disclosure.
+
+    Both keep the exchange filing timestamp, revision and original payload.
+    Annual records are sourced from actual full-year contexts, never inferred
+    from a March date or calculated by multiplying a quarter by four.
+    """
+    primary = filing_from_exchange_record(record, xbrl)
+    filings = [primary]
+    if xbrl:
+        other_kind = "annual" if record.filing_kind == "quarter" else "quarter"
+        other = filing_from_exchange_record(replace(record, filing_kind=other_kind), xbrl)
+        if (primary.sales is None and primary.pat is None
+                and other.sales is not None and other.pat is not None):
+            # Some exchange summaries omit the annual label. The actual XML
+            # duration, not an empty default quarter, identifies that report.
+            return [other]
+        if other.sales is not None or other.pat is not None or (
+            other_kind == "annual" and other.operating_cash_flow is not None
+        ):
+            filings.append(other)
+    return filings
+
+
 def prefer_nse_then_bse(
     nse: Iterable[FinancialFiling], bse: Iterable[FinancialFiling]
 ) -> list[FinancialFiling]:
@@ -429,6 +488,7 @@ def prefer_nse_then_bse(
             filing.instrument_id.split(":", 1)[-1],
             filing.period_end,
             filing.statement_scope,
+            filing.filing_kind,
             filing.filed_at,
             filing.version,
         )
