@@ -90,3 +90,28 @@ def test_atomic_quarter_year_upsert_reparse_and_migration_preserve_source(databa
         write(bad)
     with database.connect() as c:
         assert c.execute(text('SELECT count(*) FROM pms.financial_filings')).scalar_one() == 2
+
+
+def test_v2_overlay_hides_exact_legacy_identity_and_all_its_stale_facts(database):
+    with database.begin() as c:
+        c.execute(text('alter table pms.financial_filings rename to financial_filings_local'))
+        c.execute(text('alter table pms.financial_facts rename to financial_facts_local'))
+        c.execute(text('create table public.legacy_filings (like pms.financial_filings_local including all)'))
+        c.execute(text('create table public.legacy_facts(filing_id bigint,fact_name text,value numeric,unit text)'))
+        c.execute(text("""insert into public.legacy_filings(id,instrument_id,period_end,filing_timestamp,source,consolidated,revision_number,filing_kind,raw_payload)
+            values(1000,1,'2026-06-30','2026-08-01 12:00Z','NSE',true,1,'quarter','{}'),
+            (1001,1,'2026-06-30','2026-08-01 12:00Z','NSE',true,1,'annual','{}'),
+            (1002,1,'2026-06-30','2026-08-01 12:00Z','NSE',true,2,'quarter','{}')"""))
+        c.execute(text("insert into public.legacy_facts values(1000,'sales',999,'INR crore'),(1000,'pat',88,'INR crore'),(1001,'sales',222,'INR crore')"))
+        c.execute(text('create view pms.financial_filings as select * from pms.financial_filings_local union all select * from public.legacy_filings'))
+        c.execute(text('create view pms.financial_facts as select * from pms.financial_facts_local union all select * from public.legacy_facts'))
+        c.execute(text("""insert into pms.financial_filings_local(id,instrument_id,period_end,filing_timestamp,source,consolidated,revision_number,filing_kind,raw_payload)
+            values(1,1,'2026-06-30','2026-08-01 12:00Z','NSE',true,1,'quarter','{"financial_extraction":{"version":"FINANCIAL_XBRL_v2"}}')"""))
+        c.execute(text("insert into pms.financial_facts_local values(1,'sales',120,'INR crore')"))
+        migration=(ROOT/'migrations/014_financial_overlay_precedence.sql').read_text()
+        c.execute(text(migration));c.execute(text(migration))
+        assert c.execute(text('select id from pms.financial_filings order by id')).scalars().all()==[1,1001,1002]
+        assert c.execute(text('select filing_id,fact_name,value from pms.financial_facts order by filing_id')).all()==[(1,'sales',120),(1001,'sales',222)]
+        assert c.execute(text('select count(*) from public.legacy_filings')).scalar_one()==3
+        assert c.execute(text('select count(*) from public.legacy_facts')).scalar_one()==3
+        assert c.execute(text('select value from public.source_sentinel')).scalar_one()=='unchanged'

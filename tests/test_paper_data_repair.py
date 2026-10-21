@@ -55,3 +55,24 @@ def test_repair_refuses_enabled_entries():
         def execute(self,*args):return result
     service=PaperDataRepair(SimpleNamespace(connect=Connection),None,None)
     with pytest.raises(SourceError,match='entries_disabled'):service.locked()
+
+
+def test_sector_repair_prioritizes_missing_dated_coverage(monkeypatch):
+    from packages.data_layer.cloud_storage import CloudStore
+    import packages.data_layer.cloud_sources as sources
+    called=[]
+    class Result:
+        def scalars(self):return [1]
+    class Conn:
+        def __enter__(self):return self
+        def __exit__(self,*args):pass
+        def execute(self,*args,**kwargs):return Result()
+    engine=SimpleNamespace(connect=Conn,begin=Conn)
+    store=CloudStore(engine)
+    store.instruments=lambda: {s:dict(id=i,isin='ISIN',sector='Services',metadata={}) for i,s in [(1,'COVERED'),(2,'GAP')]}
+    store.execute=lambda *args:None
+    def fetch(*args):
+        called.append(args[1]);raise SourceError('source_unavailable')
+    monkeypatch.setattr(sources,'fetch_classification',fetch)
+    store.classifications(None,date(2026,10,22),limit=1)
+    assert called==['GAP']

@@ -725,7 +725,16 @@ class CloudStore:
                 overdue.add(s)
             if due:
                 candidates.append((s, r))
+        # Repair missing dated coverage before refreshing already-covered stocks.
+        # Rotation by last attempt still prevents a failed symbol starving others.
+        covered=set()
+        if candidates:
+            with self.engine.connect() as c:
+                covered=set(c.execute(text('''select distinct instrument_id from pms.sector_history
+                    where effective_from<=:effective and (effective_to is null or effective_to>:effective)
+                    and btrim(sector)<>'' '''),{'effective':day+timedelta(days=1)}).scalars())
         candidates.sort(key=lambda item: (
+            item[1]['id'] in covered,
             (item[1].get('metadata') or {}).get('classification_last_attempted_at', ''),
             item[1]['id']))
         errors = []

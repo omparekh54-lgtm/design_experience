@@ -3,6 +3,7 @@ on:
   push:
     branches: [main]
     paths:
+      - migrations/014_financial_overlay_precedence.sql
       - packages/pms/paper_data_repair.py
       - scripts/repair_paper_inputs.py
       - .github/workflows/pms-paper-input-repair.yml
