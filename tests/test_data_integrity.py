@@ -103,7 +103,7 @@ def auditor(monkeypatch, snapshot=None, checks=None, manifest=None):
 
 def test_registry_unique_fixed_and_complete_source_groups():
     assert (
-        len(CHECKS) == 39 and len({c.code for c in CHECKS}) == 39 and len(REVIEWS) == 5
+        len(CHECKS) == 45 and len({c.code for c in CHECKS}) == 45 and len(REVIEWS) == 5
     )
     assert {c.group for c in CHECKS} >= {
         "UNIVERSE",
@@ -156,7 +156,7 @@ def test_clean_automated_checks_require_independent_reviews(monkeypatch):
     report = auditor(monkeypatch).run()
     s = report["summary"]
     assert s["status"] == "REVIEW_REQUIRED" and s["complete"]
-    assert len(report["checks"]) == 45 and s["counts"]["REVIEW_REQUIRED"] == 5
+    assert len(report["checks"]) == 51 and s["counts"]["REVIEW_REQUIRED"] == 5
     assert s["counts"]["NOT_APPLICABLE"] == 1
     assert s["automated_checks_passed"] and not s["full_data_certification"]
     assert s["acceptance"] == "NOT_CERTIFIED"
@@ -195,7 +195,7 @@ def test_sql_failure_rolls_back_savepoint_continues_and_redacts_credentials(
     report = auditor(monkeypatch, source).run()
     failed = next(r for r in report["checks"] if r["code"] == "PRICE_VALUES")
     assert failed["status"] == "ERROR" and failed["finding_count"] is None
-    assert source.rollback_count == 1 and len(report["checks"]) == 45
+    assert source.rollback_count == 1 and len(report["checks"]) == 51
     assert report["summary"]["status"] == "FAILED" and "password" not in json.dumps(
         report
     )
@@ -209,7 +209,7 @@ def test_partial_selection_is_incomplete_and_never_passes(monkeypatch):
     report = auditor(monkeypatch, checks=CHECKS[:1]).run()
     assert (
         report["summary"]["status"] == "INCOMPLETE"
-        and report["summary"]["counts"]["NOT_RUN"] == 38
+        and report["summary"]["counts"]["NOT_RUN"] == 44
     )
     assert not report["summary"]["automated_checks_passed"]
 
@@ -221,7 +221,7 @@ def test_schema_failure_skips_dependent_queries_preserves_review_and_identity(
     report = auditor(monkeypatch, source).run()
     assert len(source.calls) == 1 and report["summary"]["counts"]["FAIL"] == 1
     assert (
-        report["summary"]["counts"]["NOT_RUN"] == 39
+        report["summary"]["counts"]["NOT_RUN"] == 45
         and report["summary"]["status"] == "INCOMPLETE"
     )
     assert report["identity"] and report["dataset"] is None
@@ -382,7 +382,7 @@ def test_api_is_read_only_bounds_pagination_and_rejects_unknown_status(monkeypat
 def test_cli_plan_offline_and_no_implicit_execution_cutoff(capsys):
     assert main(["--plan"]) == 0
     report = json.loads(capsys.readouterr().out)
-    assert len(report["checks"]) == 39 and len(report["independent_reviews"]) == 5
+    assert len(report["checks"]) == 45 and len(report["independent_reviews"]) == 5
     assert not report["source_writes"] and not report["full_certification"]
     with pytest.raises(SystemExit):
         main(["--run"])
