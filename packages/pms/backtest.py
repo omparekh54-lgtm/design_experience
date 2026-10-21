@@ -56,6 +56,10 @@ class Signal:
     signal_date: date
     signal_high: float
     signal_low: float
+    score: float = 0.0
+    stop_risk_pct: float = 0.0
+    adtv: float = 0.0
+    reentry: bool = False
 
 
 @dataclass(frozen=True)
@@ -131,12 +135,43 @@ class EventDrivenBacktester:
         self.seen_signals = set()
         self._ran = False
         self.entry_guard = None
+        self.entry_timing_guard = None
+        self.signal_ranks = {}
+        self.pending_rank_provider = None
 
     def _active_count(self):
         return sum(
             p.state not in {TradeState.CLOSED, TradeState.CANCELLED}
             for p in self.positions.values()
         )
+
+    def _trim_pending(self, day, capacity):
+        def rank(p):
+            values = (
+                self.pending_rank_provider(p, day)
+                if self.pending_rank_provider else None
+            )
+            score, risk, adtv = values or self.signal_ranks.get(
+                (p.instrument_id, p.signal_date), (0.0, 0.0, 0.0)
+            )
+            if not all(math.isfinite(float(v)) for v in (score, risk, adtv)):
+                raise ValueError("Invalid pending-order rank")
+            return (-score, risk, -adtv, p.signal_date, p.instrument_id)
+
+        pending = sorted(
+            (p for p in self.positions.values() if p.state == TradeState.PENDING_ENTRY),
+            key=rank,
+        )
+        for p in reversed(pending):
+            if self._active_count() <= capacity:
+                break
+            cancel_entry(p, "regime_capacity", day)
+            self.events.append(
+                BacktestEvent(
+                    EventType.POSITION_STATE, day, p.instrument_id,
+                    {"to": "CANCELLED", "reason": "regime_capacity"},
+                )
+            )
 
     def _costs(self, d, side, price, qty):
         return estimate_delivery_costs(
@@ -232,6 +267,8 @@ class EventDrivenBacktester:
         )
 
     def _apply_entry(self, position, bar):
+        if self.entry_timing_guard is not None:
+            self.entry_timing_guard(position, bar)
         # Recompute the risk budget from portfolio equity, not leftover cash.
         position.capital = self._equity_at_open()
         process_entry_bar(position, bar.trade_date, bar.open, bar.high, self.cfg)
@@ -349,6 +386,9 @@ class EventDrivenBacktester:
         on_session_close=None,
         entry_guard=None,
         allow_live_signals=False,
+        auto_reentry=True,
+        pending_rank_provider=None,
+        entry_timing_guard=None,
     ):
         if self._ran:
             raise ValueError("Use a fresh backtester for each run")
@@ -378,6 +418,8 @@ class EventDrivenBacktester:
         if not set(bars_by_date).issubset(self.sessions):
             raise ValueError("Market bar outside exchange calendar")
         self.entry_guard = entry_guard
+        self.entry_timing_guard = entry_timing_guard
+        self.pending_rank_provider = pending_rank_provider
         if bar_provider is not None and (
             not trading_sessions or session_bounds is None
         ):
@@ -422,22 +464,16 @@ class EventDrivenBacktester:
                 bar = daily.get(instrument)
                 if bar and position.state in PENDING_EXITS:
                     replacement = self._apply_open_execution(
-                        position, bar, eligibility_provider, allow_reentry
+                        position, bar, eligibility_provider, allow_reentry and auto_reentry
                     )
                     if replacement is not None:
                         self.positions[instrument] = replacement
-            # Existing positions are retained when regime capacity falls. Pending
-            # entries lose eligibility immediately; trim newest pending first.
-            pending = []
+            # Filled holdings survive capacity reductions; lowest-ranked pending
+            # orders are cancelled using the last available after-close ranking.
             for i, p in self.positions.items():
-                if p.state == TradeState.PENDING_ENTRY:
-                    if not eligibility_provider(i, d):
-                        cancel_entry(p, "module_a_ineligible", d)
-                    else:
-                        pending.append(p)
-            for p in reversed(pending):
-                if self._active_count() > capacity:
-                    cancel_entry(p, "regime_capacity", d)
+                if p.state == TradeState.PENDING_ENTRY and not eligibility_provider(i, d):
+                    cancel_entry(p, "module_a_ineligible", d)
+            self._trim_pending(d, capacity)
             for instrument, position in list(self.positions.items()):
                 bar = daily.get(instrument)
                 if not bar:
@@ -459,6 +495,9 @@ class EventDrivenBacktester:
                     int(close_capacity_provider(d)),
                 ),
             )
+            for i, p in self.positions.items():
+                if p.state == TradeState.PENDING_ENTRY and not signal_eligibility_provider(i, d):
+                    cancel_entry(p, "module_a_ineligible", d)
             for signal in signal_provider(d):
                 if allow_live_signals and (
                     signal.signal_date > d
@@ -487,13 +526,29 @@ class EventDrivenBacktester:
                     or not signal_eligibility_provider(signal.instrument_id, d)
                 ):
                     continue
-                p = TradePosition(
-                    signal.instrument_id,
-                    signal.signal_date,
-                    signal.signal_high,
-                    signal.signal_low,
-                    max(self._equity_at_open(), 0),
-                    entry_sessions=self._entry_sessions(signal.signal_date),
+                if signal.reentry:
+                    if (
+                        not allow_reentry or not existing or not reentry_allowed(existing)
+                        or signal.signal_date != existing.reentry_signal_date
+                        or signal.signal_high != existing.reentry_signal_high
+                        or signal.signal_low != existing.reentry_signal_low
+                    ):
+                        raise ValueError("Invalid allocated re-entry")
+                    p = create_reentry(
+                        existing, max(self._equity_at_open(), 0),
+                        entry_sessions=self._entry_sessions(signal.signal_date),
+                    )
+                else:
+                    p = TradePosition(
+                        signal.instrument_id,
+                        signal.signal_date,
+                        signal.signal_high,
+                        signal.signal_low,
+                        max(self._equity_at_open(), 0),
+                        entry_sessions=self._entry_sessions(signal.signal_date),
+                    )
+                self.signal_ranks[(signal.instrument_id, signal.signal_date)] = (
+                    signal.score, signal.stop_risk_pct, signal.adtv
                 )
                 activate_entry(p)
                 self.positions[signal.instrument_id] = p
@@ -509,6 +564,7 @@ class EventDrivenBacktester:
                         },
                     )
                 )
+            self._trim_pending(d, close_capacity)
             self.last_prices.update({i: b.close for i, b in daily.items()})
             equity = self.cash + sum(
                 p.remaining_shares * self.last_prices.get(i, p.entry or 0)
