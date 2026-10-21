@@ -538,7 +538,8 @@ class CloudStore:
                 **values,
                 "id": known[symbol]["id"],
                 "raw": encoded({**raw, "official_xml_sha256": doc.sha256,
-                                "identity_review": values.get('identity_review')}),
+                                "identity_review": values.get('identity_review'),
+                                "percentage_reconciliation": values.get('percentage_reconciliation')}),
             }
             self.execute(
                 c,

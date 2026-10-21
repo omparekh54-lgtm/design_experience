@@ -22,9 +22,10 @@ XML header before accepting a stale outer API identifier. BSE numeric entities
 remain linked through that same header. Encumbrance counts use the full promoter
 category and promoter-share denominator; absent disclosures are not assumed zero.
 An omitted promoter section needs an explicit zero summary and complete public /
-non-public category reconciliation. Equity shares outstanding exclude separately
-reported depository-receipt counts only after reconciling fully/partly-paid equity
-and total counts. Percentage bases must reconcile with the XML's declared ratio,
+non-public category reconciliation. Shares outstanding retain the reported total,
+including equity underlying depository receipts; the percentage denominator is
+separate. Reconcile fully/partly-paid and DR counts before considering a different
+percentage basis. Percentage bases must reconcile with the XML's declared ratio,
 its rounding precision and category totals before comparison with the API summary.
 Employee trusts remain included in actual equity shares outstanding.
 
