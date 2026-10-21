@@ -76,3 +76,17 @@ def test_sector_repair_prioritizes_missing_dated_coverage(monkeypatch):
     monkeypatch.setattr(sources,'fetch_classification',fetch)
     store.classifications(None,date(2026,10,22),limit=1)
     assert called==['GAP']
+
+
+def test_sector_job_finishes_overdue_provenance_even_after_dated_gaps_are_filled(monkeypatch):
+    import packages.pms.paper_data_repair as repair
+    service=PaperDataRepair(None,None,None)
+    service.locked=lambda:None
+    service.counts=lambda:dict(sector_pending=0)
+    results=iter([dict(due=2,remaining=1),dict(due=1,remaining=0)])
+    class Store:
+        def __init__(self,*args):pass
+        def classifications(self,*args,**kwargs):return next(results)
+    monkeypatch.setattr(repair,'CloudStore',Store)
+    report=service.sectors(max_passes=3)
+    assert report['status']=='SUCCESS' and len(report['passes'])==2

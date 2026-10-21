@@ -141,6 +141,6 @@ class PaperDataRepair:
             passes.append(result)
             counts=self.counts()
             if on_progress:on_progress(dict(pass_number=n+1,result=result,counts=counts))
-            if counts['sector_pending']==0 or result['due']==0:break
+            if (counts['sector_pending']==0 and result['remaining']==0) or result['due']==0:break
         after=self.counts()
-        return dict(status='SUCCESS' if after['sector_pending']==0 else 'PARTIAL',before=before,after=after,passes=passes)
+        return dict(status='SUCCESS' if after['sector_pending']==0 and passes[-1]['remaining']==0 else 'PARTIAL',before=before,after=after,passes=passes)
