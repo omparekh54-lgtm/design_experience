@@ -67,6 +67,11 @@ def record_key(raw):
 
 
 def parse_meetings(doc, now):
+    # Announcements can arrive while earlier collection stages are running.
+    # Bound knowability by this document's receipt, never a later wall clock.
+    if now.tzinfo is None or doc.observed_at.tzinfo is None:
+        raise SourceError("earnings_observation_timezone_required")
+    cutoff = doc.observed_at
     output = []
     for r in json_rows(doc, allow_empty=True):
         subject = str(r.get("bm_purpose", "")) + " " + str(r.get("bm_desc", ""))
@@ -76,7 +81,7 @@ def parse_meetings(doc, now):
         symbol = r.get("bm_symbol")
         stamp = parse_stamp(r.get("bm_timestamp"))
         event = parse_day(r.get("bm_date"))
-        if not symbol or stamp > now:
+        if not symbol or stamp > cutoff:
             raise SourceError("earnings_identity_or_timestamp_invalid")
         # Keep earlier blackouts; a cancellation never silently erases prior evidence.
         output.append(
