@@ -224,7 +224,7 @@ def module_e_from_database(trade_date: date) -> dict:
     with db_engine().connect() as conn:
         row = conn.execute(text("""select * from pms.market_regime_history
             where trade_date=(select max(trade_date) from pms.module_e_benchmark_bars
-              where benchmark_code='NIFTY50' and source='NSE_HISTORICAL_OR' and trade_date<=:d)"""), {"d": trade_date}).mappings().first()
+              where benchmark_code='NIFTY50' and source in ('NSE_HISTORICAL_OR','NSE_DAILY_INDEX') and trade_date<=:d)"""), {"d": trade_date}).mappings().first()
     if not row:
         raise HTTPException(status_code=404, detail="regime snapshot not found")
     result=dict(row)

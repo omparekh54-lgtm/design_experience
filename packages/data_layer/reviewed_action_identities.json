@@ -158,5 +158,37 @@
     "quote_sha256": "ba942fa858180d07c06912c516aeb1d1fa6c0d1800c81840be709fa7d5311d03",
     "reviewed_on": "2026-10-20",
     "scope": "Exact corporate-action record only; no general ISIN alias or historical adjustment authorization"
+  },
+  {
+    "symbol": "TECHM",
+    "previous_isin": "INE669C01028",
+    "current_isin": "INE669C01036",
+    "ex_date": "2026-10-23",
+    "action_type": "DIVIDEND",
+    "company": "Tech Mahindra Limited",
+    "raw_record_sha256": "be4ab72d161bd235fc0e71cb224f529c38f140ce617d5c574be114d04dcb07d1",
+    "raw": {
+      "bcEndDate": "-",
+      "bcStartDate": "-",
+      "caBroadcastDate": null,
+      "comp": "Tech Mahindra Limited",
+      "exDate": "23-Oct-2026",
+      "faceVal": "5",
+      "ind": "-",
+      "isin": "INE669C01028",
+      "ndEndDate": "-",
+      "ndStartDate": "-",
+      "recDate": "23-Oct-2026",
+      "series": "EQ",
+      "subject": "Interim Dividend - Rs  15 Per Share",
+      "symbol": "TECHM"
+    },
+    "event_source_url": "https://www.nseindia.com/api/corporates-corporateActions?index=equities&from_date=14-10-2026&to_date=05-12-2026",
+    "event_source_sha256": "e2cd4d5bdb0622125519028fdea6f34fbafa435e72bf8218f6f78fa0ab84e3c7",
+    "master_sha256": "a6a09d6f397db028efcb4191a8aa5f0475a5f47697c070a27d48fd0795092810",
+    "quote_url": "https://www.nseindia.com/api/NextApi/apiClient/GetQuoteApi?functionName=getSymbolData&marketType=N&series=EQ&symbol=TECHM",
+    "quote_sha256": "395a5e450fd8a0f432b2f7bf188a1a3dcacf063c0944c9eeb95a31c0a954b041",
+    "reviewed_on": "2026-10-21",
+    "scope": "Exact corporate-action record only; raw dividend amount, ex-date and face value retained. No general ISIN alias or historical price adjustment authorization"
   }
 ]

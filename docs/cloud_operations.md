@@ -204,3 +204,20 @@ The 230-share difference is disclosed in the filing's own note about an IEPF
 transfer error. Retain the filed figure and note rather than substitute a
 current quote into historical shareholding facts. Source notes and raw XML
 remain private archival evidence. This review is not a completed cloud import.
+
+### Current action review and deployed session reporting
+
+The next guarded run, `39560063393`, targeted the latest completed session,
+20 October, but stopped before the bulk checks on a newly published TECHM
+dividend carrying its former ISIN. The current master and independent detailed
+quote agree on TECHM / INE669C01036, the company name, EQ series and face value
+of INR 5. The exact source action (23 October, INR 15 dividend) is now reviewed
+by its full record hash in `reviewed_action_identities.json`. Source amount,
+dates, old ISIN and terms remain unchanged; changed records still block.
+
+The dashboard session/benchmark coverage queries previously read only the
+historical source, leaving cloud-collected sessions invisible. They now accept
+both verified official source families and count distinct sessions across
+overlapping observations. The regime endpoint uses the same current calendar;
+missing current strategy outputs remain unavailable until later calculation
+phases. This changes data visibility, not campaign permissions.

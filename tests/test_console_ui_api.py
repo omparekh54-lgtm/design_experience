@@ -12,6 +12,25 @@ DAY = date(2026, 10, 16)
 CFG = load_strategy_config()
 
 
+def test_cloud_benchmark_sessions_are_current_and_not_double_counted():
+    from sqlalchemy import create_engine, text
+    engine = create_engine('sqlite://')
+    with engine.connect() as conn:
+        conn.exec_driver_sql("attach database ':memory:' as pms")
+        conn.exec_driver_sql('create table pms.module_e_benchmark_bars (benchmark_code text,trade_date text,source text)')
+        conn.execute(text('insert into pms.module_e_benchmark_bars values (:code,:day,:source)'), [
+            dict(code='NIFTY50', day='2026-10-16', source='NSE_HISTORICAL_OR'),
+            dict(code='NIFTY50', day='2026-10-16', source='NSE_DAILY_INDEX'),
+            dict(code='NIFTY50', day='2026-10-19', source='NSE_DAILY_INDEX'),
+            dict(code='NIFTY50', day='2026-10-20', source='UNVERIFIED'),
+            dict(code='NIFTY50', day='2026-10-22', source='NSE_DAILY_INDEX'),
+        ])
+        assert str(console._session(conn, date(2026, 10, 20))) == '2026-10-19'
+        row = conn.execute(text(console.BENCHMARK_COVERAGE_SQL), {'d': date(2026, 10, 20)}).mappings().one()
+        assert row['rows'] == 2 and row['latest'] == '2026-10-19'
+    engine.dispose()
+
+
 class Result:
     def __init__(self, value):
         self.value = value
