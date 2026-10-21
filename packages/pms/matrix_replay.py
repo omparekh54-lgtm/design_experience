@@ -20,6 +20,7 @@ from packages.pms.backtest import (
     BacktestEvent,
     EventType,
 )
+from packages.pms.execution_timing import intraday_trigger, intraday_information_changed
 from packages.pms.backtest_matrix import fingerprint, round_trips
 from packages.pms.market_calendar import MarketCalendar
 from packages.pms.module_a_context import IST, end_of_day
@@ -209,6 +210,7 @@ class MatrixReplay:
         self.e = ResearchE(engine, cfg, self)
         self.capacity = int(cfg["risk"]["max_open_trades"])
         self.last_analysis, self.metadata = {}, {}
+        self.admissions = {}
         self.rejections = Counter()
         self.regimes, self.decisions = [], []
         self.actions = self._actions()
@@ -395,8 +397,10 @@ class MatrixReplay:
                         )
                     },
                 )
-                risk += size.rupee_risk
-                reserved += size.position_value + info.get("estimated_entry_costs", 0)
+                admission = self.admissions.get((instrument, p.signal_date))
+                shares = min(size.shares, admission["shares"]) if admission else size.shares
+                risk += shares * (p.signal_high - size.stop)
+                reserved += shares * p.signal_high + info.get("estimated_entry_costs", 0)
             else:
                 opened += 1
                 risk += max(0, (p.entry - p.stop) * p.remaining_shares)
@@ -444,7 +448,7 @@ class MatrixReplay:
             reentries = {}
             if self.case.variant.reentry:
                 for instrument, p in self.broker.positions.items():
-                    if reentry_allowed(p) or p.state == TradeState.PENDING_LEG2_EXIT:
+                    if reentry_allowed(p):
                         reentries[instrument] = {
                             **self.metadata.get(instrument, {}),
                             "setup": "SETUP_1",
@@ -486,11 +490,18 @@ class MatrixReplay:
             for row in report.order_sheet:
                 info = row["signal"]
                 self.metadata[row["instrument_id"]] = info
+                self.admissions[(row["instrument_id"], date.fromisoformat(info["signal_date"]))] = {
+                    "day": day, "shares": int(row["shares"]),
+                }
                 yield Signal(
                     row["instrument_id"],
                     date.fromisoformat(info["signal_date"]),
                     float(info["signal_high"]),
                     float(info["signal_low"]),
+                    float(row["score"]),
+                    (float(row["buy_stop"]) - float(row["stop"])) / float(row["buy_stop"]) * 100,
+                    float(row["stats"]["adtv"]),
+                    row["instrument_id"] in reentries,
                 )
         else:
             for instrument in self.symbols:
@@ -510,9 +521,37 @@ class MatrixReplay:
                         float(info["signal_low"]),
                     )
 
+    def pending_rank(self, position, day):
+        info = self.last_analysis.get(position.instrument_id, {})
+        if (
+            info.get("stats") and info.get("score") is not None
+            and info.get("buy_stop") and info.get("stop") is not None
+        ):
+            return (
+                float(info["score"]),
+                (float(info["buy_stop"]) - float(info["stop"])) / float(info["buy_stop"]) * 100,
+                float(info["stats"]["adtv"]),
+            )
+        return None
+
+    def entry_timing_guard(self, position, bar):
+        if (not self.case.variant.use_module_a
+                or bar.trade_date <= position.signal_date
+                or (position.entry_sessions and bar.trade_date not in position.entry_sessions)
+                or not intraday_trigger(bar.open, bar.high, position.signal_high)):
+            return
+        with self.engine.connect() as conn:
+            instrument_pk = self.b.prices._db_instrument_id(conn, position.instrument_id)
+            if intraday_information_changed(conn, instrument_pk, bar.trade_date):
+                raise ResearchDataGap("intraday_filing_trigger_order_unknown")
+
     def entry_guard(self, position, bar, quantity):
         if not self.case.variant.use_module_c:
             return quantity
+        admission = self.admissions.get((position.instrument_id, position.signal_date))
+        if not admission or admission["day"] >= bar.trade_date:
+            return 0
+        quantity = min(quantity, admission["shares"])
         info = self.last_analysis.get(position.instrument_id)
         if (
             not info
@@ -583,6 +622,9 @@ class MatrixReplay:
             on_session_close=self.on_close,
             entry_guard=self.entry_guard,
             allow_live_signals=True,
+            auto_reentry=not self.case.variant.use_module_c,
+            pending_rank_provider=self.pending_rank,
+            entry_timing_guard=self.entry_timing_guard,
         )
         return result, dict(
             rejections=dict(self.rejections),
@@ -593,6 +635,7 @@ class MatrixReplay:
                 )
             ),
             allocation=self.decisions,
+            execution_policy="ranked pending cancellation; fresh C re-entry after exit; ambiguous intraday filings block replay",
             replay="isolated A/B/C/E and simulated account; no stored selected lists or live holdings",
             dividend_assumption="credited on ex-date, before personal taxes; payment-date reinvestment timing requires separate audit",
             limitations=[

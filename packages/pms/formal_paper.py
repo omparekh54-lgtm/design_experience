@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from packages.pms.execution_timing import intraday_trigger, intraday_information_changed
+
 from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta
@@ -752,24 +754,9 @@ class FormalPaperExecution:
             )
             # A daily high cannot establish whether a trigger preceded an intraday filing.
             # Gap-at-open entries remain ordered; ambiguous intraday entries need review.
-            if bar["open"] < float(row["entry"]) <= bar["high"]:
-                changed = int(
-                    conn.execute(
-                        text(
-                            """select
-                    (select count(*) from financial_filings where instrument_id=:id and filing_timestamp>:opened and filing_timestamp<=:closed) +
-                    (select count(*) from shareholding_history where instrument_id=:id and filed_at>:opened and filed_at<=:closed) +
-                    (select count(*) from earnings_calendar where instrument_id=:id and announced_at>:opened and announced_at<=:closed)"""
-                        ),
-                        {
-                            "id": row["instrument_id"],
-                            "opened": opening,
-                            "closed": datetime.combine(day, time(15, 30), tzinfo=IST),
-                        },
-                    ).scalar_one()
-                )
-                if changed:
-                    raise ValueError("intraday_filing_trigger_order_unknown")
+            if (intraday_trigger(bar["open"], bar["high"], float(row["entry"]))
+                    and intraday_information_changed(conn, row["instrument_id"], day)):
+                raise ValueError("intraday_filing_trigger_order_unknown")
             dates = [
                 day,
                 *calendar.forward(
