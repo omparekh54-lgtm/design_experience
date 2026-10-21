@@ -132,3 +132,24 @@ instrument identity changes, or historical sector reconstruction.
 
 A subsequent full successful verification and actual import receipt are still
 required to finish Phase 3. The prior run is not a completed import.
+
+### Ind AS insurer filing format (21 October)
+
+Run `39464980320` checked 4,460 items: the two classification repairs passed,
+but the newly published STARHEALTH filing was the sole failure. The guarded
+import was skipped. Its official XML uses the `IF_INS_COM_IND_AS` filename
+family and `InsuranceRevenue`, rather than the older GI `OperatingIncome`.
+The parser now recognizes that official NSE profile and preserves the
+`IND_AS_INSURANCE_REVENUE` basis and source fact names. It does not substitute
+gross written premium, investment income or industrial sales.
+
+The actual source document SHA-256 is
+`91a5d5628763ee76e84a4e0b75c64f3d4d50c5add2cb58a55246d6b95e70b128`.
+Local replay extracts INR 4,917.2 crore insurance revenue and INR 549.73 crore
+PAT for the quarter ended 30 June 2026. The source filing timestamp remains
+20 October 2026; this is not a September-quarter observation or a backdated
+fact. Synthetic regression coverage checks quarter selection, INR conversion,
+metric provenance, missing target periods and rejection of foreign hosts,
+exchanges, schemes and unsupported filenames. Financial-sector exclusion in
+Module A remains unchanged. Full cloud verification and import are still
+required; parser replay alone is not Phase-3 acceptance.
