@@ -4,6 +4,9 @@ on:
     branches: [main]
     paths:
       - migrations/014_financial_overlay_precedence.sql
+      - packages/data_layer/cloud_sources.py
+      - packages/data_layer/classification_identity.py
+      - packages/data_layer/reviewed_classification_identities.json
       - packages/pms/paper_data_repair.py
       - scripts/repair_paper_inputs.py
       - .github/workflows/pms-paper-input-repair.yml

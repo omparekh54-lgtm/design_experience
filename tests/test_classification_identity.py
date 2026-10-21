@@ -14,7 +14,8 @@ def doc(value):
 
 
 @pytest.mark.parametrize('change', [None, 'metadata', 'symbol', 'isin', 'series', 'company', 'quote_isin', 'quote_market'])
-def test_reviewed_stale_metadata_requires_exact_review_and_live_master(monkeypatch, change):
+@pytest.mark.parametrize('multiple_series', [False, True])
+def test_reviewed_stale_metadata_requires_exact_review_and_live_master(monkeypatch, change, multiple_series):
     metadata = dict(symbol='TEST', companyName='Test Limited', isin='INE000A01010', activeSeries=['BE'], marketType='G')
     review = dict(symbol='TEST', company='Test Limited', metadata_isin=metadata['isin'],
                   current_isin='INE000A01028', series='BE', metadata_sha256=doc(metadata).sha256)
@@ -34,8 +35,10 @@ def test_reviewed_stale_metadata_requires_exact_review_and_live_master(monkeypat
                 'secInfo': dict(sector='Capital Goods')}]})
         def fetch(self, url):
             assert url == 'https://nsearchives.nseindia.com/content/equities/EQUITY_L.csv'
+            extra = ('{symbol},{company},BZ,04-Aug-2020,{isin}\n'.format(**master)
+                     if multiple_series else '')
             return doc(('SYMBOL,NAME OF COMPANY,SERIES,DATE OF LISTING,ISIN NUMBER\n'
-                        '{symbol},{company},{series},04-Aug-2020,{isin}\n'.format(**master)).encode())
+                        '{symbol},{company},{series},04-Aug-2020,{isin}\n'.format(**master) + extra).encode())
     if change is None:
         _, classification = fetch_classification(HTTP(), 'TEST', 'INE000A01028')
         assert classification['identity_basis'] == 'REVIEWED_METADATA_LIVE_MASTER_AND_QUOTE'

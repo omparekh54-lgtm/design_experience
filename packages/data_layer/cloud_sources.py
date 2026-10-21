@@ -346,22 +346,36 @@ def parse_master(body):
         body, ["SYMBOL", "NAME OF COMPANY", "SERIES", "DATE OF LISTING", "ISIN NUMBER"]
     )
     result = {}
+    identities = {}
     for row in rows:
         symbol, isin = row["SYMBOL"], row["ISIN NUMBER"]
         if (
-            symbol in result
-            or not symbol
+            not symbol
+            or not row["SERIES"]
             or len(isin) != 12
             or not isin.startswith("IN")
         ):
             raise SourceError("master_identity_invalid")
-        result[symbol] = dict(
+        parsed = dict(
             symbol=symbol,
             isin=isin,
             series=row["SERIES"],
             listed_from=parse_day(row["DATE OF LISTING"]),
             name=row["NAME OF COMPANY"],
         )
+        if symbol in result:
+            previous = result[symbol]
+            series = previous.get('series_list', [previous['series']])
+            # NSE may publish one equity identity in several trading series.
+            # Preserve all series; never resolve conflicting identities by order.
+            if (parsed['series'] in series or
+                    identities[symbol] != {k: v for k, v in row.items() if k != 'SERIES'}):
+                raise SourceError("master_identity_invalid")
+            previous['series_list'] = sorted([*series, parsed['series']])
+            previous['series'] = None
+        else:
+            result[symbol] = parsed
+            identities[symbol] = {k: v for k, v in row.items() if k != 'SERIES'}
     return result
 
 
