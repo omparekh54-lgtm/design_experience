@@ -129,8 +129,8 @@ or revision_number is null or revision_number<1 or consolidated is null)""",
 add(
     "FILINGS_DUPLICATES",
     "POINT_IN_TIME",
-    f"""select instrument_id,period_end,filing_timestamp,source,consolidated,revision_number,count(*) records
-from pms.financial_filings where instrument_id {IDS} and filing_timestamp<=:stamp group by 1,2,3,4,5,6 having count(*)>1""",
+    f"""select instrument_id,period_end,filing_timestamp,source,consolidated,revision_number,filing_kind,count(*) records
+from pms.financial_filings where instrument_id {IDS} and filing_timestamp<=:stamp group by 1,2,3,4,5,6,7 having count(*)>1""",
     "Reconcile duplicate filing/revision/scope identities; do not overwrite older vintages.",
 )
 add(
@@ -294,6 +294,74 @@ from pms.financial_filings f join pms.financial_facts v on v.filing_id=f.id wher
 ((v.fact_name='diluted_eps' and lower(btrim(coalesce(v.unit,'')))<>'inr/share')
 or (v.fact_name in ('sales','operating_profit','pat','pbt','other_income','exceptional_items','operating_cash_flow','debt','equity','interest_expense') and lower(btrim(coalesce(v.unit,'')))<>'inr crore'))""",
     "Reconcile source units and scale against the normalized ingestion contract (INR crore; INR/share for EPS). Generic INR or other labels require source review; do not guess a conversion.",
+    "REVIEW",
+)
+# Coverage inventory, not an assumed statutory deadline: omit the newest 120
+# days so an unpublished recent period is not silently labelled corrupt.
+# Fiscal quarters are compared by calendar-quarter key, not exact month-end.
+EXPECTED_QUARTERS = f"""select i.id instrument_id,q.period_start::date,
+    (q.period_start+interval '3 months'-interval '1 day')::date period_end
+from pms.instruments i cross join lateral generate_series(
+    date_trunc('quarter',greatest(cast(:start as date)-interval '2 years',
+        coalesce(i.listed_from,cast(:start as date)))),
+    date_trunc('quarter',least(cast(:end as date)-interval '120 days',
+        coalesce(i.delisted_on,cast(:end as date)))),interval '3 months') q(period_start)
+where i.id {IDS} and i.listed_from is not null and q.period_start>=i.listed_from
+    and q.period_start+interval '3 months'<=cast(:end as date)-interval '120 days'
+    and (i.delisted_on is null or q.period_start+interval '3 months'<=i.delisted_on)"""
+add(
+    "FINANCIAL_QUARTER_COVERAGE", "COVERAGE",
+    f"""select e.instrument_id,e.period_end from ({EXPECTED_QUARTERS}) e where not exists
+    (select 1 from pms.financial_filings f where f.instrument_id=e.instrument_id
+    and date_trunc('quarter',f.period_end)=e.period_start
+    and lower(f.filing_kind) in ('quarter','quarterly') and f.filing_timestamp<=:stamp)""",
+    "Backfill missing quarterly reporting vintages from original exchange artifacts, including two years of financial warmup. The 120-day inventory lag is not a legal filing deadline; investigate fiscal-calendar exceptions.",
+)
+add(
+    "QUARTER_CORE_FACTS", "FUNDAMENTALS",
+    f"""select f.id filing_id,f.instrument_id,required.fact_name from pms.financial_filings f
+    cross join (values ('sales'),('operating_profit'),('pat'),('diluted_eps'),
+    ('pbt'),('other_income'),('exceptional_items'),('interest_expense')) required(fact_name)
+    where f.instrument_id {IDS} and f.period_end>=cast(:start as date)-interval '2 years'
+    and f.filing_timestamp<=:stamp and lower(f.filing_kind) in ('quarter','quarterly')
+    and not exists(select 1 from pms.financial_facts v where v.filing_id=f.id
+    and v.fact_name=required.fact_name and v.value is not null and v.value::text not in {NUM})""",
+    "Reparse missing duration/scope-aware facts using ingestion V2. Missing facts remain unknown, not zero; preserve all filing vintages.",
+)
+add(
+    "ANNUAL_CASH_FLOW_COVERAGE", "FUNDAMENTALS",
+    f"""select distinct e.instrument_id,extract(year from e.period_end)::int audit_year
+    from ({EXPECTED_QUARTERS}) e where not exists
+    (select 1 from pms.financial_filings f where f.instrument_id=e.instrument_id
+    and lower(f.filing_kind) in ('annual','year','yearly')
+    and f.period_end between e.period_end-interval '2 years' and e.period_end
+    and f.filing_timestamp<=:stamp and exists(select 1 from pms.financial_facts v
+    where v.filing_id=f.id and v.fact_name='operating_cash_flow' and v.value is not null
+    and v.value::text not in {NUM}) and exists(select 1 from pms.financial_facts v
+    where v.filing_id=f.id and v.fact_name='pat' and v.value is not null and v.value::text not in {NUM}))""",
+    "Backfill annual OCF/PAT companions for each historical year; quarterly PAT cannot substitute for annual cash flow. This inventories coverage, not historical publication readiness.",
+)
+add(
+    "SHAREHOLDING_QUARTER_COVERAGE", "COVERAGE",
+    f"""select e.instrument_id,e.period_end from ({EXPECTED_QUARTERS}) e where not exists
+    (select 1 from pms.shareholding_history h where h.instrument_id=e.instrument_id
+    and date_trunc('quarter',h.period_end)=e.period_start and h.filed_at<=:stamp)""",
+    "Obtain missing historical shareholding/pledge filings and publication timestamps; do not copy current percentages backwards.",
+)
+add(
+    "FINANCIAL_EXTRACTION_VERSION", "PROVENANCE",
+    f"""select f.id filing_id,f.instrument_id,f.period_end from pms.financial_filings f
+    where f.instrument_id {IDS} and f.filing_timestamp<=:stamp and f.xbrl_uri is not null
+    and coalesce(f.raw_payload->'financial_extraction'->>'version','')<>'FINANCIAL_XBRL_v2'""",
+    "Reprocess the original stored XBRL through the reviewed ingestion V2 parser. Verify migration 012 first; do not treat old receipt success as V2 evidence.",
+)
+add(
+    "EARNINGS_ARCHIVE_PRESENCE", "COVERAGE",
+    f"""select distinct f.instrument_id from pms.financial_filings f where f.instrument_id {IDS}
+    and f.period_end between :start and :end and f.filing_timestamp<=:stamp and not exists
+    (select 1 from pms.earnings_calendar e where e.instrument_id=f.instrument_id
+    and e.event_date between :start and :end and e.announced_at<=:stamp)""",
+    "Reconcile the original board-meeting/earnings-announcement inventory. A financial result publication does not establish advance earnings blackout knowability.",
     "REVIEW",
 )
 CHECKS = tuple(CHECKS)

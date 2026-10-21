@@ -1,0 +1,51 @@
+name: PMS historical dataset audit
+
+on:
+  workflow_dispatch:
+    inputs:
+      start:
+        description: Historical start including the research period (YYYY-MM-DD)
+        type: string
+        required: true
+        default: '2018-01-01'
+      end:
+        description: Explicit completed historical cutoff (YYYY-MM-DD)
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pms-historical-dataset-audit
+  cancel-in-progress: false
+
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      DATABASE_URL: ${{ secrets.NEON_PMS_DATABASE_URL }}
+      SSL_CERT_FILE: /etc/ssl/certs/ca-certificates.crt
+      AUDIT_START: ${{ inputs.start }}
+      AUDIT_END: ${{ inputs.end }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Audit one read-only repeatable-read snapshot
+        run: |
+          python scripts/run_data_integrity_audit.py --run \
+            --start "$AUDIT_START" --end "$AUDIT_END" \
+            --report artifacts/historical-dataset/audit.json
+      - name: Preserve audit and repair inventory, including failures
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pms-historical-dataset-audit-${{ github.run_id }}
+          path: artifacts/historical-dataset
+          if-no-files-found: warn
+          retention-days: 14

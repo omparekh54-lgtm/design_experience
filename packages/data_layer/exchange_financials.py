@@ -178,6 +178,7 @@ class NSEIntegratedFinancialsProvider:
         page: int = 1,
         size: int = 100,
         segment: str = "equities",
+        strict: bool = False,
     ) -> list[ExchangeFilingRecord]:
         self._prime()
         params: dict[str, Any] = {
@@ -198,7 +199,15 @@ class NSEIntegratedFinancialsProvider:
         response = self.client.get(self.BASE_URL + self.API_PATH, params=params)
         response.raise_for_status()
         rows = _records_from_json(response.json())
-        return [record for row in rows if (record := self._parse_row(row)) is not None]
+        parsed = []
+        for row in rows:
+            record = self._parse_row(row)
+            if record is None:
+                if strict:
+                    raise ExchangeFinancialsError("Financial discovery returned an unparseable filing")
+                continue
+            parsed.append(record)
+        return parsed
 
     def _parse_row(self, row: dict[str, Any]) -> ExchangeFilingRecord | None:
         symbol = _pick(row, "symbol", "sm_symbol", "securitySymbol")

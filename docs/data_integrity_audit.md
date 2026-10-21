@@ -6,7 +6,7 @@ This phase implements the audit runner and saved evidence views. It does not imp
 
 An audit is a dated, read-only scan over the historical NSE master, including inactive companies whose listing intervals overlap the requested period. Optional canonical symbols make an explicitly labelled sample. An explicit completed-date end is required; an audit never quietly substitutes today or a partial market session.
 
-The design contains a schema-contract check, **39 automated rules**, and five mandatory independent source reviews. Missing schema fields prevent dependent checks from running. An empty universe fails. A partial `--checks` request leaves the omitted rules `NOT_RUN`; it cannot produce a clean audit result.
+The design contains a schema-contract check, **45 automated rules**, and five mandatory independent source reviews. Missing schema fields prevent dependent checks from running. An empty universe fails. A partial `--checks` request leaves the omitted rules `NOT_RUN`; it cannot produce a clean audit result.
 
 | Group | Automated evidence |
 |---|---|
@@ -65,3 +65,10 @@ python scripts/run_data_integrity_audit.py --run --start 2018-01-01 --end 2026-1
 Choose the final completed-session cutoff during setup. `--symbols`, `--checks`, `--sample-limit`, `--timeout-ms`, `--config` and a new `--report` path explicitly change the scope. `DATABASE_URL` takes precedence over `PMS_DATABASE_URL`, matching the application and other research runners. Exit codes: 0 for fully clean automated status with no reviews, 2 for failed/incomplete/review-required results or setup failure, 130 for interruption. Independent mandatory reviews mean this version normally returns 2 even when the automated scan is clean.
 
 After implementation, the actual full populated-database scan, remediation, independent source reconciliation, historical performance runs and acceptance review still have to happen. A code test pass is not a data audit pass.
+
+
+The v1.1 registry also inventories missing financial/shareholding quarters, annual OCF/PAT coverage, missing quarterly facts, and extraction V2 provenance. Quarter inventory uses a 120-day lag and two years of financial warmup; fiscal-calendar exceptions need source review. Publication eligibility is separately checked against actual timestamps. Annual coverage counts company/year buckets, not unique missing annual filings.
+
+Every full CLI audit writes a prioritized `.repair.json` next to JSON/CSV evidence. Unknown counts stay unknown; failed, errored, skipped and independent review items stay blocking. The `PMS historical dataset audit` manual workflow runs the full scanner against a repeatable-read, read-only Neon snapshot and retains failure artifacts. It does not import sources, apply migrations, resolve DQ issues, or unlock execution.
+
+See [historical dataset completion](historical_dataset_completion.md) for the live diagnostic, export/backfill changes and remaining source work.

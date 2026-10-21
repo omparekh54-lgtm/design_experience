@@ -15,7 +15,7 @@ from packages.pms.module_a_context import IST, end_of_day
 from packages.pms.research import ResearchVariant
 from packages.pms.walk_forward import ReplayPeriod
 
-VERSION = "DATA_INTEGRITY_v1.0"
+VERSION = "DATA_INTEGRITY_v1.1"
 EXTRA_INPUTS = {
     "module_a_history": "as_of<=:stamp",
     "module_b_signals": "signal_date<=:end",
@@ -61,6 +61,9 @@ REQUIRED = {
         "revision_number",
         "source",
         "consolidated",
+        "filing_kind",
+        "raw_payload",
+        "xbrl_uri",
         "exchange_received_at",
         "exchange_disseminated_at",
     },

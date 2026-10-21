@@ -19,8 +19,10 @@ from packages.pms.data_integrity import (
     IntegrityAuditor,
     write_report,
     persist_audit,
+    VERSION,
 )
 from packages.pms.integrity_checks import CHECKS, REVIEWS
+from packages.pms.historical_dataset import write_completion_plan
 
 
 def export_csv(report, path):
@@ -103,7 +105,7 @@ def main(argv=None):
         print(
             json.dumps(
                 dict(
-                    version="DATA_INTEGRITY_v1.0",
+                    version=VERSION,
                     checks=[
                         {k: v for k, v in asdict(c).items() if k != "sql"}
                         for c in CHECKS
@@ -155,7 +157,7 @@ def main(argv=None):
     )
     try:
         with report_lock(path):
-            if path.exists() or path.with_suffix(".csv").exists():
+            if any(p.exists() for p in (path, path.with_suffix(".csv"), path.with_suffix(".repair.json"))):
                 raise ValueError("Preserve existing evidence; select a new report path")
             with consistent_inputs(engine) as snapshot:
                 auditor = IntegrityAuditor(
@@ -172,6 +174,7 @@ def main(argv=None):
 
                 report = auditor.run(on_progress=progress)
             export_csv(report, path)
+            repair_plan = write_completion_plan(report, path.with_suffix(".repair.json"))
             if args.persist:
                 persist_audit(engine, report)
             print(
@@ -180,6 +183,9 @@ def main(argv=None):
                         run_id=report["run_id"],
                         summary=report["summary"],
                         report=str(path),
+                        completion=repair_plan["status"],
+                        pending_repairs=repair_plan["pending_tasks"],
+                        repair_plan=str(path.with_suffix(".repair.json")),
                     ),
                     indent=2,
                 )
