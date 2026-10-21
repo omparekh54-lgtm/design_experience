@@ -167,7 +167,10 @@ def test_mixed_statement_basis_cannot_pass_comparisons():
 
 
 def test_undefined_production_leverage_policy_fails_closed():
-    result = evaluate(cfg=load_strategy_config())[1]
+    cfg = load_strategy_config()
+    cfg['fundamental']['leverage_limits'] = {
+        'default': {'max_debt_to_equity': None, 'min_interest_coverage': None}, 'sectors': {}}
+    result = evaluate(cfg=cfg)[1]
     assert not result.eligible
     assert 'sector_leverage_policy_unconfigured' in result.failed_rules
 

@@ -116,7 +116,7 @@ def policy_checks(cfg):
         check(
             "LEVERAGE_POLICY",
             "PASS" if valid else "BLOCKED",
-            "Explicit finite nonnegative default leverage limits required by the research runner; owner decision, no invented cutoffs",
+            "Explicit finite nonnegative limits configured; provisional values require backtesting before policy validation",
         ),
         check(
             "LEGACY_SURVEILLANCE",

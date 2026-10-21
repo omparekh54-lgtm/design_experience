@@ -162,7 +162,9 @@ def test_incomplete_prices_block_and_coverage_is_reused_across_variants():
 def test_missing_policy_and_legacy_surveillance_are_visible_not_disabled():
     engine = Engine([[], [DAY, DAY + timedelta(days=1)], 257])
     gate = MatrixGates(engine, manifest())
-    reasons = gate(Cell(CELL.period, core_cases()[2]), CFG)
+    cfg = deepcopy(CFG)
+    cfg["fundamental"]["leverage_limits"]["default"]["max_debt_to_equity"] = None
+    reasons = gate(Cell(CELL.period, core_cases()[2]), cfg)
     assert "module_a_default_leverage_policy_unconfigured" in reasons
     assert "historical_surveillance_not_verified" in reasons
     assert CFG["fundamental"]["legacy_surveillance_verified"] is False

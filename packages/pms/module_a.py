@@ -4,6 +4,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 import math
 
+from packages.pms.policies import financial_sector
+
 
 @dataclass(frozen=True)
 class FundamentalSnapshot:
@@ -102,8 +104,7 @@ def evaluate_fundamentals(snapshot: FundamentalSnapshot, cfg: dict) -> Fundament
         failed.append('promoter_pledge_invalid')
     if not 0 <= snapshot.positive_growth_quarters_last_4 <= 4:
         failed.append('growth_consistency_invalid')
-    if (snapshot.sector or '').strip().casefold() in {
-        'financial services', 'financials', 'banks', 'banking', 'nbfc', 'insurance'}:
+    if financial_sector(snapshot.sector):
         failed.append('financial_sector_excluded')
 
     hard_checks = (

@@ -8,6 +8,7 @@ import pandas as pd
 from packages.data_layer.reference_data import CorporateAction
 from packages.pms.config import load_strategy_config
 from packages.pms.market_calendar import MarketCalendar
+from packages.pms.policies import regime_benchmark
 from packages.pms.module_a_context import IST, end_of_day, as_ist
 from packages.pms.module_e import (
     ENGINE_VERSION,
@@ -32,6 +33,7 @@ class ModuleEPipeline:
     def __init__(self, engine, cfg=None):
         self.engine = engine
         self.cfg = cfg or load_strategy_config()
+        self.MIDSMALL_CODE = regime_benchmark(self.cfg)
         self.last_report = {}
 
     def _benchmark_rows(self, code, expected, start):

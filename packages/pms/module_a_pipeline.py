@@ -12,6 +12,7 @@ from packages.pms.fundamental_history import calculate_financial_history
 from packages.pms.module_a import FundamentalDecision, FundamentalSnapshot, evaluate_fundamentals
 from packages.pms.module_a_context import as_ist, reference_failures, validate_module_a_config
 from packages.pms.module_a_data import ModuleAReferenceInputs
+from packages.pms.policies import policy_summary, is_cyclical
 
 
 def evaluate_inputs(history: list[dict], context: dict, as_of: datetime, cfg: dict):
@@ -55,9 +56,10 @@ def evaluate_inputs(history: list[dict], context: dict, as_of: datetime, cfg: di
                       ttm_sales_rising=False,ttm_profit_rising=False,ocf_to_pat=None)
     sector = context.get('sector')
     industry = context.get('industry')
-    limits = f.get('leverage_limits',{})
-    overrides = {k.casefold():v for k,v in limits.get('sectors',{}).items()}
-    policy = {**limits.get('default',{}),**overrides.get((sector or '').casefold(),{})}
+    applied_policy = policy_summary(cfg, sector)
+    if applied_policy['status'] == 'PROVISIONAL_BACKTEST':
+        flags.append('provisional_policy')
+    policy = applied_policy['leverage']['limits']
     max_debt, min_cover = policy.get('max_debt_to_equity'),policy.get('min_interest_coverage')
     if max_debt is None or min_cover is None:
         quality_failures.append('sector_leverage_policy_unconfigured')
@@ -69,8 +71,7 @@ def evaluate_inputs(history: list[dict], context: dict, as_of: datetime, cfg: di
         quality_failures.append('interest_coverage_unavailable')
     elif not metrics.interest_free and min_cover is not None and metrics.interest_coverage<float(min_cover):
         quality_failures.append('interest_coverage')
-    cyclical = any(word in ((sector or '')+' '+(industry or '')).casefold()
-                   for word in ('metal','commodity','commodities','sugar','oil gas','mining'))
+    cyclical = is_cyclical(sector, industry)
     pe = (context['market_cap_cr']/metrics.ttm_pat_cr if metrics and metrics.ttm_pat_cr is not None
           and metrics.ttm_pat_cr>0 and context.get('market_cap_cr') is not None else None)
     snapshot = FundamentalSnapshot(
@@ -83,7 +84,8 @@ def evaluate_inputs(history: list[dict], context: dict, as_of: datetime, cfg: di
         flags=tuple(dict.fromkeys(flags)),triggers=metrics.triggers if metrics else (),
         data_failures=tuple(dict.fromkeys(data_failures)),quality_failures=tuple(dict.fromkeys(quality_failures)),
         cyclical=cyclical,valuation_pe=pe,
-        reference_context={k:v for k,v in context.items() if k not in {'metadata','current_sector'}},
+        reference_context={**{k:v for k,v in context.items() if k not in {'metadata','current_sector'}},
+                           'applied_policy': applied_policy},
     )
     return snapshot,evaluate_fundamentals(snapshot,cfg)
 
@@ -142,6 +144,7 @@ class ModuleAPipeline:
         return {'as_of':stamp.isoformat(),'strategy_version':self.cfg['version'],'evaluated':len(results),
                 'eligible':sum(r['decision']['eligible'] for r in results),
                 'configuration_ready':counts.get('sector_leverage_policy_unconfigured',0)==0,
+                'policy':policy_summary(self.cfg),
                 'stocks_with_financial_history':sum(r['snapshot']['filing_timestamp'] is not None for r in results),
                 'rejection_counts':dict(counts),'results':results,'persisted':persist}
 
