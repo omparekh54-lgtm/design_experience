@@ -27,7 +27,7 @@ def test_only_exact_reviewed_corporate_actions_link_to_current_identity():
     actions, known = reviewed_actions()
     original = copy.deepcopy(actions)
     receipt = validate_action_identities(actions, known)
-    assert len(receipt) == 5 and actions == original
+    assert len(receipt) == 6 and actions == original
     assert all(r['previous_isin'] != r['current_isin'] for r in receipt)
 
 
@@ -59,6 +59,18 @@ def test_reviewed_elecon_dividend_retains_fractional_rupee_amount():
     raw = next(a['raw'] for a in actions if a['symbol'] == 'ELECON')
     parsed = module.parse_actions(document([raw]), NOW)[0]
     assert parsed['cash_amount'] == 0.5
+
+
+def test_reviewed_techm_dividend_preserves_source_terms_and_rejects_changes():
+    actions, known = reviewed_actions()
+    action = next(a for a in actions if a['symbol'] == 'TECHM')
+    parsed = module.parse_actions(document([action['raw']]), NOW)[0]
+    assert parsed['cash_amount'] == 15 and parsed['ex_date'] == date(2026, 10, 23)
+    assert parsed['raw']['isin'] == 'INE669C01028'
+    assert validate_action_identities([parsed], known)[0]['current_isin'] == 'INE669C01036'
+    parsed['raw'] = {**parsed['raw'], 'subject': 'Interim Dividend - Rs 16 Per Share'}
+    with pytest.raises(SourceError, match='action_isin_mismatch'):
+        validate_action_identities([parsed], known)
 
 
 def test_failed_reference_stage_preserves_completed_stage_receipts(monkeypatch):

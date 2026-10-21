@@ -12,6 +12,11 @@ from packages.pms.module_e import ENGINE_VERSION
 
 router = APIRouter(prefix="/v1/console", tags=["console"])
 
+BENCHMARK_COVERAGE_SQL = """select benchmark_code,count(distinct trade_date) rows,
+min(trade_date) first_date,max(trade_date) latest from pms.module_e_benchmark_bars
+where source in ('NSE_HISTORICAL_OR','NSE_DAILY_INDEX') and trade_date<=:d
+group by benchmark_code order by benchmark_code"""
+
 
 def _engine():
     from apps.api.main import db_engine
@@ -35,7 +40,7 @@ def _session(conn, day):
     )
     return conn.execute(
         text(
-            "select max(trade_date) from pms.module_e_benchmark_bars where benchmark_code='NIFTY50' and source='NSE_HISTORICAL_OR' and trade_date<=:d"
+            "select max(trade_date) from pms.module_e_benchmark_bars where benchmark_code='NIFTY50' and source in ('NSE_HISTORICAL_OR','NSE_DAILY_INDEX') and trade_date<=:d"
         ),
         {"d": cutoff},
     ).scalar_one_or_none()
@@ -426,7 +431,7 @@ def data_status():
         benchmarks = (
             conn.execute(
                 text(
-                    "select benchmark_code,count(*) rows,min(trade_date) first_date,max(trade_date) latest from pms.module_e_benchmark_bars where source='NSE_HISTORICAL_OR' and trade_date<=:d group by benchmark_code order by benchmark_code"
+                    BENCHMARK_COVERAGE_SQL
                 ),
                 {"d": day},
             )
