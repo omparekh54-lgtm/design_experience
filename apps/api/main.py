@@ -149,7 +149,8 @@ def ready():
     except Exception as exc:
         logging.getLogger(__name__).warning("Readiness failed: %s", connection_failure_code(exc))
         raise HTTPException(503,"Database unavailable") from None
-    return {"status":"ready","database":"reachable","execution_readiness":False}
+    return {"status":"ready","database":"reachable","execution_readiness":False,
+            "deployed_commit":os.getenv('RENDER_GIT_COMMIT') or None}
 
 
 @app.post("/v1/module-a/evaluate")

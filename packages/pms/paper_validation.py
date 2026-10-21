@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, asdict
-from datetime import date
+from datetime import date, datetime, time
 from typing import Any
 from uuid import uuid4
 
@@ -48,14 +48,20 @@ class PaperValidationService:
         criteria = criteria or PaperValidationCriteria()
         if ended_on < started_on:
             raise ValueError("ended_on must be on or after started_on")
+        from packages.pms.paper_campaign import load_evidence
+        from packages.pms.module_a_context import IST
+        now=datetime.now(IST)
         with self.engine.connect() as conn:
+            evidence=load_evidence(conn,now=min(now,datetime.combine(ended_on,time.max,tzinfo=IST)))
+            qualified=[date.fromisoformat(d) for d in (evidence or {}).get('qualifying_sessions',[]) if started_on<=date.fromisoformat(d)<=ended_on]
             fills = int(
                 conn.execute(
                     text("""
                 select count(*) from broker_fills f join broker_orders o on o.id=f.order_id
                 where o.mode='PAPER' and f.raw_response->>'implementation'='PAPER_EXECUTION_v1.0' and (f.fill_time at time zone 'Asia/Kolkata')::date between :s and :e
+                and (f.fill_time at time zone 'Asia/Kolkata')::date=any(cast(:qualified as date[]))
             """),
-                    {"s": started_on, "e": ended_on},
+                    {"s": started_on, "e": ended_on,"qualified":qualified},
                 ).scalar_one()
             )
             snapshots = [
@@ -63,9 +69,9 @@ class PaperValidationService:
                 for r in conn.execute(
                     text("""
                 select snapshot_date,nav from portfolio_snapshots
-                where account_mode='PAPER' and snapshot_date between :s and :e order by snapshot_date
+                where account_mode='PAPER' and snapshot_date between :s and :e and snapshot_date=any(cast(:qualified as date[])) order by snapshot_date
             """),
-                    {"s": started_on, "e": ended_on},
+                    {"s": started_on, "e": ended_on,"qualified":qualified},
                 )
                 .mappings()
                 .all()
@@ -76,7 +82,7 @@ class PaperValidationService:
                 select count(*) from reconciliation_runs where account_mode='PAPER'
                 and (started_at at time zone 'Asia/Kolkata')::date between :s and :e and status not in ('SUCCESS','MATCHED')
             """),
-                    {"s": started_on, "e": ended_on},
+                    {"s": started_on, "e": ended_on,"qualified":qualified},
                 ).scalar_one()
             )
             worker_failures = int(
@@ -84,7 +90,7 @@ class PaperValidationService:
                     text("""
                 select count(*) from worker_runs where (started_at at time zone 'Asia/Kolkata')::date between :s and :e and status in ('FAILED','BLOCKED','INTERRUPTED')
             """),
-                    {"s": started_on, "e": ended_on},
+                    {"s": started_on, "e": ended_on,"qualified":qualified},
                 ).scalar_one()
             )
             dq_errors = int(
@@ -104,6 +110,8 @@ class PaperValidationService:
         calendar_days = (ended_on - started_on).days + 1
         metrics = {
             "calendar_days": calendar_days,
+            "campaign_evidence":evidence,
+            "qualified_campaign_sessions":len(qualified),
             "fills": fills,
             "snapshots": len(snapshots),
             "reconciliation_mismatches": recon_mismatch,
@@ -113,7 +121,9 @@ class PaperValidationService:
             "ending_nav": float(snapshots[-1]["nav"]) if snapshots else None,
         }
         gates = {
-            "duration": calendar_days >= criteria.min_calendar_days,
+            "campaign_bound":bool(evidence and started_on>=datetime.fromisoformat(evidence['activated_at']).astimezone(IST).date() and ended_on<=now.date()),
+            "duration":bool(evidence and evidence['elapsed_calendar_days']>=criteria.min_calendar_days),
+            "elapsed_sessions":len(qualified)>=criteria.min_snapshots,
             "fills": fills >= criteria.min_fills,
             "snapshots": len(snapshots) >= criteria.min_snapshots,
             "reconciliation": recon_mismatch <= criteria.max_reconciliation_mismatches,
