@@ -96,7 +96,7 @@ def test_v2_overlay_hides_exact_legacy_identity_and_all_its_stale_facts(database
     with database.begin() as c:
         c.execute(text('alter table pms.financial_filings rename to financial_filings_local'))
         c.execute(text('alter table pms.financial_facts rename to financial_facts_local'))
-        c.execute(text('create table public.legacy_filings (like pms.financial_filings_local including all)'))
+        c.execute(text('create table public.legacy_filings (like pms.financial_filings_local including all excluding indexes)'))
         c.execute(text('create table public.legacy_facts(filing_id bigint,fact_name text,value numeric,unit text)'))
         c.execute(text("""insert into public.legacy_filings(id,instrument_id,period_end,filing_timestamp,source,consolidated,revision_number,filing_kind,raw_payload)
             values(1000,1,'2026-06-30','2026-08-01 12:00Z','NSE',true,1,'quarter','{}'),
