@@ -1,0 +1,73 @@
+name: PMS targeted PAPER input repair
+on:
+  push:
+    branches: [main]
+    paths:
+      - packages/pms/paper_data_repair.py
+      - scripts/repair_paper_inputs.py
+      - .github/workflows/pms-paper-input-repair.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: pms-market-close-paper
+  cancel-in-progress: false
+jobs:
+  repair:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [financials, sectors]
+    env:
+      DATABASE_URL: ${{ secrets.NEON_PMS_DATABASE_URL }}
+      PMS_NEON_ARCHIVE_JSON: ${{ secrets.PMS_NEON_ARCHIVE_JSON }}
+      SSL_CERT_FILE: /etc/ssl/certs/ca-certificates.crt
+      PMS_DATABASE_VERIFY_FULL: '1'
+      EXECUTION_MODE: PAPER
+      LIVE_TRADING_ENABLED: 'false'
+      REPAIR_MODE: ${{ matrix.mode }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Repair from original evidence with PAPER entries disabled
+        run: python scripts/repair_paper_inputs.py "$REPAIR_MODE" --output "repair-$REPAIR_MODE.json"
+      - name: Preserve receipts including partial repairs and failures
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pms-paper-input-repair-${{ matrix.mode }}-${{ github.run_id }}
+          path: repair-*.json
+          retention-days: 30
+  verify-collector:
+    needs: repair
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      DATABASE_URL: ${{ secrets.NEON_PMS_DATABASE_URL }}
+      PMS_NEON_ARCHIVE_JSON: ${{ secrets.PMS_NEON_ARCHIVE_JSON }}
+      SSL_CERT_FILE: /etc/ssl/certs/ca-certificates.crt
+      PMS_DATABASE_VERIFY_FULL: '1'
+      EXECUTION_MODE: PAPER
+      LIVE_TRADING_ENABLED: 'false'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Verify corrected collector against a completed exchange session
+        run: python scripts/repair_paper_inputs.py collector --output collector-verification.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pms-collector-verification-${{ github.run_id }}
+          path: collector-verification.json
+          retention-days: 30
