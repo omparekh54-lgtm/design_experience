@@ -38,7 +38,12 @@ class ProductionReadinessController:
             paper = (
                 conn.execute(
                     text(
-                        "select id,passed,created_at from paper_validation_runs order by created_at desc limit 1"
+                        """select v.id,v.passed,v.created_at from paper_validation_runs v
+                        join pms.paper_campaigns c on c.closed_at is null
+                         and v.metrics->'campaign_evidence'->>'campaign_id'=c.id::text
+                        where v.gates->>'campaign_bound'='true' and v.gates->>'duration'='true'
+                         and v.gates->>'elapsed_sessions'='true'
+                        order by v.created_at desc limit 1"""
                     )
                 )
                 .mappings()

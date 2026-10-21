@@ -160,6 +160,11 @@ class DailyServices:
     def __init__(self, engine, cfg):
         self.engine, self.cfg = engine, cfg
 
+    def campaign_context(self, code_version):
+        from packages.pms.paper_campaign import campaign_context
+        with self.engine.connect() as c:
+            return campaign_context(c,self.cfg,code_version)
+
     def settle(self, day):
         from packages.pms.formal_paper import FormalPaperExecution
 
@@ -168,9 +173,13 @@ class DailyServices:
     def admit(self, day):
         from packages.pms.formal_paper import FormalPaperExecution
 
+        from packages.pms.matrix_data import code_fingerprint
+        if not self.campaign_context(code_fingerprint())['campaign_guard_ok']:
+            return dict(status='BLOCKED',reasons=['campaign_frozen_inputs_changed'])
         return FormalPaperExecution(self.engine, self.cfg).admit(day)
 
     def preflight(self, day, now):
+        source_complete=False
         calendar = MarketCalendar.from_database(self.engine, now)
         forward = calendar.forward(day, 1)
         if not forward:
@@ -185,7 +194,8 @@ class DailyServices:
         if os.getenv('PMS_CLOUD_COLLECTION_REQUIRED', '0') == '1':
             from packages.pms.cloud_collection import collection_gate
             with self.engine.connect() as conn:
-                if not collection_gate(conn, day, now):
+                source_complete=collection_gate(conn,day,now)
+                if not source_complete:
                     return {'status':'BLOCKED','reasons':['cloud_collection_missing_partial_failed_or_stale']}
         with self.engine.connect() as conn:
             counts = dict(
@@ -236,6 +246,7 @@ class DailyServices:
         return {
             "status": "BLOCKED" if reasons else "READY",
             "reasons": reasons,
+            "collection_complete":source_complete,
             "benchmark_session_rows": counts,
             "equity_instruments_with_bars": prices,
             "critical_dq_errors": errors,
@@ -332,7 +343,9 @@ class DailyOrchestrator:
             raise ValueError(
                 "Persisted daily runs require today's IST date; use --check for past dates"
             )
-        fingerprint = hashlib.sha256(encode(self.cfg).encode()).hexdigest()
+        from packages.pms.backtest_matrix import fingerprint as config_fingerprint
+        from packages.pms.matrix_data import code_fingerprint
+        fingerprint = config_fingerprint(self.cfg)
         key = f"{day}:PAPER:{VERSION}:{fingerprint}"
         base = {
             "trade_date": str(day),
@@ -340,6 +353,7 @@ class DailyOrchestrator:
             "mode": "PAPER",
             "implementation": VERSION,
             "config_hash": fingerprint,
+            "code_version": code_fingerprint(),
             "run_key": key,
             "broker_orders_submitted": 0,
             "proposal_only": False,
@@ -354,6 +368,10 @@ class DailyOrchestrator:
                 "check_only": True,
                 "preflight": preflight,
             }
+        if hasattr(self.services,'campaign_context'):
+            base.update(self.services.campaign_context(base['code_version']))
+        else:
+            base.update(campaign_id=None,campaign_guard_ok=True)
         with self.journal.exclusive() as acquired:
             if not acquired:
                 return {
@@ -362,7 +380,7 @@ class DailyOrchestrator:
                     "reason": "another_daily_run_holds_lock",
                 }
             prior = self.journal.latest(key)
-            if prior and prior["status"] == "SUCCESS" and not rerun and os.getenv('PMS_CLOUD_COLLECTION_REQUIRED','0')!='1':
+            if base["campaign_guard_ok"] and prior and prior["details"].get("campaign_id")==base["campaign_id"] and prior["status"] == "SUCCESS" and not rerun and os.getenv('PMS_CLOUD_COLLECTION_REQUIRED','0')!='1':
                 replay = {**prior["details"], "replayed": True}
                 try:
                     replay["paper_admission"] = self.services.admit(day)
@@ -416,7 +434,10 @@ class DailyOrchestrator:
                 preflight = stage(
                     "preflight", lambda: self.services.preflight(day, now)
                 )
-                if settlement["status"] in {"BLOCKED", "FAILED"}:
+                report['collection_complete']=bool(preflight.get('collection_complete',False))
+                if not report['campaign_guard_ok']:
+                    report.update(status='BLOCKED',reasons=['campaign_frozen_inputs_changed'])
+                elif settlement["status"] in {"BLOCKED", "FAILED"}:
                     report.update(
                         status="BLOCKED", reasons=["paper_settlement_requires_review"]
                     )
@@ -428,6 +449,7 @@ class DailyOrchestrator:
                     reconciliation = stage(
                         "paper_reconciliation", lambda: self.services.reconcile(day)
                     )
+                    report['reconciliation_ok']=reconciliation['ok'] is True
                     if not reconciliation["ok"]:
                         report.update(
                             status="BLOCKED", reasons=["paper_reconciliation_mismatch"]
@@ -486,4 +508,6 @@ class DailyOrchestrator:
                         error_type=type(exc).__name__,
                     )
                     self.journal.save(report)
+            report['finished_at']=self._now().isoformat()
+            self.journal.save(report)
             return report
