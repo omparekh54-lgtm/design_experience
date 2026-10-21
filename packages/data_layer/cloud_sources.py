@@ -365,6 +365,22 @@ def parse_master(body):
     return result
 
 
+def cash_equity_master(rows, session_day):
+    """Ordinary equities listed by the requested price session; retain exclusions."""
+    eligible, excluded = {}, []
+    for symbol, row in rows.items():
+        reason = None
+        if symbol.endswith('-RE') and row['name'].upper().endswith('-RE'):
+            reason = 'RIGHTS_ENTITLEMENT_OUTSIDE_CASH_EQUITY_UNIVERSE'
+        elif row['listed_from'] > session_day:
+            reason = 'LISTING_NOT_YET_EFFECTIVE'
+        if reason:
+            excluded.append({**row, 'reason': reason})
+        else:
+            eligible[symbol] = row
+    return eligible, excluded
+
+
 def fetch_classification(http, symbol, isin):
     path = "NextApi/apiClient/GetQuoteApi"
     metadata_doc = http.api(path, functionName="getMetaData", symbol=symbol)

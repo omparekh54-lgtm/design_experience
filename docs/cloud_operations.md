@@ -153,3 +153,27 @@ metric provenance, missing target periods and rejection of foreign hosts,
 exchanges, schemes and unsupported filenames. Financial-sector exclusion in
 Module A remains unchanged. Full cloud verification and import are still
 required; parser replay alone is not Phase-3 acceptance.
+
+### Overnight master additions and historical catch-up scope
+
+The restarted run `39544467498` stopped before filing checks with
+`preflight_master_identity_unresolved`. The 21 October master (SHA-256
+`a6a09d6f397db028efcb4191a8aa5f0475a5f47697c070a27d48fd0795092810`)
+adds HDFIRE (listed 21 October), IIRM (22 October), and OLAELEC-RE (22 October).
+None belongs to the ordinary-equity price universe for the requested
+19 October session. The rights entitlement is also a separate security type.
+
+Both verification and ingestion now retain the raw master and report why
+later listings and explicitly named rights entitlements are excluded from the
+requested session. Later ordinary listings become eligible on their actual
+listing date. Classification refresh still uses today's observation date and
+next-day effective dating, but only requires instruments listed by the price
+session being caught up. Daily runs use their own current session cutoff.
+This does not claim readiness for a later session that includes a new listing.
+
+For genuinely new, already-effective listings, the verifier constructs a
+read-only identity projection matching the existing writer's insertion path.
+It still blocks changed ISINs, renamed symbols sharing an existing ISIN and
+duplicate new identities. It creates no instrument IDs and performs no writes.
+The collector adds valid listings only during the subsequent guarded import.
+The existing snapshot, original historical rows, and PAPER locks remain intact.

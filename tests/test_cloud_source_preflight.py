@@ -57,3 +57,46 @@ def test_repeated_source_denials_stop_new_downloads(monkeypatch):
     with pytest.raises(SourceError, match='preflight_source_access_denied'):
         http.fetch('https://www.nseindia.com/api/next')
     assert len(calls) == 3 and budget.blocked
+
+
+def test_new_listing_projection_is_readonly_and_still_rejects_identity_conflicts():
+    known = {'OLD': {'isin': 'INE000A01010', 'sector': 'Services', 'id': 1}}
+    master = {'OLD': {'isin': 'INE000A01010'},
+              'NEW': {'isin': 'INE111A01010', 'listed_from': date(2026, 10, 21)}}
+    result = verify.projected_master(known, master)
+    assert set(result) == {'OLD', 'NEW'} and 'NEW' not in known
+    assert result['OLD']['id'] == 1 and 'id' not in result['NEW']
+    assert verify.classification_due(result['NEW'], date(2026, 10, 21))
+    for bad in [{'OLD': {'isin': 'INE999A01010'}},
+                {'RENAMED': {'isin': 'INE000A01010'}},
+                {'NEW1': {'isin': 'INE111A01010'}, 'NEW2': {'isin': 'INE111A01010'}}]:
+        with pytest.raises(SourceError, match='preflight_master_identity_unresolved'):
+            verify.projected_master(known, bad)
+
+
+def test_current_cash_equity_scope_defers_future_listings_and_excludes_rights():
+    from packages.data_layer.cloud_sources import cash_equity_master
+    rows = {
+        'TODAY': dict(symbol='TODAY', name='Today Ltd', listed_from=date(2026, 10, 21)),
+        'FUTURE': dict(symbol='FUTURE', name='Future Ltd', listed_from=date(2026, 10, 22)),
+        'TEST-RE': dict(symbol='TEST-RE', name='Test Ltd-RE', listed_from=date(2026, 10, 21)),
+    }
+    current, excluded = cash_equity_master(rows, date(2026, 10, 21))
+    assert set(current) == {'TODAY'} and len(rows) == 3
+    assert {r['reason'] for r in excluded} == {
+        'LISTING_NOT_YET_EFFECTIVE', 'RIGHTS_ENTITLEMENT_OUTSIDE_CASH_EQUITY_UNIVERSE'}
+    tomorrow, _ = cash_equity_master(rows, date(2026, 10, 22))
+    assert set(tomorrow) == {'TODAY', 'FUTURE'}
+    historical, _ = cash_equity_master(rows, date(2026, 10, 19))
+    assert historical == {}
+
+
+def test_classification_writer_defers_later_listings_without_requesting_sources():
+    store = verify.CloudStore(None)
+    store.instruments = lambda: {'NEW': {'listed_from': date(2026, 10, 21)}}
+    # No engine or HTTP is available: a later listing must not trigger either.
+    result = store.classifications(None, date(2026, 10, 21), limit=100,
+                                   listed_through=date(2026, 10, 19))
+    assert result['due'] == result['remaining'] == 0
+    store.instruments = lambda: {'FUTURE': {'listed_from': date(2026, 10, 22)}}
+    assert store.classifications(None, date(2026, 10, 21), limit=100)['remaining'] == 0

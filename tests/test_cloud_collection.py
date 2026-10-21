@@ -809,8 +809,8 @@ def test_initial_catch_up_does_not_backdate_current_reference_snapshots(monkeypa
     import packages.pms.cloud_collection as module
     target = NOW.date() - timedelta(days=1)
     seen = []
-    store = SimpleNamespace(classifications=lambda http, day, limit:
-        seen.append(('classification', day, limit)) or {'remaining': 0})
+    store = SimpleNamespace(classifications=lambda http, day, limit, listed_through:
+        seen.append(('classification', day, limit, listed_through)) or {'remaining': 0})
     collector = module.CloudCollector(store, now=NOW, catch_up_date=target,
                                       max_classifications=500)
     collector.core = lambda day, apply: seen.append(('prices', day)) or {
@@ -819,7 +819,7 @@ def test_initial_catch_up_does_not_backdate_current_reference_snapshots(monkeypa
         'status': 'SUCCESS', 'stages': {}}
     assert collector.collect(target, apply=True)['status'] == 'SUCCESS'
     assert seen == [('prices', target), ('references', NOW.date()),
-                    ('classification', NOW.date(), 500)]
+                    ('classification', NOW.date(), 500, target)]
 
 
 def test_successful_references_never_promote_partial_price_coverage():
