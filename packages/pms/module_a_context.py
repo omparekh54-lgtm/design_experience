@@ -51,12 +51,5 @@ def validate_module_a_config(cfg: dict):
         value = f.get(key)
         if value is not None and (not math.isfinite(float(value)) or float(value)<=0 or float(value)!=int(float(value))):
             raise ValueError(f'fundamental.{key} must be a positive integer')
-    leverage = f.get('leverage_limits',{})
-    for sector,limits in [('default',leverage.get('default',{})),*leverage.get('sectors',{}).items()]:
-        for key in ('max_debt_to_equity','min_interest_coverage'):
-            value = limits.get(key)
-            if value is not None and (not math.isfinite(float(value)) or float(value)<0):
-                raise ValueError(f'Invalid leverage limit {sector}.{key}')
-    value = f.get('cyclical_high_pe_threshold')
-    if value is not None and (not math.isfinite(float(value)) or float(value)<=0):
-        raise ValueError('cyclical_high_pe_threshold must be positive or null')
+    from packages.pms.policies import validate_policy_config
+    validate_policy_config(cfg)
