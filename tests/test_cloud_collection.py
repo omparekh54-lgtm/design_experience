@@ -447,7 +447,8 @@ def test_scrr_denominator_reconciles_equity_and_depository_receipts():
         b'<NumberOfSharesUnderlyingOutstandingDepositoryReceipts contextRef="total">100'
         b'</NumberOfSharesUnderlyingOutstandingDepositoryReceipts></root>')
     result = parse_shareholding(xml, dict(shp_record(), pr_and_prgrp='55.56'))
-    assert result['total_shares'] == 900
+    assert result['total_shares'] == 1000
+    assert result['percentage_reconciliation']['percentage_denominator'] == 900
     assert abs(result['promoter_holding_pct'] - Decimal('55.56')) < Decimal('.01')
     with pytest.raises(SourceError, match='totals_invalid'):
         parse_shareholding(xml.replace(b'>900<', b'>899<'), shp_record())
@@ -1062,6 +1063,31 @@ def test_xml_percentage_selects_reconciled_table_basis(declared, summary):
     with pytest.raises(SourceError, match='xml_percentage_mismatch'):
         parse_shareholding(xml.replace(f'>{declared}<'.encode(), b'>0.6<'),
                           dict(shp_record(), pr_and_prgrp='60'))
+
+
+def test_scrr_percentage_keeps_trusts_and_excludes_only_nonpublic_drs():
+    extra = category_fact('PublicShareholdingMember', 400, 'public') + category_fact(
+        'SharesHeldByNonPromoterNonPublicShareholdersMember', 100, 'nonpublic')
+    extra += '''
+      <NumberOfFullyPaidUpEquityShares contextRef="total">800</NumberOfFullyPaidUpEquityShares>
+      <NumberOfSharesUnderlyingOutstandingDepositoryReceipts contextRef="total">200</NumberOfSharesUnderlyingOutstandingDepositoryReceipts>
+      <NumberOfFullyPaidUpEquityShares contextRef="nonpublic">10</NumberOfFullyPaidUpEquityShares>
+      <NumberOfSharesUnderlyingOutstandingDepositoryReceipts contextRef="nonpublic">90</NumberOfSharesUnderlyingOutstandingDepositoryReceipts>
+      <ShareholdingAsAPercentageOfTotalNumberOfShares contextRef="promoter">0.5495</ShareholdingAsAPercentageOfTotalNumberOfShares>
+    '''
+    xml = shp_xml(pledged='50').replace(b'</root>', (extra + '</root>').encode())
+    record = dict(shp_record(), pr_and_prgrp='54.95')
+    result = parse_shareholding(xml, record)
+    assert result['total_shares'] == 1000
+    assert result['promoter_holding_pct'] == Decimal(50000)/910
+    assert result['promoter_pledge_pct'] == 10
+    assert result['percentage_reconciliation']['percentage_denominator'] == 910
+    for bad in [xml.replace(b'>10<', b'>9<'), xml.replace(b'>90<', b'>91<'),
+                xml.replace(b'>200<', b'>80<')]:
+        with pytest.raises(SourceError, match='totals_invalid'):
+            parse_shareholding(bad, record)
+    with pytest.raises(SourceError, match='xml_percentage_mismatch'):
+        parse_shareholding(xml.replace(b'>0.5495<', b'>0.56<'), dict(record, pr_and_prgrp='56'))
 
 
 def test_reviewed_xml_identity_defect_is_document_bound(monkeypatch):

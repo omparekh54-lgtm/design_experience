@@ -177,3 +177,30 @@ It still blocks changed ISINs, renamed symbols sharing an existing ISIN and
 duplicate new identities. It creates no instrument IDs and performs no writes.
 The collector adds valid listings only during the subsequent guarded import.
 The existing snapshot, original historical rows, and PAPER locks remain intact.
+
+### USHAMART percentage reconciliation (21 October)
+
+Run `39545421683` checked all 4,472 items and blocked only
+`shareholding_xml_percentage_mismatch` for USHAMART. The import was skipped.
+The filing's source SHA-256 is
+`a071e40ddbab88e17b8393aa174869a26b7048f8b59389e84dd7d86b323ae129`.
+Its promoter/public/non-public counts reconcile to 304,742,010 reported shares.
+The declared 40.09% uses a 300,120,140 denominator: exclude 4,621,870 non-public
+DR shares while retaining the 341,500 employee-trust shares. The parser now
+considers that basis only after reconciling the non-public paid/partly-paid/DR
+breakdown, category totals and the overall DR count. The original percentage
+tolerance, source identity checks and pledge requirements still apply.
+
+Reported shares outstanding are now kept separately from percentage bases.
+The previous DR path incorrectly reduced total shares to the paid-share
+subtotal; this is corrected before the resumed import. Both shareholding and
+shares-outstanding provenance retain the reported count, paid subtotal,
+promoter count, chosen denominator and XML-declared ratio. No raw source
+figure or historical filing timestamp is rewritten.
+
+As a cross-check, the current NSE quote reports 304,741,780 issued shares
+(quote SHA-256 `5e0df8678cfd28e6028a3abc7470ece1494c8cea0f6e1f2969ff51842370ada0`).
+The 230-share difference is disclosed in the filing's own note about an IEPF
+transfer error. Retain the filed figure and note rather than substitute a
+current quote into historical shareholding facts. Source notes and raw XML
+remain private archival evidence. This review is not a completed cloud import.

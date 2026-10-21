@@ -652,16 +652,18 @@ def parse_shareholding(xml, record, *, expected_isin=None):
     total = [("CategoryOfShareholdersAxis", "ShareholdingPatternMember")]
     shares = number(fact("NumberOfShares", total), integer=True, minimum=1)
     reported_shares = shares
+    paid_equity_shares = shares
     drs = fact("NumberOfSharesUnderlyingOutstandingDepositoryReceipts", total, optional=True)
     if drs is not None and number(drs, integer=True):
-        # SCRR shareholding excludes depository receipts. Reconcile all reported
-        # counts before using the equity denominator; never relax the percentage gate.
+        # The percentage table can exclude DR categories. Its denominator is
+        # separate from the reported total equity shares (including underlying
+        # DR shares); do not shrink shares_outstanding to fit a percentage.
         paid = number(fact("NumberOfFullyPaidUpEquityShares", total), integer=True)
         partly = fact("NumberOfPartlyPaidUpEquityShares", total, optional=True)
         equity = paid + (number(partly, integer=True) if partly is not None else 0)
         if equity <= 0 or equity + number(drs, integer=True) != shares:
             raise SourceError("shareholding_totals_invalid")
-        shares = equity
+        paid_equity_shares = equity
     public = fact("NumberOfShares", [
         ("CategoryOfShareholdersAxis", "PublicShareholdingMember")], optional=True)
     nonpublic = fact("NumberOfShares", [
@@ -681,7 +683,7 @@ def parse_shareholding(xml, record, *, expected_isin=None):
         promoter_shares = number(promoter_count, integer=True)
     if promoter_shares > shares:
         raise SourceError("shareholding_totals_invalid")
-    denominator = shares
+    denominator = paid_equity_shares
     if public is not None:
         if promoter_shares + number(public, integer=True) + nonpublic_count != reported_shares:
             raise SourceError("shareholding_totals_invalid")
@@ -693,9 +695,25 @@ def parse_shareholding(xml, record, *, expected_isin=None):
         # Exchange taxonomies report percentages on different table bases.
         # Resolve the base from the XML's own percentage and reconciled category
         # totals, never by selecting a base that happens to fit the API summary.
-        bases = {shares, reported_shares}
+        bases = {paid_equity_shares, reported_shares}
         if public is not None:
             bases.add(promoter_shares + number(public, integer=True))
+            nonpublic_drs = fact('NumberOfSharesUnderlyingOutstandingDepositoryReceipts', [
+                ('CategoryOfShareholdersAxis', 'SharesHeldByNonPromoterNonPublicShareholdersMember')],
+                optional=True)
+            if nonpublic_drs is not None and number(nonpublic_drs, integer=True):
+                dr_count = number(nonpublic_drs, integer=True)
+                paid = number(fact('NumberOfFullyPaidUpEquityShares', [
+                    ('CategoryOfShareholdersAxis', 'SharesHeldByNonPromoterNonPublicShareholdersMember')]), integer=True)
+                partly = fact('NumberOfPartlyPaidUpEquityShares', [
+                    ('CategoryOfShareholdersAxis', 'SharesHeldByNonPromoterNonPublicShareholdersMember')], optional=True)
+                if (paid + (number(partly, integer=True) if partly is not None else 0)
+                        + dr_count != nonpublic_count
+                        or drs is None or dr_count > number(drs, integer=True)):
+                    raise SourceError('shareholding_totals_invalid')
+                # A+B+C2: exclude non-public DRs (C1), retain employee trusts
+                # (C2). Require both category and total counts to reconcile.
+                bases.add(reported_shares - dr_count)
         bases.discard(0)
         denominator = min(bases, key=lambda n: abs(Decimal(100) * promoter_shares / n - declared_pct))
         rounding = min(Decimal('.1'), max(Decimal('.005'),
@@ -737,6 +755,12 @@ def parse_shareholding(xml, record, *, expected_isin=None):
         promoter_holding_pct=percentage,
         promoter_pledge_pct=pledge,
         total_shares=shares,
+        percentage_reconciliation={
+            'reported_total_shares': reported_shares,
+            'paid_equity_shares': paid_equity_shares,
+            'promoter_shares': promoter_shares,
+            'percentage_denominator': denominator,
+            'declared_ratio': declared},
         identity_review=identity_review,
         revision_number=1 if record.get("revisedData") == "Y" else 0,
     )
