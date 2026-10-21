@@ -141,3 +141,33 @@ def test_financial_sector_taxonomies_preserve_income_basis_and_quarter(profile, 
     generic = filing_from_exchange_record(replace(record, xbrl_uri='https://example.com/bank.xml'), xml)
     assert generic.sales is None
     assert 'canonical_metric_basis' not in generic.raw_payload
+
+
+def test_ind_as_insurance_revenue_preserves_quarter_units_and_filing_date():
+    # Synthetic insurance taxonomy: premium and investment income must not be
+    # mistaken for InsuranceRevenue. A later filing does not change its quarter.
+    xml = SAMPLE_XBRL.replace(b'RevenueFromOperations', b'InsuranceRevenue')
+    xml = xml.replace(b'</xbrli:xbrl>', b'''
+      <in-gaap:GrossWrittenPremium contextRef="Q1">999999</in-gaap:GrossWrittenPremium>
+      <in-gaap:InvestmentIncome contextRef="Q1" unitRef="INR">9000000000</in-gaap:InvestmentIncome>
+      </xbrli:xbrl>''')
+    record = ExchangeFilingRecord(exchange='NSE', symbol='TESTINS', company_name='Test Insurer',
+        period_end=date(2026, 6, 30), filed_at=datetime(2026, 10, 20, 19, 12, 49),
+        statement_scope='standalone', submission_type='Original',
+        xbrl_uri='https://nsearchives.nseindia.com/corporate/xbrl/IF_INS_COM_IND_AS_123_WebXMLFile_20261020_191249443.xml',
+        raw_payload={'original': 'preserved'})
+    filing = filing_from_exchange_record(record, xml)
+    assert (filing.sales, filing.pat) == (Decimal('120'), Decimal('15'))
+    assert filing.period_end == date(2026, 6, 30)
+    assert filing.filed_at == datetime(2026, 10, 20, 19, 12, 49)
+    assert filing.raw_payload['canonical_metric_basis'] == {
+        'sales': 'IND_AS_INSURANCE_REVENUE', 'sales_fact': 'InsuranceRevenue',
+        'pat_fact': 'ProfitLossForPeriod'}
+    assert filing.raw_payload['original'] == 'preserved'
+    assert 'canonical_metric_basis' not in record.raw_payload
+    assert filing_from_exchange_record(replace(record, period_end=date(2026, 9, 30)), xml).sales is None
+    for other in [replace(record, exchange='BSE'),
+                  replace(record, xbrl_uri=record.xbrl_uri.replace('nsearchives.nseindia.com', 'example.com')),
+                  replace(record, xbrl_uri=record.xbrl_uri.replace('https:', 'http:')),
+                  replace(record, xbrl_uri=record.xbrl_uri.replace('WebXMLFile', 'unreviewed'))]:
+        assert filing_from_exchange_record(other, xml).sales is None

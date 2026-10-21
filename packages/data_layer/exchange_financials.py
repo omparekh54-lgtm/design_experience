@@ -373,9 +373,14 @@ def filing_from_exchange_record(
             'BANKING': ('Income', 'ProfitLossForThePeriod', 'BANK_TOTAL_INCOME'),
             'GI': ('OperatingIncome', 'ProfitLossAfterTax', 'GENERAL_INSURANCE_OPERATING_INCOME'),
             'LI': ('NetPremiumIncome', 'ProfitLossAfterTaxAndExtraordinaryItems', 'LIFE_INSURANCE_NET_PREMIUM'),
+            'INS_COM_IND_AS': ('InsuranceRevenue', 'ProfitLossForPeriod', 'IND_AS_INSURANCE_REVENUE'),
         }
         match = re.fullmatch(r'INTEGRATED_FILING_(BANKING|GI|LI)_[0-9]+_[0-9]+_WEB.xml',
                              source.path.rsplit('/', 1)[-1])
+        insurance_match = re.fullmatch(
+            r'IF_(INS_COM_IND_AS)_[0-9]+_WebXMLFile_[0-9]{8}_[0-9]+\.xml',
+            source.path.rsplit('/', 1)[-1])
+        match = match or insurance_match
         if (record.exchange == 'NSE' and source.scheme == 'https'
                 and source.hostname == 'nsearchives.nseindia.com' and match):
             revenue, pat, basis = profiles[match.group(1)]
