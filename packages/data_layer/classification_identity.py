@@ -25,7 +25,8 @@ def reviewed_classification_identity(http, metadata_doc, metadata, symbol, isin,
     review = matches[0]
     master_doc = http.fetch('https://nsearchives.nseindia.com/content/equities/EQUITY_L.csv')
     current = parse_master(master_doc.body).get(symbol)
-    if (current is None or current['isin'] != isin or current['series'] != series
+    if (current is None or current['isin'] != isin
+            or series not in current.get('series_list', [current['series']])
             or current['name'] != review['company']):
         raise SourceError('classification_identity_mismatch')
     return {**review, 'verified_master_sha256': master_doc.sha256,

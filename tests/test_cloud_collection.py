@@ -155,6 +155,24 @@ def test_master_validates_listing_date_and_identity():
         parse_master(csv_body([{**row, "ISIN NUMBER": "UNKNOWN"}]))
 
 
+def test_master_preserves_multiple_series_without_selecting_one():
+    row = {"SYMBOL": "TEST", "NAME OF COMPANY": "Test", "SERIES": "EQ",
+           "DATE OF LISTING": "01-Jan-2020", "ISIN NUMBER": "INE000000001",
+           "FACE VALUE": "1"}
+    rows = [row, {**row, "SERIES": "BZ"}, {**row, "SERIES": "BE"}]
+    forward = parse_master(csv_body(rows))["TEST"]
+    assert forward == parse_master(csv_body(list(reversed(rows))))["TEST"]
+    assert forward["series"] is None
+    assert forward["series_list"] == ["BE", "BZ", "EQ"]
+    for field, value in [("ISIN NUMBER", "INE000000002"),
+                         ("NAME OF COMPANY", "Other"),
+                         ("DATE OF LISTING", "02-Jan-2020"), ("FACE VALUE", "2")]:
+        with pytest.raises(SourceError, match="master_identity_invalid"):
+            parse_master(csv_body([row, {**row, "SERIES": "BZ", field: value}]))
+    with pytest.raises(SourceError, match="master_identity_invalid"):
+        parse_master(csv_body([*rows, rows[-1]]))
+
+
 def surveillance_csv(gsm="0", lt="100", st="100"):
     return csv_body(
         [

@@ -191,6 +191,7 @@ class CloudStore:
                                 {
                                     "cloud_master_observed_at": doc.observed_at,
                                     "series": r["series"],
+                                    "series_list": r.get("series_list", [r["series"]]),
                                 }
                             ),
                         },
