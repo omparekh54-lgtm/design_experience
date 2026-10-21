@@ -143,7 +143,7 @@ class PostgresStorage:
                         )
                         on conflict (
                             instrument_id, period_end, filing_timestamp, source,
-                            consolidated, revision_number
+                            consolidated, revision_number, filing_kind
                         ) do update set
                             submission_type=excluded.submission_type,
                             audit_status=excluded.audit_status,
@@ -193,6 +193,12 @@ class PostgresStorage:
                     "equity": filing.equity,
                     "interest_expense": filing.interest_expense,
                 }
+                if (filing.raw_payload.get("financial_extraction") or {}).get("version") == "FINANCIAL_XBRL_v2":
+                    # A reparse may invalidate an earlier segment/duration value.
+                    # Upserting only non-null facts would leave that bad value
+                    # available to Module A indefinitely.
+                    conn.execute(text("delete from financial_facts where filing_id=:filing_id and fact_name=any(cast(:names as text[]))"),
+                        {"filing_id": filing_id, "names": list(facts)})
                 for fact_name, value in facts.items():
                     if value is not None:
                         conn.execute(

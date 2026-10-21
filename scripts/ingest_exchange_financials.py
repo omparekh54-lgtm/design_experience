@@ -8,7 +8,7 @@ from packages.data_layer.exchange_financials import (
     BSEFinancialResultsProvider,
     ExchangeFinancialsError,
     NSEIntegratedFinancialsProvider,
-    filing_from_exchange_record,
+    filings_from_exchange_record,
 )
 from packages.data_layer.models import Instrument
 from packages.data_layer.postgres_storage import PostgresStorage
@@ -70,7 +70,7 @@ def ingest_nse(
                     if strict_xbrl:
                         raise
                     print(f"WARN NSE {symbol} {record.period_end}: XBRL fetch failed: {exc}")
-            filings.append(filing_from_exchange_record(record, xbrl))
+            filings.extend(filings_from_exchange_record(record, xbrl))
         if filings:
             written += storage.append_filings(filings)
         print(f"NSE {symbol}: discovered={len(records)} stored={len(filings)}")
@@ -99,7 +99,7 @@ def ingest_bse(
                     if strict_xbrl:
                         raise
                     print(f"WARN BSE {symbol} {record.period_end}: XBRL fetch failed: {exc}")
-            filings.append(filing_from_exchange_record(record, xbrl))
+            filings.extend(filings_from_exchange_record(record, xbrl))
         if filings:
             written += storage.append_filings(filings)
         print(f"BSE {symbol} ({code}): discovered={len(records)} stored={len(filings)}")

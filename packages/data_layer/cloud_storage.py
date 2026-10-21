@@ -582,7 +582,7 @@ class CloudStore:
                 return known[instrument_id.split(":", 1)[1]]["id"]
 
         ResolvedStorage(engine=RoutedEngine()).append_filings(
-            [filing], refresh_module_a=False
+            list(filing) if isinstance(filing, (list, tuple)) else [filing], refresh_module_a=False
         )
 
     def events(self, dataset, rows, doc):

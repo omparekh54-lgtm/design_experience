@@ -21,7 +21,7 @@ from packages.data_layer.cloud_sources import (IST, OfficialHTTP, SourceError,
     fetch_classification, parse_master, cash_equity_master)
 from packages.data_layer.cloud_storage import CloudStore
 from packages.data_layer.index_membership import equity_membership
-from packages.data_layer.exchange_financials import NSEIntegratedFinancialsProvider, filing_from_exchange_record
+from packages.data_layer.exchange_financials import NSEIntegratedFinancialsProvider, filings_from_exchange_record, FINANCIAL_ACK_DATASET
 from packages.data_layer.action_identity import validate_action_identities
 from packages.pms.cloud_collection import parse_actions, parse_meetings, record_key, CloudCollector
 from packages.pms.database import online_engine
@@ -120,7 +120,7 @@ def verify_item(item, known, budget, now):
             doc = http.fetch(record.xbrl_uri)
             if b'<!DOCTYPE' in doc.body.upper() or b'<!ENTITY' in doc.body.upper():
                 raise SourceError('xbrl_entities_forbidden')
-            filing = filing_from_exchange_record(record, doc.body)
+            filing = filings_from_exchange_record(record, doc.body)[0]
             if filing.sales is None or filing.pat is None:
                 raise SourceError('financial_core_facts_unavailable')
         return {'kind': kind, 'symbol': symbol, 'code': 'OK', 'sha256': doc.sha256}
@@ -146,7 +146,7 @@ def verify(engine, target, *, now=None, workers=8):
         if c.execute(text('SHOW transaction_read_only')).scalar_one() != 'on':
             raise SourceError('preflight_read_only_required')
         pending = {kind: [r['record'] for r in c.execute(text(PENDING_SQL),
-            {'pending': f'CLOUD_{dataset}_PENDING', 'ack': f'CLOUD_{dataset}_XML'}).mappings()]
+            {'pending': f'CLOUD_{dataset}_PENDING', 'ack': FINANCIAL_ACK_DATASET if kind == 'financial' else f'CLOUD_{dataset}_XML'}).mappings()]
             for kind, dataset in [('financial', 'FINANCIAL'), ('shareholding', 'SHAREHOLDING')]}
     master_doc = http.fetch('https://nsearchives.nseindia.com/content/equities/EQUITY_L.csv')
     raw_master = parse_master(master_doc.body)
@@ -168,7 +168,7 @@ def verify(engine, target, *, now=None, workers=8):
     tasks = []
     for kind, discovered in [('financial', [r.raw_payload for r in financials]),
                               ('shareholding', live_shp)]:
-        acked = store.acked(f'CLOUD_{"FINANCIAL" if kind == "financial" else "SHAREHOLDING"}_XML')
+        acked = store.acked(FINANCIAL_ACK_DATASET if kind == 'financial' else 'CLOUD_SHAREHOLDING_XML')
         rows = merge_pending(pending[kind], [r for r in discovered if r.get('symbol') in known])
         rows = [r for r in rows if record_key(r) not in acked]
         tasks.extend((kind, r) for r in rows)

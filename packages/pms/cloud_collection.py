@@ -277,6 +277,9 @@ class CloudCollector:
         if apply:
             from packages.data_layer.index_membership import equity_membership
             equity_membership(members, known)
+        from packages.data_layer.exchange_financials import FINANCIAL_ACK_DATASET, filings_from_exchange_record
+
+        # Versioned receipts reparse queued disclosures accepted by older parsers.
         # Lookback recovers overnight/recent revisions; historical backfill remains separate.
         records = paged_financials(
             self.http,
@@ -287,7 +290,7 @@ class CloudCollector:
             records = [r for r in records if r.symbol in known]
             pending_raw = self.store.queue_records(
                 "CLOUD_FINANCIAL_PENDING",
-                "CLOUD_FINANCIAL_XML",
+                FINANCIAL_ACK_DATASET,
                 [r.raw_payload for r in records],
             )
             self.store.financial_discovered(day)
@@ -299,13 +302,10 @@ class CloudCollector:
             records = [parser._parse_row(r) for r in pending_raw]
             if any(r is None for r in records):
                 raise SourceError("persisted_financial_record_invalid")
-        acked = self.store.acked("CLOUD_FINANCIAL_XML") if apply else set()
+        acked = self.store.acked(FINANCIAL_ACK_DATASET) if apply else set()
         pending = [r for r in records if record_key(r.raw_payload) not in acked]
         written = 0
         errors = []
-        from packages.data_layer.exchange_financials import filing_from_exchange_record
-        from packages.data_layer.postgres_storage import PostgresStorage
-
         for r in pending[: self.max_filings if apply else 1]:
             try:
                 from packages.pms.module_a_context import as_ist
@@ -327,13 +327,14 @@ class CloudCollector:
                 doc = self.http.fetch(r.xbrl_uri)
                 if b"<!DOCTYPE" in doc.body.upper() or b"<!ENTITY" in doc.body.upper():
                     raise SourceError("xbrl_entities_forbidden")
-                filing = filing_from_exchange_record(r, doc.body)
+                filings = filings_from_exchange_record(r, doc.body)
+                filing = filings[0]
                 if filing.sales is None or filing.pat is None:
                     raise SourceError("financial_core_facts_unavailable")
                 if apply:
-                    self.store.financial(filing)
+                    self.store.financial(filings)
                     self.store.ack(
-                        "CLOUD_FINANCIAL_XML", doc, record_key(r.raw_payload)
+                        FINANCIAL_ACK_DATASET, doc, record_key(r.raw_payload)
                     )
                 written += 1
             except Exception as exc:
