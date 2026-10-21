@@ -27,7 +27,7 @@ def test_only_exact_reviewed_corporate_actions_link_to_current_identity():
     actions, known = reviewed_actions()
     original = copy.deepcopy(actions)
     receipt = validate_action_identities(actions, known)
-    assert len(receipt) == 6 and actions == original
+    assert len(receipt) == len(actions) == 7 and actions == original
     assert all(r['previous_isin'] != r['current_isin'] for r in receipt)
 
 
@@ -87,3 +87,12 @@ def test_failed_reference_stage_preserves_completed_stage_receipts(monkeypatch):
     assert r['status'] == 'FAILED' and r['complete'] is False
     assert r['stages']['prices']['complete'] is True
     assert r['stages']['financials']['remaining'] == 12
+
+
+def test_irfc_review_does_not_extend_to_changed_dividend():
+    actions,known=reviewed_actions()
+    a=next(a for a in actions if a['symbol']=='IRFC')
+    assert validate_action_identities([a],known)[0]['current_isin']=='INE053F01010'
+    a['raw']['subject']='Interim Dividend - Rs 1.16 Per Share'
+    with pytest.raises(SourceError,match='action_isin_mismatch'):
+        validate_action_identities([a],known)

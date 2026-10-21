@@ -190,5 +190,37 @@
     "quote_sha256": "395a5e450fd8a0f432b2f7bf188a1a3dcacf063c0944c9eeb95a31c0a954b041",
     "reviewed_on": "2026-10-21",
     "scope": "Exact corporate-action record only; raw dividend amount, ex-date and face value retained. No general ISIN alias or historical price adjustment authorization"
+  },
+  {
+    "symbol": "IRFC",
+    "previous_isin": "INE053F07520",
+    "current_isin": "INE053F01010",
+    "ex_date": "2026-10-23",
+    "action_type": "DIVIDEND",
+    "company": "Indian Railway Finance Corporation Limited",
+    "raw_record_sha256": "0cea8d530b2d0eaa5aedcf91b97530ef9daf748dd26496ca9c597c769e05192c",
+    "raw": {
+      "bcEndDate": "-",
+      "bcStartDate": "-",
+      "caBroadcastDate": null,
+      "comp": "Indian Railway Finance Corporation Limited",
+      "exDate": "23-Oct-2026",
+      "faceVal": "10",
+      "ind": "-",
+      "isin": "INE053F07520",
+      "ndEndDate": "-",
+      "ndStartDate": "-",
+      "recDate": "23-Oct-2026",
+      "series": "EQ",
+      "subject": "Interim Dividend - Rs 1.15 Per Share",
+      "symbol": "IRFC"
+    },
+    "event_source_url": "https://www.nseindia.com/api/corporates-corporateActions?index=equities&from_date=14-10-2026&to_date=05-12-2026",
+    "event_source_sha256": "7dc4c4630108255730e291e37359dd49ea204b6dd7a3f67cd4bea142e6e1227b",
+    "master_sha256": "a6a09d6f397db028efcb4191a8aa5f0475a5f47697c070a27d48fd0795092810",
+    "quote_url": "https://www.nseindia.com/api/NextApi/apiClient/GetQuoteApi?functionName=getSymbolData&marketType=N&series=EQ&symbol=IRFC",
+    "quote_sha256": "e83c88a016b26e07525162db5157606ffd0cb03a5df5847a3767e22c2e97b36f",
+    "reviewed_on": "2026-10-22",
+    "scope": "Exact source event identity review only. NSE event names IRFC EQ with face value 10 and a conflicting identifier; independent current master and detailed quote agree on symbol, issuer name, EQ series, current ISIN and face value. Original identifier retained; no historical alias, identifier rewrite or general event exemption."
   }
 ]
