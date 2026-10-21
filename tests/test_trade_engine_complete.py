@@ -485,33 +485,6 @@ def test_demo_completes_gap_partial_exit_and_leg2_exit_without_orders():
     assert result["position"]["realized_pnl"] > 0
 
 
-def test_database_backtest_open_callbacks_use_prior_regime_and_open_timestamp():
-    from packages.pms.database_backtest import DatabaseBacktestStrategy
-    from packages.pms.module_a_context import IST
-    from sqlalchemy import create_engine, text
-
-    engine = create_engine("sqlite://")
-    with engine.begin() as c:
-        c.execute(
-            text(
-                "create table market_regime_history(trade_date date,max_open_trades integer)"
-            )
-        )
-        c.execute(
-            text("insert into market_regime_history values(:d,2),(:next,7)"),
-            {"d": D, "next": SESSIONS[0]},
-        )
-    adapter = DatabaseBacktestStrategy(engine, ["NSE:A"])
-    assert adapter.capacity_for_date(SESSIONS[0]) == 2
-    assert adapter.capacity_for_close(SESSIONS[0]) == 7
-    stamps = []
-    adapter.module_b.module_a.evaluate = lambda i, stamp: stamps.append(stamp) or (
-        None,
-        SimpleNamespace(eligible=True),
-    )
-    assert adapter.eligibility_for_reentry("NSE:A", SESSIONS[0])
-    assert stamps[-1].hour == 9 and stamps[-1].minute == 15 and stamps[-1].tzinfo == IST
-
 
 def test_fractional_stop_rounding_does_not_widen_five_point_five_percent_cap():
     entry = 103.123

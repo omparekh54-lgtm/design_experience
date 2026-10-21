@@ -9,7 +9,7 @@ from sqlalchemy import text
 
 from packages.pms.backtest_matrix import plain
 from packages.pms.matrix_data import input_manifest, MatrixGates
-from packages.pms.matrix_replay import MatrixReplay
+from packages.pms.replay_service import execute_replay
 from packages.pms.walk_forward import phase_cells
 
 
@@ -30,9 +30,9 @@ def replay_executor(snapshot, datasets, report_path):
 
     def execute(window, phase, cell, cfg):
         symbols = [r["instrument_id"] for r in datasets[window.name][phase]["universe"]]
-        result, diagnostics = MatrixReplay(
+        result, diagnostics = execute_replay(
             snapshot, symbols, cfg, cell.case, cell.period.start, cell.period.end
-        ).run()
+        )
         # Matrix checkpoint files are in this folder; journal paths are relative to it.
         folder = report_path.parent / (report_path.stem + "_folds") / "journals"
         folder.mkdir(parents=True, exist_ok=True)

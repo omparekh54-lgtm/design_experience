@@ -182,6 +182,21 @@ class ResearchC(ModuleCPipeline):
         super().__init__(engine, cfg)
         self.replay, self.a, self.b = replay, replay.a, replay.b
 
+    def _evaluate_signal(self, instrument, day):
+        if self.replay.case.variant.setup_2:
+            return self.replay.setup2.evaluate(instrument, day, require_module_a=True)
+        return super()._evaluate_signal(instrument, day)
+
+    def _validate_signal(self, result):
+        if self.replay.case.variant.setup_2 and result.research_only:
+            if result.signal and (
+                result.signal.get("setup") != "SETUP_2"
+                or result.signal.get("status") not in {"ACTIVE", "SIGNAL_CREATED"}
+            ):
+                raise ValueError("unsupported_or_inactive_signal")
+            return
+        super()._validate_signal(result)
+
     def _regime_capacity(self, expected):
         return self.replay.capacity, ()
 

@@ -493,16 +493,11 @@ def test_executor_selects_phase_universe_and_saves_complete_local_journal(
     datasets[W.name]["TEST"]["universe"] = [dict(instrument_id="NSE:TEST_ONLY")]
     captured = []
 
-    class Replay:
-        def __init__(self, snapshot, symbols, cfg, case, start, end):
-            captured.append((symbols, start, end))
-            self.cell = phase_cells(W, (case,), "TEST")[0]
-            self.cfg = cfg
+    def execute(snapshot, symbols, cfg, case, start, end):
+        captured.append((symbols, start, end))
+        return replay(phase_cells(W, (case,), "TEST")[0], cfg)
 
-        def run(self):
-            return replay(self.cell, self.cfg)
-
-    monkeypatch.setattr(data, "MatrixReplay", Replay)
+    monkeypatch.setattr(data, "execute_replay", execute)
     cell = phase_cells(W, CASES[:1], "TEST")[0]
     result, diag = replay_executor(object(), datasets, tmp_path / "report.json")(
         W, "TEST", cell, cell.case.config(CFG)

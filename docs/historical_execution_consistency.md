@@ -10,6 +10,6 @@ The isolated `MatrixReplay` path now applies these execution rules:
 
 Daily candles do not reconstruct intraday prices. These checks deliberately refuse ambiguous evidence; timestamped intraday prices would be needed to resolve it. A capacity reduction can free reservations after C's allocation pass; replacement candidates are considered on the next close rather than backdated into an earlier allocation.
 
-This change applies to the isolated matrix replay and shared lifecycle engine. The legacy stored-selection `DatabaseBacktest` adapter remains diagnostic; unifying that adapter with isolated replay is a separate migration. Low-level/B-only research callers retain the explicit automatic re-entry option. No assertion of complete ruleset compliance or strategy profitability is implied.
+This change applies to the isolated matrix replay and shared lifecycle engine. The `DatabaseBacktestStrategy` compatibility adapter now delegates to the isolated replay, as described in `research_commands.md`; stored-selection execution has been removed. Low-level/B-only research callers retain the explicit automatic re-entry option. No assertion of complete ruleset compliance or strategy profitability is implied.
 
 Existing backtest results must be rerun with the new code. No historical database rows, source ingestion, production settings or live positions are rewritten by this change.
