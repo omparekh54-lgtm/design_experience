@@ -27,7 +27,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - run: pip install sqlalchemy==2.0.44 psycopg2-binary==2.9.11 pytest==8.4.2 httpx==0.28.1 beautifulsoup4==4.14.2 lxml==6.0.2
+      - run: pip install sqlalchemy==2.0.44 psycopg2-binary==2.9.11 pytest==8.4.2 httpx==0.28.1 beautifulsoup4==4.14.2 lxml==6.0.2 pyyaml==6.0.3
       - name: Install PostgreSQL17 clients
         run: |
           sudo apt-get update
