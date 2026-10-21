@@ -83,6 +83,18 @@ def _percentile_map(values, *, reverse=False):
 class ModuleCPipeline:
     """After-close PAPER order proposals; never submits orders or invents account state."""
 
+    def _evaluate_signal(self, instrument, day):
+        return self.b.evaluate(instrument, day, require_module_a=True)
+
+    def _validate_signal(self, result):
+        if result.research_only:
+            raise ValueError("research_signal_not_production")
+        if result.signal and (
+            result.signal.get("setup") != "SETUP_1"
+            or result.signal.get("status") not in {"ACTIVE", "SIGNAL_CREATED"}
+        ):
+            raise ValueError("unsupported_or_inactive_signal")
+
     def __init__(self, engine, cfg=None):
         self.engine = engine
         self.cfg = cfg or load_strategy_config()
@@ -281,10 +293,9 @@ class ModuleCPipeline:
                 row["rejected_reasons"] = ["sector_unavailable_as_of"]
                 continue
             try:
-                b = self.b.evaluate(instrument, d, require_module_a=True)
+                b = self._evaluate_signal(instrument, d)
                 b_results.append(b)
-                if b.research_only:
-                    raise ValueError("research_signal_not_production")
+                self._validate_signal(b)
                 if not b.eligible_universe:
                     row["rejected_reasons"] = list(b.rejected_reasons)
                     continue
@@ -298,11 +309,6 @@ class ModuleCPipeline:
                 if not benchmark:
                     raise ValueError("nifty500_history_unavailable")
                 signal = dict(b.signal or b.watchlist)
-                if b.signal and (
-                    signal.get("setup") != "SETUP_1"
-                    or signal.get("status") not in {"ACTIVE", "SIGNAL_CREATED"}
-                ):
-                    raise ValueError("unsupported_or_inactive_signal")
                 if b.signal and date.fromisoformat(signal["signal_date"]) > d:
                     raise ValueError("future_signal")
                 frame = self.b.features(self.b._candles(instrument, d)).data

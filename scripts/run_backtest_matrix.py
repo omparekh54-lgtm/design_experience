@@ -149,7 +149,7 @@ def main(argv=None):
         persist_report,
         report_lock,
     )
-    from packages.pms.matrix_replay import MatrixReplay
+    from packages.pms.replay_service import execute_replay
 
     load_dotenv()
     url = os.getenv("DATABASE_URL") or os.getenv("PMS_DATABASE_URL")
@@ -202,14 +202,14 @@ def main(argv=None):
             selected = [r["instrument_id"] for r in manifest["universe"]]
 
             def execute(cell, config):
-                result, diagnostics = MatrixReplay(
+                result, diagnostics = execute_replay(
                     snapshot,
                     selected,
                     config,
                     cell.case,
                     cell.period.start,
                     cell.period.end,
-                ).run()
+                )
                 import hashlib
 
                 folder = args.report.parent / (args.report.stem + "_cells")

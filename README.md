@@ -88,7 +88,7 @@ The trade engine preserves the Leg-2 EMA21 exit-signal candle and can create the
 
 `packages/pms/backtest.py` processes daily market-open, bar, signal, fill, state-change, re-entry and market-close events. Entries begin only after a close-generated signal. EMA exits execute at the following open. Stops remain intraday. Gap fills, same-day stop ambiguity, cash limits, dynamic Module E capacity and daily marked-to-market equity are modeled.
 
-`DatabaseBacktestStrategy` is a legacy diagnostic adapter that reads saved C/E decisions; it is not a complete historical portfolio replay. Use the isolated backtesting matrix for historical component comparisons through the shared A/B/C/E and trade code.
+`run_backtest.py`, Research Lab, the backtesting matrix and walk-forward all use the isolated `MatrixReplay` engine through `replay_service.py`. `DatabaseBacktestStrategy` is a compatibility facade for the same replay; it no longer reads saved C selections or E regime decisions. Research inputs are read in a repeatable-read, read-only snapshot and checked with the shared data gates.
 
 Run a database-backed test with:
 
@@ -112,7 +112,7 @@ python scripts/run_backtest.py \
 
 ### Phase 10 — Module C ranking and allocation
 
-`module_c.py` applies Stage-1 eligibility and the full 100-point ranking: rally 25, pullback 20, fundamentals 20, relative strength 15, 52-week-high proximity 10 and sector strength 10. It enforces score >=60, 2% ADTV position size, signal age, ADR, existing-position checks, sector limits, cash, portfolio heat, regime capacity and the seven-position cap. Tie-break order is score, lower stop risk, then higher ADTV. Persisted daily selections are consumed by the full research variant.
+`module_c.py` applies Stage-1 eligibility and the full 100-point ranking: rally 25, pullback 20, fundamentals 20, relative strength 15, 52-week-high proximity 10 and sector strength 10. It enforces score >=60, 2% ADTV position size, signal age, ADR, existing-position checks, sector limits, cash, portfolio heat, regime capacity and the seven-position cap. Tie-break order is score, lower stop risk, then higher ADTV. Research variants recompute selections against their own simulated cash, positions and risk; saved PAPER selections are never imported.
 
 ### Phase 11 — Historical research dataset/backfill
 
@@ -130,7 +130,7 @@ Historical shareholding/pledge, ASM/GSM, index constituents and corporate-action
 
 ### Phase 12 — Research Lab
 
-`ResearchLab` runs database-backed strategy experiments and computes marked-to-market total return, CAGR, max drawdown, Sharpe, Sortino, Calmar, win rate, profit factor, expectancy, average winner/loser, trade count and holding period.
+`ResearchLab` runs isolated strategy experiments with the matrix metrics: daily marked NAV returns and complete position cycles, including partial exits and costs. Variants and robustness points share one input snapshot but start fresh portfolios. Comparison and optimization dates must end by 2024-12-31; use walk-forward for reserved holdout evaluation. See [research command usage](docs/research_commands.md).
 
 ### Phase 13 — Strategy variants
 
