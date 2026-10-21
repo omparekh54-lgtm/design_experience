@@ -696,13 +696,15 @@ class CloudStore:
         return {"source_rows": len(source_members), "equity_members": len(members),
                 "excluded_from_equity_universe": excluded, "effective_from": str(effective)}
 
-    def classifications(self, http, day, *, limit):
+    def classifications(self, http, day, *, limit, listed_through=None):
         from packages.data_layer.cloud_sources import fetch_classification
 
         known = self.instruments()
         candidates = []
         overdue = set()
         for s, r in known.items():
+            if r.get('listed_from') and r['listed_from'] > (listed_through or day):
+                continue
             observed = (
                 (r.get("metadata") or {})
                 .get("sector_classification", {})

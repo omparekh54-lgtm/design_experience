@@ -20,6 +20,7 @@ from packages.data_layer.cloud_sources import (
     parse_bhavcopy,
     parse_indices,
     parse_master,
+    cash_equity_master,
     parse_surveillance,
     rows_csv,
     json_rows,
@@ -188,7 +189,8 @@ class CloudCollector:
             elif day != self.now.date() or (self.now.hour, self.now.minute) < (15, 30):
                 raise SourceError("current_completed_session_required")
         master_doc = http.fetch(ARCHIVE + "/content/equities/EQUITY_L.csv")
-        master = parse_master(master_doc.body)
+        raw_master = parse_master(master_doc.body)
+        master, excluded = cash_equity_master(raw_master, day)
         stages = {}
         self.core_stages = stages
         coverage_complete = True
@@ -196,6 +198,8 @@ class CloudCollector:
             stages["master"] = self.store.master(master, master_doc)
         else:
             stages["master"] = {"source_rows": len(master)}
+        stages['master'].update(raw_source_rows=len(raw_master),
+                                excluded_from_cash_equity=excluded)
         # Archives validate every requested date. No previous-session fallback labelled as today.
         dates = (
             [day] if not apply else [day - timedelta(days=n) for n in range(6, -1, -1)]
@@ -460,7 +464,8 @@ class CloudCollector:
         result["status"] = 'SUCCESS' if result['status'] == ref['status'] == 'SUCCESS' else 'PARTIAL'
         if apply:
             result["stages"]["classifications"] = self.store.classifications(
-                self.http, reference_day, limit=self.max_classifications
+                self.http, reference_day, limit=self.max_classifications,
+                **({'listed_through': day} if self.catch_up_date else {})
             )
             if result["stages"]["classifications"]["remaining"]:
                 result["status"] = "PARTIAL"

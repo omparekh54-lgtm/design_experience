@@ -18,7 +18,7 @@ from sqlalchemy import text
 from packages.data_layer.read_only import readonly_connections
 from packages.data_layer.cloud_sources import (IST, OfficialHTTP, SourceError,
     rows_csv, json_rows, paged_financials, parse_shareholding, parse_stamp,
-    fetch_classification, parse_master)
+    fetch_classification, parse_master, cash_equity_master)
 from packages.data_layer.cloud_storage import CloudStore
 from packages.data_layer.index_membership import equity_membership
 from packages.data_layer.exchange_financials import NSEIntegratedFinancialsProvider, filing_from_exchange_record
@@ -44,6 +44,22 @@ def classification_due(row, day):
     observed = (row.get('metadata') or {}).get('sector_classification', {}).get('observed_at')
     return (not row.get('sector') or not observed
             or datetime.fromisoformat(observed).date() < day - timedelta(days=60))
+
+
+def projected_master(known, master):
+    """Validate the writer's new listings without writing or inventing IDs."""
+    result = dict(known)
+    by_isin = {row['isin']: symbol for symbol, row in known.items()}
+    for symbol, row in master.items():
+        if symbol in known:
+            if known[symbol]['isin'] != row['isin']:
+                raise SourceError('preflight_master_identity_unresolved')
+        else:
+            if row['isin'] in by_isin:
+                raise SourceError('preflight_master_identity_unresolved')
+            result[symbol] = {**row, 'sector': None, 'metadata': {}}
+        by_isin[row['isin']] = symbol
+    return result
 
 
 class SourceBudget:
@@ -133,9 +149,13 @@ def verify(engine, target, *, now=None, workers=8):
             {'pending': f'CLOUD_{dataset}_PENDING', 'ack': f'CLOUD_{dataset}_XML'}).mappings()]
             for kind, dataset in [('financial', 'FINANCIAL'), ('shareholding', 'SHAREHOLDING')]}
     master_doc = http.fetch('https://nsearchives.nseindia.com/content/equities/EQUITY_L.csv')
-    master = parse_master(master_doc.body)
-    if any(s not in known or known[s]['isin'] != row['isin'] for s, row in master.items()):
-        raise SourceError('preflight_master_identity_unresolved')
+    raw_master = parse_master(master_doc.body)
+    master, excluded = cash_equity_master(raw_master, target)
+    new_symbols = sorted(set(master) - set(known))
+    known = projected_master(known, master)
+    report['master'] = {'source_rows': len(raw_master), 'eligible_rows': len(master),
+                        'new_symbols': new_symbols, 'excluded': excluded,
+                        'sha256': master_doc.sha256}
     doc = http.fetch('https://www.niftyindices.com/IndexConstituent/ind_nifty500list.csv')
     members = rows_csv(doc.body, ['Company Name', 'Industry', 'Symbol', 'Series', 'ISIN Code'])
     if len(members) < 490:
@@ -153,7 +173,8 @@ def verify(engine, target, *, now=None, workers=8):
         rows = [r for r in rows if record_key(r) not in acked]
         tasks.extend((kind, r) for r in rows)
     tasks.extend(('classification', {'symbol': s}) for s, r in known.items()
-                 if classification_due(r, now.date()))
+                 if (not r.get('listed_from') or r['listed_from'] <= target)
+                 and classification_due(r, now.date()))
     if len(tasks) > 9000:
         raise SourceError('preflight_record_budget_exceeded')
     report['required'] = dict(Counter(kind for kind, _ in tasks))
