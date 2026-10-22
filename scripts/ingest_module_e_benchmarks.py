@@ -161,8 +161,6 @@ def _fetch_retry(cache: Path, code: str, start: date, end: date, attempts: int =
     last: Exception | None = None
     for attempt in range(1, attempts + 1):
         try:
-            # Fresh NSE session per attempt: a socket ReadTimeout can leave a
-            # long-lived session unhealthy on Windows.
             with NSE(download_folder=cache) as nse:
                 return fetch_window(nse, code, start, end)
         except Exception as exc:
@@ -184,6 +182,26 @@ def _dates(engine, code: str, start: date, end: date) -> set[date]:
               and source in ('NSE_HISTORICAL_OR','NSE_DAILY_INDEX')
               and trade_date between :start and :end
         """), {"code": code, "start": start, "end": end}).scalars())
+
+
+def _existing_month_is_usable(rows: set[date], first: date, last: date) -> bool:
+    """Reuse previously persisted official NSE calendar months on reruns.
+
+    The final coverage audit still validates the complete range. This avoids
+    repeatedly calling NSE for old months that were already loaded from the
+    same official source on earlier successful runs.
+    """
+    if not rows:
+        return False
+    ordered = sorted(rows)
+    # Normal NSE months usually contain ~18-23 sessions. The lower bound keeps
+    # partial/obviously truncated months from being silently accepted while
+    # still permitting short partial windows at the start/end of a requested range.
+    span_days = (last - first).days + 1
+    minimum = 3 if span_days <= 10 else 10
+    if len(rows) < minimum:
+        return False
+    return (ordered[0] - first).days <= 7 and (last - ordered[-1]).days <= 7
 
 
 def coverage_audit(engine, start: date, end: date) -> dict:
@@ -222,18 +240,24 @@ def ingest(start: date | None = None, end: date | None = None) -> dict[str, Any]
     windows = list(month_windows(start, end))
     try:
         for n, (first, last) in enumerate(windows, 1):
-            try:
-                calendar_rows, detail = _fetch_retry(cache, "NIFTY50", first, last)
-                counts["calendar"] += upsert_rows(engine, calendar_rows)
-                diagnostics.append(detail)
-                expected = {r["trade_date"] for r in calendar_rows}
-                if not expected:
-                    raise RuntimeError("official NIFTY50 month returned no sessions")
-                print(f"  [{n}/{len(windows)}] NIFTY50 {first}..{last}: {len(calendar_rows)} dates", flush=True)
-            except Exception as exc:
-                failures.append(f"NIFTY50 {first}..{last}: {type(exc).__name__}: {exc}")
-                print(f"  FAILED: {failures[-1]}", flush=True)
-                continue
+            existing_calendar = _dates(engine, CALENDAR_CODE, first, last)
+            if _existing_month_is_usable(existing_calendar, first, last):
+                expected = existing_calendar
+                counts["skipped_complete"] += 1
+                print(f"  [{n}/{len(windows)}] NIFTY50 {first}..{last}: already complete ({len(expected)} dates)", flush=True)
+            else:
+                try:
+                    calendar_rows, detail = _fetch_retry(cache, "NIFTY50", first, last)
+                    counts["calendar"] += upsert_rows(engine, calendar_rows)
+                    diagnostics.append(detail)
+                    expected = {r["trade_date"] for r in calendar_rows}
+                    if not expected:
+                        raise RuntimeError("official NIFTY50 month returned no sessions")
+                    print(f"  [{n}/{len(windows)}] NIFTY50 {first}..{last}: {len(calendar_rows)} dates", flush=True)
+                except Exception as exc:
+                    failures.append(f"NIFTY50 {first}..{last}: {type(exc).__name__}: {exc}")
+                    print(f"  FAILED: {failures[-1]}", flush=True)
+                    continue
 
             for code, label in (("NIFTY500", "nifty500"), ("NIFTYMIDSMALLCAP400", "index"), ("INDIAVIX", "vix")):
                 try:
