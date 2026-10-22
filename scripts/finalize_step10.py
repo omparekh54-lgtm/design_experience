@@ -3,8 +3,10 @@
 Run only after Step 1 reaches 100%:
     python scripts/finalize_step10.py
 
-This command keeps 2025+ untouched as out-of-sample, runs the declared
+The command keeps 2025+ untouched as out-of-sample, runs the declared
 2023-2024 matrix twice, verifies reproducibility, and writes a final certificate.
+Interrupted runs resume from stable checkpoints only when Step-1 data, config,
+and code fingerprints are unchanged.
 """
 from __future__ import annotations
 
@@ -35,6 +37,10 @@ ARTIFACT_ROOT = ROOT / "artifacts" / "final_acceptance"
 STEP1_CERT = ARTIFACT_ROOT / "step1_certificate.json"
 STEP10_CERT = ARTIFACT_ROOT / "step10_certificate.json"
 BASE_CONFIG = ROOT / "config" / "strategy_v1.yaml"
+STEP10_DIR = ARTIFACT_ROOT / "step10"
+RUN1 = STEP10_DIR / "matrix-run1.json"
+RUN2 = STEP10_DIR / "matrix-run2.json"
+STATE = STEP10_DIR / "checkpoint-state.json"
 
 
 def sha256(path: Path) -> str:
@@ -90,12 +96,12 @@ def require_step1(start: date, end: date) -> dict:
 
 def research_config() -> Path:
     cfg = yaml.safe_load(BASE_CONFIG.read_text(encoding="utf-8"))
-    # Do not weaken production defaults. This research-only copy is enabled only
-    # because require_step1() has already verified the immutable Step-1 certificate.
+    if not isinstance(cfg, dict) or not isinstance(cfg.get("fundamental"), dict):
+        raise RuntimeError("strategy_v1.yaml is missing the fundamental configuration")
     cfg["fundamental"]["legacy_surveillance_verified"] = True
     cfg.setdefault("backtest", {})["step1_certificate"] = sha256(STEP1_CERT)
     cfg["backtest"]["final_acceptance_scope"] = "2023-2024_IN_SAMPLE_ONLY"
-    path = ARTIFACT_ROOT / "step10" / "certified_research_config.yaml"
+    path = STEP10_DIR / "certified_research_config.yaml"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(yaml.safe_dump(cfg, sort_keys=False), encoding="utf-8")
     return path
@@ -114,6 +120,43 @@ def run_checked(cmd: list[str], label: str, *, stdout_path: Path | None = None) 
     if result.returncode:
         raise RuntimeError(f"{label} failed with exit code {result.returncode}")
     return result.returncode
+
+
+def _quarantine(path: Path, tag: str) -> None:
+    if not path.exists():
+        return
+    destination = path.with_name(path.name + f".stale-{tag}")
+    counter = 1
+    while destination.exists():
+        destination = path.with_name(path.name + f".stale-{tag}-{counter}")
+        counter += 1
+    path.replace(destination)
+
+
+def prepare_checkpoints(config: Path) -> dict:
+    from packages.pms.matrix_data import code_fingerprint
+
+    identity = hashlib.sha256(json.dumps({
+        "step1": sha256(STEP1_CERT),
+        "config": sha256(config),
+        "code": code_fingerprint(),
+    }, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    old = None
+    if STATE.is_file():
+        try:
+            old = json.loads(STATE.read_text(encoding="utf-8"))
+        except Exception:
+            old = None
+    if old and old.get("identity") != identity:
+        tag = datetime.now(IST).strftime("%Y%m%d-%H%M%S")
+        for report in (RUN1, RUN2):
+            _quarantine(report, tag)
+            _quarantine(report.parent / (report.stem + "_cells"), tag)
+    payload = {"identity": identity, "created_at": datetime.now(IST).isoformat(),
+               "step1_sha256": sha256(STEP1_CERT), "config_sha256": sha256(config),
+               "code_fingerprint": code_fingerprint()}
+    write_json(STATE, payload)
+    return payload
 
 
 def matrix_subprocess(cmd: list[str], report: Path, progress: Progress, low: int, high: int, label: str) -> None:
@@ -208,7 +251,8 @@ def main() -> int:
         step1 = require_step1(args.start, args.end)
         engine = db_engine()
         config = research_config()
-        p.step(8, "Step 1 certificate + OOS boundary verified")
+        checkpoint_state = prepare_checkpoints(config)
+        p.step(8, "Step 1 certificate + OOS boundary + checkpoint identity verified")
 
         tests = [
             "tests/test_backtest_matrix.py",
@@ -218,34 +262,36 @@ def main() -> int:
             "tests/test_historical_execution_consistency.py",
             "tests/test_historical_dataset.py",
         ]
+        missing_tests = [t for t in tests if not (ROOT / t).is_file()]
+        if missing_tests:
+            raise RuntimeError(f"required regression tests missing: {missing_tests}")
         run_checked([sys.executable, "-m", "pytest", "-q", *tests], "matrix/leakage/replay regression suite")
         p.step(18, "leakage + replay regression suite passed")
 
-        preflight = ARTIFACT_ROOT / "step10" / "preflight.json"
+        preflight = STEP10_DIR / "preflight.json"
         run_checked([
             sys.executable, "scripts/run_backtest_matrix.py", "--check",
             "--start", args.start.isoformat(), "--end", args.end.isoformat(),
             "--config", str(config),
         ], "all-cell historical data preflight", stdout_path=preflight)
+        try:
+            preflight_payload = json.loads(preflight.read_text(encoding="utf-8"))
+        except Exception as exc:
+            raise RuntimeError("matrix preflight did not emit valid JSON") from exc
+        if int(preflight_payload.get("ready_cells", 0)) != len(preflight_payload.get("cells", [])):
+            raise RuntimeError("matrix preflight returned non-ready cells despite zero exit status")
         p.step(25, "all matrix cells are data-ready")
 
-        stamp = datetime.now(IST).strftime("%Y%m%d-%H%M%S")
-        run1 = ARTIFACT_ROOT / "step10" / f"matrix-run1-{stamp}.json"
-        run2 = ARTIFACT_ROOT / "step10" / f"matrix-run2-{stamp}.json"
         base = [
             sys.executable, "scripts/run_backtest_matrix.py", "--run",
             "--start", args.start.isoformat(), "--end", args.end.isoformat(),
             "--config", str(config),
         ]
+        matrix_subprocess(base + ["--report", str(RUN1)], RUN1, p, 25, 55, "matrix replay 1/2")
+        matrix_subprocess(base + ["--report", str(RUN2), "--no-persist"], RUN2, p, 55, 85, "matrix replay 2/2")
 
-        # First run is persisted to research_runs so the completed result remains visible
-        # to the existing research UI. The second is isolated and exists only to prove
-        # deterministic reproducibility without adding duplicate UI history.
-        matrix_subprocess(base + ["--report", str(run1)], run1, p, 25, 55, "matrix replay 1/2")
-        matrix_subprocess(base + ["--report", str(run2), "--no-persist"], run2, p, 55, 85, "matrix replay 2/2")
-
-        first = json.loads(run1.read_text(encoding="utf-8"))
-        second = json.loads(run2.read_text(encoding="utf-8"))
+        first = json.loads(RUN1.read_text(encoding="utf-8"))
+        second = json.loads(RUN2.read_text(encoding="utf-8"))
         if (first.get("summary") or {}).get("status") != "COMPLETED":
             raise RuntimeError("first matrix replay did not complete every cell")
         if (second.get("summary") or {}).get("status") != "COMPLETED":
@@ -261,20 +307,18 @@ def main() -> int:
         canon2 = canonical_result(second)
         fp1, fp2 = digest(canon1), digest(canon2)
         if fp1 != fp2:
-            mismatch = ARTIFACT_ROOT / "step10" / "reproducibility-mismatch.json"
+            mismatch = STEP10_DIR / "reproducibility-mismatch.json"
             write_json(mismatch, {"run1": canon1, "run2": canon2, "fingerprints": [fp1, fp2]})
             raise RuntimeError(f"reproducibility mismatch; inspect {mismatch.relative_to(ROOT)}")
         if canon1.get("dataset_fingerprint") != canon2.get("dataset_fingerprint"):
             raise RuntimeError("dataset changed between replay runs")
         p.step(97, "reproducibility fingerprints match")
 
-        # Final fail-closed acceptance: no blocked/failed/pending cells, no 2025+ data,
-        # source-certified Step 1, survivorship inclusion, and byte-stable evidence hashes.
         bad = [c for c in first.get("cells", []) if c.get("status") not in {"COMPLETED", "NO_TRADES"}]
         if bad:
             raise RuntimeError(f"{len(bad)} matrix cells are not terminal-success states")
         certificate = {
-            "version": "PMS_STEP10_FINAL_v1",
+            "version": "PMS_STEP10_FINAL_v2",
             "created_at": datetime.now(IST).isoformat(),
             "status": "STEP10_COMPLETE",
             "scope": {"start": args.start.isoformat(), "end": args.end.isoformat()},
@@ -282,8 +326,9 @@ def main() -> int:
             "step1_certificate_sha256": sha256(STEP1_CERT),
             "step1_audit_run_id": step1.get("audit_run_id"),
             "config": str(config.relative_to(ROOT)),
-            "run1": str(run1.relative_to(ROOT)),
-            "run2": str(run2.relative_to(ROOT)),
+            "run1": str(RUN1.relative_to(ROOT)),
+            "run2": str(RUN2.relative_to(ROOT)),
+            "checkpoint_identity": checkpoint_state["identity"],
             "dataset_fingerprint": canon1.get("dataset_fingerprint"),
             "code_fingerprint": canon1.get("code_version"),
             "result_fingerprint": fp1,
@@ -300,7 +345,7 @@ def main() -> int:
         print(f"Result fingerprint: {fp1}")
         return 0
     except KeyboardInterrupt:
-        p.fail("interrupted; rerun the same command — matrix checkpoints are resumable per report")
+        p.fail("interrupted; rerun the same command — stable matrix checkpoints will resume when identity is unchanged")
         return 130
     except Exception as exc:
         p.fail(f"{type(exc).__name__}: {exc}")
