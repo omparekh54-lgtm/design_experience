@@ -12,6 +12,11 @@ on:
         description: Explicit completed historical cutoff (YYYY-MM-DD)
         type: string
         required: true
+  push:
+    branches:
+      - main
+    paths:
+      - '.audit-trigger/historical-dataset.txt'
 
 permissions:
   contents: read
@@ -27,8 +32,8 @@ jobs:
     env:
       DATABASE_URL: ${{ secrets.NEON_PMS_DATABASE_URL }}
       SSL_CERT_FILE: /etc/ssl/certs/ca-certificates.crt
-      AUDIT_START: ${{ inputs.start }}
-      AUDIT_END: ${{ inputs.end }}
+      AUDIT_START: ${{ inputs.start || '2018-01-01' }}
+      AUDIT_END: ${{ inputs.end || '2026-10-21' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
