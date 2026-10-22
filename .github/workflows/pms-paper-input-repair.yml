@@ -1,4 +1,5 @@
 name: PMS targeted PAPER input repair
+# Acceptance rerun requested 2026-10-22 after full historical audit.
 on:
   push:
     branches: [main]
