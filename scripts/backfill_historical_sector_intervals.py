@@ -1,10 +1,13 @@
 """Build point-in-time historical sector intervals from dated NSE sector-index membership.
 
-The source dataset is reconstructed from NSE Indices press releases/circulars and
-keeps source_url provenance per membership interval. We deliberately do NOT
-backdate today's company classification. Stocks that cannot be classified from a
-historical sector index remain missing and therefore ineligible wherever a dated
-sector is required.
+Historical intervals come from the reviewed public reconstruction of NSE Indices
+press releases. That source currently has dated membership evidence through
+2026-05-15. For a later Step-1 cutoff we DO NOT silently stretch those open
+intervals. Instead we reconcile them against live official NSE constituent
+snapshots and apply the source project's documented semi-annual snapshot method:
+source-open intervals are carried only to the next review boundary, then the
+current official snapshot is used from that boundary onward. These inferred rows
+are labelled separately and are never confused with press-release-backed rows.
 """
 from __future__ import annotations
 
@@ -15,6 +18,7 @@ import io
 import json
 import os
 import sys
+import time
 from collections import defaultdict
 from datetime import date, timedelta
 from pathlib import Path
@@ -28,9 +32,11 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from apps.api.main import _render_safe_database_url
+from packages.data_layer.cloud_sources import OfficialHTTP
 
 SOURCE_URL = "https://raw.githubusercontent.com/aditya-jha/nse-historical-membership/main/index_history/data/index_membership_history.csv"
 SOURCE_REPO = "https://github.com/aditya-jha/nse-historical-membership"
+SOURCE_FRESHNESS = date(2026, 5, 15)
 
 # More specific indices win when a stock legitimately belongs to two sector
 # indices (e.g. Bank + Financial Services, Pharma + Healthcare).
@@ -52,6 +58,26 @@ SECTOR_INDICES = {
     "Nifty Financial Services": (40, "Financial Services"),
 }
 
+# Official live constituent sources. Static archives are preferable because they
+# do not need a browser session; two sector indices are exposed through NSE API.
+CURRENT_SOURCES = {
+    "Nifty Bank": "https://archives.nseindia.com/content/indices/ind_niftybanklist.csv",
+    "Nifty IT": "https://archives.nseindia.com/content/indices/ind_niftyitlist.csv",
+    "Nifty FMCG": "https://archives.nseindia.com/content/indices/ind_niftyfmcglist.csv",
+    "Nifty Pharma": "https://archives.nseindia.com/content/indices/ind_niftypharmalist.csv",
+    "Nifty Auto": "https://archives.nseindia.com/content/indices/ind_niftyautolist.csv",
+    "Nifty Metal": "https://archives.nseindia.com/content/indices/ind_niftymetallist.csv",
+    "Nifty Realty": "https://archives.nseindia.com/content/indices/ind_niftyrealtylist.csv",
+    "Nifty Energy": "https://archives.nseindia.com/content/indices/ind_niftyenergylist.csv",
+    "Nifty PSU Bank": "https://archives.nseindia.com/content/indices/ind_niftypsubanklist.csv",
+    "Nifty Private Bank": "nseapi:NIFTY PRIVATE BANK",
+    "Nifty Healthcare Index": "https://archives.nseindia.com/content/indices/ind_niftyhealthcarelist.csv",
+    "Nifty Financial Services": "nseapi:NIFTY FIN SERVICE",
+    "Nifty Media": "https://archives.nseindia.com/content/indices/ind_niftymedialist.csv",
+    "Nifty Consumer Durables": "https://archives.nseindia.com/content/indices/ind_niftyconsumerdurableslist.csv",
+    "Nifty Oil & Gas": "https://archives.nseindia.com/content/indices/ind_niftyoilgaslist.csv",
+}
+
 
 def parse_date(value: str | None) -> date | None:
     value = (value or "").strip()
@@ -69,14 +95,120 @@ def engine():
     )
 
 
+def _get(url: str, attempts: int = 4) -> requests.Response:
+    last = None
+    for attempt in range(1, attempts + 1):
+        try:
+            response = requests.get(url, timeout=45, headers={"User-Agent": "pms-historical-sector-repair/2.0"})
+            response.raise_for_status()
+            return response
+        except Exception as exc:
+            last = exc
+            if attempt < attempts:
+                time.sleep(min(8, 2 ** (attempt - 1)))
+    raise RuntimeError(f"sector source unavailable: {type(last).__name__}") from last
+
+
 def fetch_source() -> tuple[bytes, list[dict]]:
-    response = requests.get(SOURCE_URL, timeout=90, headers={"User-Agent": "pms-historical-sector-repair/1.0"})
-    response.raise_for_status()
+    response = _get(SOURCE_URL)
     raw = response.content
     rows = list(csv.DictReader(io.StringIO(raw.decode("utf-8-sig"))))
     if not rows or not {"index_name", "symbol", "valid_from", "valid_to", "source", "source_url"}.issubset(rows[0]):
         raise RuntimeError("historical membership source schema changed")
     return raw, rows
+
+
+def _symbols_from_csv(body: bytes) -> set[str]:
+    rows = list(csv.DictReader(io.StringIO(body.decode("utf-8-sig"))))
+    out = set()
+    for row in rows:
+        lower = {str(k).strip().lower(): v for k, v in row.items()}
+        symbol = lower.get("symbol") or lower.get("ticker") or lower.get("nse symbol")
+        if symbol and str(symbol).strip():
+            out.add(str(symbol).strip().upper())
+    if not out:
+        raise RuntimeError("official sector constituent CSV had no symbols")
+    return out
+
+
+def fetch_current_memberships() -> tuple[dict[str, set[str]], dict[str, dict]]:
+    memberships: dict[str, set[str]] = {}
+    evidence: dict[str, dict] = {}
+    api = OfficialHTTP(seconds=900)
+    for name, source in CURRENT_SOURCES.items():
+        if source.startswith("nseapi:"):
+            index_name = source.split(":", 1)[1]
+            doc = api.api("equity-stockIndices", index=index_name)
+            payload = json.loads(doc.body)
+            rows = payload.get("data") if isinstance(payload, dict) else None
+            if not isinstance(rows, list):
+                raise RuntimeError(f"{name}: official NSE API schema changed")
+            symbols = {str(r.get("symbol") or "").strip().upper() for r in rows if isinstance(r, dict) and r.get("symbol")}
+            uri, sha = doc.url, doc.sha256
+        else:
+            response = _get(source)
+            body = response.content
+            symbols = _symbols_from_csv(body)
+            uri, sha = source, hashlib.sha256(body).hexdigest()
+        if not symbols:
+            raise RuntimeError(f"{name}: official current membership is empty")
+        memberships[name] = symbols
+        evidence[name] = {"source_uri": uri, "content_sha256": sha, "symbols": len(symbols)}
+    return memberships, evidence
+
+
+def review_boundary_after(freshness: date, end: date) -> date | None:
+    candidates = []
+    for year in range(freshness.year, end.year + 1):
+        for month, day in ((3, 31), (9, 30)):
+            d = date(year, month, day)
+            if freshness < d <= end:
+                candidates.append(d)
+    return max(candidates) if candidates else None
+
+
+def reconcile_current(rows: list[dict], end: date) -> tuple[list[dict], dict]:
+    """Bound stale open intervals and add official-current snapshot intervals.
+
+    This mirrors the source repository's documented `snapshot` / inferred-exclude
+    policy. It is deliberately explicit evidence, not a fabricated press release.
+    """
+    if end <= SOURCE_FRESHNESS:
+        return rows, {"current_reconciliation": "NOT_NEEDED", "source_freshness": SOURCE_FRESHNESS.isoformat()}
+    boundary = review_boundary_after(SOURCE_FRESHNESS, end)
+    if boundary is None:
+        raise RuntimeError(
+            f"sector source is fresh only through {SOURCE_FRESHNESS}; no review boundary exists to reconcile cutoff {end}"
+        )
+    current, current_evidence = fetch_current_memberships()
+    adjusted = []
+    for row in rows:
+        item = dict(row)
+        if (item.get("index_name") or "").strip() in SECTOR_INDICES and not (item.get("valid_to") or "").strip():
+            # An old open interval is evidence only until the next scheduled review.
+            item["valid_to"] = boundary.isoformat()
+            notes = (item.get("notes") or "").strip()
+            item["notes"] = (notes + "; " if notes else "") + f"bounded at current-snapshot reconciliation {boundary}"
+        adjusted.append(item)
+    for name, symbols in current.items():
+        source_uri = current_evidence[name]["source_uri"]
+        for symbol in sorted(symbols):
+            adjusted.append({
+                "index_name": name,
+                "symbol": symbol,
+                "valid_from": boundary.isoformat(),
+                "valid_to": "",
+                "source": "snapshot",
+                "source_url": source_uri,
+                "notes": f"official current snapshot reconciled at inferred semi-annual boundary {boundary}",
+            })
+    return adjusted, {
+        "current_reconciliation": "OFFICIAL_NSE_CURRENT_SNAPSHOT",
+        "source_freshness": SOURCE_FRESHNESS.isoformat(),
+        "reconciliation_boundary": boundary.isoformat(),
+        "current_snapshot_evidence": current_evidence,
+        "policy": "Open historical rows are bounded at the next semi-annual review; current official constituent snapshots are applied from that boundary. This follows the source repository's documented snapshot/inferred-exclude model.",
+    }
 
 
 def resolve_symbol_map(conn) -> dict[str, int]:
@@ -161,10 +293,15 @@ def main() -> int:
     args = ap.parse_args()
     if args.end < args.start:
         ap.error("--end must be on or after --start")
+    if args.end > date.today():
+        ap.error("--end cannot be in the future")
 
     raw, source_rows = fetch_source()
     source_sha = hashlib.sha256(raw).hexdigest()
-    intervals, build_meta = build_intervals(source_rows, args.start, args.end)
+    reconciled_rows, reconciliation = reconcile_current(source_rows, args.end)
+    intervals, build_meta = build_intervals(reconciled_rows, args.start, args.end)
+    if build_meta["ambiguous_count"]:
+        raise RuntimeError(f"historical sector reconstruction has {build_meta['ambiguous_count']} unresolved same-priority sector conflicts")
     db = engine()
     inserted = 0
     unmatched = set()
@@ -176,42 +313,45 @@ def main() -> int:
                 if iid is None:
                     unmatched.add(item["symbol"])
                     continue
+                provenance = "NSE_PIT_SECTOR_INDEX_CURRENT_RECONCILED" if "snapshot" in item.get("source_kinds", set()) else "NSE_PIT_SECTOR_INDEX"
                 result = conn.execute(text("""
                     insert into pms.sector_history(instrument_id,sector,industry,effective_from,effective_to,source)
-                    values(:iid,:sector,null,:frm,:to,'NSE_PIT_SECTOR_INDEX')
+                    values(:iid,:sector,null,:frm,:to,:source)
                     on conflict(instrument_id,sector,effective_from,source) do update
                     set effective_to=excluded.effective_to
-                """), {"iid": iid, "sector": item["sector"], "frm": item["start"], "to": item["end"]})
+                """), {"iid": iid, "sector": item["sector"], "frm": item["start"], "to": item["end"], "source": provenance})
                 inserted += max(0, result.rowcount)
 
             meta = {
-                "version": "PIT_SECTOR_INDEX_v1",
+                "version": "PIT_SECTOR_INDEX_v2",
                 "complete": True,
                 "start": args.start.isoformat(), "end": args.end.isoformat(),
-                "repo": SOURCE_REPO, "source_sha256": source_sha,
+                "repo": SOURCE_REPO, "historical_source_sha256": source_sha,
                 "sector_indices": sorted(SECTOR_INDICES),
                 "intervals_built": len(intervals), "unmatched_symbols": sorted(unmatched)[:250],
-                **build_meta,
+                **reconciliation, **build_meta,
             }
+            meta_bytes=json.dumps(meta,default=str,sort_keys=True,separators=(",",":")).encode()
+            combined_sha=hashlib.sha256(raw+b"\n"+meta_bytes).hexdigest()
             conn.execute(text("""
                 insert into pms.provider_snapshots(provider,dataset,source_uri,content_sha256,observed_at,metadata)
                 values('NSE_INDICES_PIT','HISTORICAL_SECTOR_INTERVALS',:uri,:sha,now(),cast(:meta as jsonb))
-            """), {"uri": SOURCE_URL, "sha": source_sha, "meta": json.dumps(meta, default=str)})
+            """), {"uri": SOURCE_URL, "sha": combined_sha, "meta": json.dumps(meta, default=str)})
 
         with db.connect() as conn:
             coverage = dict(conn.execute(text("""
                 select count(*)::int rows,count(distinct instrument_id)::int instruments,
                        min(effective_from) min_from,max(effective_to) max_to
-                from pms.sector_history where source='NSE_PIT_SECTOR_INDEX'
+                from pms.sector_history where source in ('NSE_PIT_SECTOR_INDEX','NSE_PIT_SECTOR_INDEX_CURRENT_RECONCILED')
                   and effective_from<=:end and effective_to>:start
             """), {"start": args.start, "end": args.end}).mappings().one())
         result = {
             "status": "PASS" if coverage["rows"] else "BLOCKED",
-            "source": SOURCE_URL, "source_sha256": source_sha,
+            "historical_source": SOURCE_URL, "historical_source_sha256": source_sha,
             "range": [args.start.isoformat(), args.end.isoformat()],
             "coverage": coverage, "inserted_or_updated": inserted,
-            "unmatched_symbols": sorted(unmatched), **build_meta,
-            "policy": "Only dated sector-index membership is used historically; current company classifications are never backdated. Missing historical sector remains missing/ineligible.",
+            "unmatched_symbols": sorted(unmatched), **reconciliation, **build_meta,
+            "policy": "Dated sector-index history is used through source freshness. Later coverage is reconciled only from official current NSE constituent snapshots at the documented semi-annual review boundary; current company classifications are never backdated.",
         }
         out = ROOT / args.output
         out.parent.mkdir(parents=True, exist_ok=True)
