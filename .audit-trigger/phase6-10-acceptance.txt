@@ -1,3 +1,3 @@
-triggered_at=2026-10-22T13:02:00Z
+triggered_at=2026-10-22T13:06:00Z
 scope=module-e,orchestrator,paper,ui,matrix
-reason=paper-table-fix-and-ingestion-duplicate-universe-fix
+reason=use-declared-insample-window-through-2024-12-31
