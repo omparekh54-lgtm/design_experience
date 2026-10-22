@@ -7,7 +7,6 @@ import json
 import os
 import zipfile
 from datetime import date, datetime
-from decimal import Decimal
 from pathlib import Path
 import sys
 
@@ -16,10 +15,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from sqlalchemy import create_engine, text
 
 from apps.api.main import _render_safe_database_url
-from packages.data_layer.cloud_sources import OfficialHTTP, PrivateArchive if False else OfficialHTTP
-from packages.data_layer.cloud_sources import SourceError, bhavcopy_url, parse_bhavcopy, number
+from packages.data_layer.cloud_sources import OfficialHTTP, SourceError, bhavcopy_url, parse_bhavcopy, number
 from packages.data_layer.private_archive import PrivateArchive
-
 
 SOURCE = "NSE_UDIFF"
 
@@ -45,10 +42,9 @@ def parse_legacy(body: bytes, day: date) -> list[dict]:
     required = {"SYMBOL","SERIES","OPEN","HIGH","LOW","CLOSE","TOTTRDQTY","TOTTRDVAL","TIMESTAMP","ISIN"}
     if not reader.fieldnames or not required.issubset({x.strip() for x in reader.fieldnames}):
         raise SourceError("legacy_bhavcopy_schema_changed")
-    out=[]
-    seen=set()
-    for r in reader:
-        r={str(k).strip(): (v.strip() if isinstance(v,str) else v) for k,v in r.items()}
+    out=[]; seen=set()
+    for row in reader:
+        r={str(k).strip(): (v.strip() if isinstance(v,str) else v) for k,v in row.items()}
         if r["SERIES"] not in {"EQ","BE","BZ","SM","ST","SZ"}:
             continue
         try:
@@ -88,36 +84,29 @@ def fetch_day(http: OfficialHTTP, day: date):
 
 def instruments(engine):
     with engine.connect() as c:
-        rows=[dict(r) for r in c.execute(text("""
+        return [dict(r) for r in c.execute(text("""
             select id,upper(coalesce(nse_symbol,replace(trading_symbol,'-EQ',''))) symbol,
                    upper(coalesce(isin,'')) isin,listed_from,delisted_on,active
             from pms.instruments where exchange='NSE'
         """)).mappings().all()]
-    return rows
 
 
 def candidates(rows, day):
     by_symbol={}; by_isin={}
     for r in rows:
-        if r['listed_from'] and day < r['listed_from']:
-            continue
-        if r['delisted_on'] and day >= r['delisted_on']:
-            continue
-        if r['symbol']:
-            by_symbol.setdefault(r['symbol'],[]).append(r)
-        if r['isin']:
-            by_isin.setdefault(r['isin'],[]).append(r)
+        if r['listed_from'] and day < r['listed_from']: continue
+        if r['delisted_on'] and day >= r['delisted_on']: continue
+        if r['symbol']: by_symbol.setdefault(r['symbol'],[]).append(r)
+        if r['isin']: by_isin.setdefault(r['isin'],[]).append(r)
     return by_symbol,by_isin
 
 
 def match(row, by_symbol, by_isin):
     sym=row['symbol'].upper(); isin=row['isin'].upper()
     exact=[r for r in by_symbol.get(sym,[]) if r['isin']==isin]
-    if len(exact)==1:
-        return exact[0]
+    if len(exact)==1: return exact[0]
     isin_only=by_isin.get(isin,[])
-    if len(isin_only)==1:
-        return isin_only[0]
+    if len(isin_only)==1: return isin_only[0]
     return None
 
 
@@ -137,8 +126,7 @@ def ingest(start:date,end:date,output:Path):
                          connect_args={'options':'-c search_path=pms,public'})
     archive=PrivateArchive.from_env()
     http=OfficialHTTP(seconds=20000,archive=archive)
-    master=instruments(engine)
-    days=sessions(engine,start,end)
+    master=instruments(engine); days=sessions(engine,start,end)
     if not days: raise RuntimeError('official_nifty50_session_calendar_empty')
     insert=text("""
       insert into pms.daily_prices(instrument_id,trade_date,open,high,low,close,volume,turnover,source)
@@ -155,14 +143,12 @@ def ingest(start:date,end:date,output:Path):
             'unmatched':0,'ambiguous_samples':[],'failures':[]}
     for n,day in enumerate(days,1):
         try:
-            doc,rows,fmt=fetch_day(http,day)
-            by_symbol,by_isin=candidates(master,day)
+            doc,rows,fmt=fetch_day(http,day); by_symbol,by_isin=candidates(master,day)
             payload=[]; unmatched=[]
             for r in rows:
                 inst=match(r,by_symbol,by_isin)
                 if not inst:
-                    unmatched.append({'symbol':r['symbol'],'isin':r['isin'],'series':r['series']})
-                    continue
+                    unmatched.append({'symbol':r['symbol'],'isin':r['isin'],'series':r['series']}); continue
                 payload.append({'instrument_id':inst['id'],'trade_date':day,'open':r['open'],'high':r['high'],
                                 'low':r['low'],'close':r['close'],'volume':r['volume'],'turnover':r['turnover'],'source':SOURCE})
             with engine.begin() as c:
@@ -178,20 +164,15 @@ def ingest(start:date,end:date,output:Path):
             code=str(exc) if isinstance(exc,SourceError) else type(exc).__name__
             report['failures'].append({'date':str(day),'code':code})
             print(json.dumps({'date':str(day),'failure':code}),flush=True)
-    output.parent.mkdir(parents=True,exist_ok=True)
-    output.write_text(json.dumps(report,indent=2,default=str)+'\n')
+    output.parent.mkdir(parents=True,exist_ok=True); output.write_text(json.dumps(report,indent=2,default=str)+'\n')
     engine.dispose()
-    if report['failures']:
-        raise SystemExit(2)
+    if report['failures']: raise SystemExit(2)
     return report
 
 
 def main():
-    p=argparse.ArgumentParser()
-    p.add_argument('--start',type=date.fromisoformat,required=True)
-    p.add_argument('--end',type=date.fromisoformat,required=True)
-    p.add_argument('--output',type=Path,required=True)
-    a=p.parse_args()
-    print(json.dumps(ingest(a.start,a.end,a.output),indent=2,default=str))
+    p=argparse.ArgumentParser(); p.add_argument('--start',type=date.fromisoformat,required=True)
+    p.add_argument('--end',type=date.fromisoformat,required=True); p.add_argument('--output',type=Path,required=True)
+    a=p.parse_args(); print(json.dumps(ingest(a.start,a.end,a.output),indent=2,default=str))
 
 if __name__=='__main__': main()
