@@ -147,6 +147,9 @@ def input_manifest(snapshot, cells, symbols=None, *, allow_ambiguous=False):
     return {**plain(payload), "fingerprint": fingerprint(payload)}
 
 
+# Final matrix acceptance is deliberately stricter than normal production data
+# selection: every expected historical session must have an official NSE raw row.
+# Other providers may coexist in daily_prices, but cannot substitute for NSE here.
 COVERAGE = """with calendar as (
   select distinct trade_date from pms.module_e_benchmark_bars
   where benchmark_code='NIFTY50' and source in ('NSE_HISTORICAL_OR','NSE_DAILY_INDEX') and
@@ -156,13 +159,13 @@ COVERAGE = """with calendar as (
 ), chosen as (
   select distinct on(p.instrument_id,p.trade_date) p.* from pms.daily_prices p
   join calendar c using(trade_date) where p.instrument_id in(select value::bigint from jsonb_array_elements_text(cast(:ids as jsonb)))
-  order by p.instrument_id,p.trade_date,case when lower(source)='angel_one' then 0 when lower(source) like 'nse%' then 1 else 2 end,lower(source)
+  order by p.instrument_id,p.trade_date,case when lower(source) like 'nse%' then 0 when lower(source)='angel_one' then 1 else 2 end,lower(source)
 ) select i.id,count(c.trade_date) expected,count(p.trade_date) observed,
  count(p.trade_date) filter(where open<=0 or low<=0 or close<=0 or high<greatest(open,close)
  or low>least(open,close) or volume<0 or open::text in ('NaN','Infinity','-Infinity')
  or high::text in ('NaN','Infinity','-Infinity') or low::text in ('NaN','Infinity','-Infinity')
  or close::text in ('NaN','Infinity','-Infinity') or volume::text in ('NaN','Infinity','-Infinity')) invalid,
- count(p.trade_date) filter(where (lower(source) not like 'nse%' and lower(source)<>'angel_one') or lower(source) in(select jsonb_array_elements_text(cast(:adjusted as jsonb)))) unverified_raw_source
+ count(p.trade_date) filter(where lower(source) not like 'nse%' or lower(source) in(select jsonb_array_elements_text(cast(:adjusted as jsonb)))) unverified_raw_source
  from pms.instruments i join calendar c on c.trade_date>=i.listed_from and (i.delisted_on is null or c.trade_date<i.delisted_on)
  left join chosen p on p.instrument_id=i.id and p.trade_date=c.trade_date
  where i.id in(select value::bigint from jsonb_array_elements_text(cast(:ids as jsonb))) group by i.id order by i.id"""
@@ -283,6 +286,8 @@ def report_lock(path):
         finally:
             handle.seek(0)
             if os.name == "nt":
+                import msvcrt
                 msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
             else:
+                import fcntl
                 fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
