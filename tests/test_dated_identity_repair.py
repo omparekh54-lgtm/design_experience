@@ -84,3 +84,17 @@ def test_transition_preserves_original_mapping_and_is_idempotent(monkeypatch):
     assert repair.shareholding_expected_isin(row,{**record,'date':'22-Oct-2026'})==repair.NEW
     assert repair.shareholding_expected_isin(row,{**record,'isin':'INE000000000'})==repair.NEW
     assert record==dict(isin=repair.OLD,date='30-Sep-2026')
+
+
+def test_price_archive_allowance_does_not_select_a_filings_old_isin():
+    # TCC's official September XML proves the current ISIN despite an old
+    # summary ISIN. Its price review was an observation, not a dated split.
+    row = {'isin': 'INE887D01024', 'metadata': {'reviewed_isin_history': [{
+        'reviewed': True, 'current_isin': 'INE887D01024',
+        'previous_isin': 'INE887D01016', 'allow_previous_through': '2026-10-19',
+        'observed_on': '2026-10-20', 'master_sha256': 'a'*64,
+        'quote_sha256': 'b'*64}]}}
+    record = {'isin': 'INE887D01016', 'date': '30-SEP-2026'}
+    assert reviewed_price_isin_matches(row, record['isin'], date(2026,9,30))
+    assert repair.shareholding_expected_isin(row, record) == row['isin']
+    assert record['isin'] == 'INE887D01016'

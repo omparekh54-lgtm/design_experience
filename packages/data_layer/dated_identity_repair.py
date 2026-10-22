@@ -88,6 +88,14 @@ def shareholding_expected_isin(instrument, record):
     from packages.data_layer.cloud_storage import reviewed_price_isin_matches
     candidate = record.get('isin')
     if candidate and candidate != instrument['isin']:
-        if reviewed_price_isin_matches(instrument, candidate, parse_day(record['date'])):
+        # An observed archive allowance does not establish a corporate-action
+        # effective date. Only a dated identity reconciliation can determine
+        # the identity a prior-period filing must prove.
+        history = (instrument.get('metadata') or {}).get('reviewed_isin_history', [])
+        dated = isinstance(history, list) and any(
+            isinstance(r, dict) and r.get('current_effective_from')
+            and r.get('current_isin') == instrument['isin']
+            and r.get('previous_isin') == candidate for r in history)
+        if dated and reviewed_price_isin_matches(instrument, candidate, parse_day(record['date'])):
             return candidate
     return instrument['isin']
