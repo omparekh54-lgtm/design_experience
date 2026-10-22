@@ -178,7 +178,6 @@ def ingest(progress: Callable[[int, int, str], None] | None = None) -> dict:
     engine=_engine()
     try:
         with engine.connect() as conn:
-            # Historical reconstruction must include inactive/delisted names too.
             instrument_rows=conn.execute(text("""
                 select id,nse_symbol from pms.instruments
                 where exchange='NSE' and nse_symbol is not null
@@ -192,7 +191,8 @@ def ingest(progress: Callable[[int, int, str], None] | None = None) -> dict:
         while cursor<=end_all:
             chunk_end=min(cursor+timedelta(days=89),end_all); chunks.append((cursor,chunk_end)); cursor=chunk_end+timedelta(days=1)
 
-        processed=circular_count=attachment_count=attachment_failures=chunk_failures=0
+        processed=circular_count=attachment_count=attachment_failures=chunk_failures=unresolved_circulars=0
+        unresolved_samples=[]
         for start,end in chunks:
             try:
                 rows=_fetch_circulars(session,start,end)
@@ -205,13 +205,21 @@ def ingest(progress: Callable[[int, int, str], None] | None = None) -> dict:
                 if "GSM" not in subject.upper() and "GRADED SURVEILLANCE" not in subject.upper(): continue
                 cdate=_circular_date(row) or start
                 urls=sorted(_attachment_urls(row),key=lambda u:0 if any(x in u.lower() for x in (".zip",".xlsx")) else 1)
-                symbols=set()
+                symbols=set(); retrieved=0; failed=0
                 for url in urls:
                     try:
-                        found=_extract_attachment(session,url,known); symbols |= found; attachment_count+=1
+                        found=_extract_attachment(session,url,known); symbols |= found; attachment_count+=1; retrieved+=1
                         if found and any(x in url.lower() for x in (".zip",".xlsx")): break
                     except Exception:
-                        attachment_failures+=1
+                        attachment_failures+=1; failed+=1
+                # A circular can legitimately have no extractable symbols, but if
+                # it advertised attachments and every attachment failed to download
+                # we have no evidence about its membership changes and must stop.
+                if urls and retrieved == 0 and failed == len(urls):
+                    unresolved_circulars += 1
+                    if len(unresolved_samples) < 20:
+                        unresolved_samples.append({"date":str(cdate),"subject":subject[:160],"attachments":len(urls)})
+                    continue
                 if not symbols: continue
                 circular_count+=1; s=subject.lower()
                 inactive=any(x in s for x in ("moving out","move out","removed","removal","exclusion","exit from gsm"))
@@ -220,8 +228,11 @@ def ingest(progress: Callable[[int, int, str], None] | None = None) -> dict:
             if progress: progress(processed,len(chunks),f"{start}..{end}")
             time.sleep(0.15)
 
-        if chunk_failures:
-            raise RuntimeError(f"legacy GSM archive has {chunk_failures} unresolved circular-window fetch failure(s)")
+        if chunk_failures or unresolved_circulars:
+            raise RuntimeError(
+                f"legacy GSM archive incomplete: {chunk_failures} unresolved circular-window failure(s), "
+                f"{unresolved_circulars} circular(s) with all attachments unavailable; samples={unresolved_samples}"
+            )
 
         intervals=[]
         for symbol,evs in events.items():
@@ -242,7 +253,7 @@ def ingest(progress: Callable[[int, int, str], None] | None = None) -> dict:
 
         return {"circulars_used":circular_count,"attachments_parsed":attachment_count,
                 "attachment_failures":attachment_failures,"circular_window_failures":chunk_failures,
-                "symbols":len(events),"intervals_written":len(intervals),
+                "unresolved_circulars":unresolved_circulars,"symbols":len(events),"intervals_written":len(intervals),
                 "historical_universe_instruments":len(instrument_rows)}
     finally:
         engine.dispose()
