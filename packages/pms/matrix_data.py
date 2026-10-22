@@ -83,7 +83,10 @@ def input_manifest(snapshot, cells, symbols=None, *, allow_ambiguous=False):
         "warmup": start - timedelta(days=1100),
         "end": end,
         "stamp": end_of_day(end),
-        "calendar_end": end + timedelta(days=150),
+        # The research identity must never read beyond the declared period.
+        # In particular, Step-10 ending 2024-12-31 must not fingerprint 2025
+        # calendar rows that belong to the reserved OOS period.
+        "calendar_end": end,
     }
     tables = {}
     for table, where in INPUTS.items():
@@ -286,7 +289,6 @@ def report_lock(path):
         finally:
             handle.seek(0)
             if os.name == "nt":
-                import msvcrt
                 msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
             else:
                 import fcntl
