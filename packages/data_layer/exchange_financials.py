@@ -426,8 +426,13 @@ def filing_from_exchange_record(
             raw_payload = {**raw_payload, 'canonical_metric_basis': {
                 'sales': basis, 'sales_fact': revenue, 'pat_fact': pat}}
         diagnostics = {}
+        if (record.raw_payload.get('financial_source') or {}).get('format')=='NSE_RENDERED_TABLES':
+            from .nse_financial_render import parse_financial_render
+            facts=parse_financial_render(xbrl,record)
+        else:
+            facts=parse_xbrl_facts(xbrl)
         canonical.update(extract_canonical_financials(
-            parse_xbrl_facts(xbrl), record.period_end, aliases=aliases,
+            facts, record.period_end, aliases=aliases,
             filing_kind=record.filing_kind, statement_scope=record.statement_scope,
             diagnostics=diagnostics))
         raw_payload["financial_extraction"] = dict(version=EXTRACTION_VERSION,
@@ -465,6 +470,18 @@ def filings_from_exchange_record(
     Annual records are sourced from actual full-year contexts, never inferred
     from a March date or calculated by multiplying a quarter by four.
     """
+    if xbrl and record.filing_kind=='quarter' and not record.raw_payload.get('financial_source'):
+        # SME half-year declarations are not three-month quarterly observations.
+        from xml.etree import ElementTree as ET
+        raw=xbrl.encode() if isinstance(xbrl,str) else xbrl
+        if b'<!DOCTYPE' in raw.upper() or b'<!ENTITY' in raw.upper():
+            raise ValueError('xbrl_entities_forbidden')
+        root=ET.fromstring(raw)
+        labels={_norm_key(x.text or '') for x in root
+            if x.tag.rsplit('}',1)[-1]=='ReportingQuarter'}
+        if labels and labels<={'halfyear','halfyearly','sixmonths'}:
+            record=replace(record,filing_kind='half_year',raw_payload={**record.raw_payload,
+                'source_reported_filing_kind':'half_year','exchange_summary_filing_kind':record.filing_kind})
     primary = filing_from_exchange_record(record, xbrl)
     filings = [primary]
     if xbrl:

@@ -312,6 +312,7 @@ class CloudCollector:
         written = 0
         errors = []
         for r in pending[: self.max_filings if apply else 1]:
+            source_key=record_key(r.raw_payload)
             try:
                 from packages.pms.module_a_context import as_ist
 
@@ -329,8 +330,11 @@ class CloudCollector:
                 )
                 if r.filed_at > now:
                     raise SourceError("financial_filing_in_future")
-                doc = self.http.fetch(r.xbrl_uri)
-                if b"<!DOCTYPE" in doc.body.upper() or b"<!ENTITY" in doc.body.upper():
+                from packages.data_layer.nse_financial_render import financial_document
+                r,doc = financial_document(self.http,r,
+                    expected_isin=known[r.symbol]['isin'] if apply else None)
+                rendered=(r.raw_payload.get('financial_source') or {}).get('format')=='NSE_RENDERED_TABLES'
+                if b"<!ENTITY" in doc.body.upper() or (not rendered and b"<!DOCTYPE" in doc.body.upper()):
                     raise SourceError("xbrl_entities_forbidden")
                 filings = filings_from_exchange_record(r, doc.body)
                 filing = filings[0]
@@ -339,12 +343,12 @@ class CloudCollector:
                 if apply:
                     self.store.financial(filings)
                     self.store.ack(
-                        FINANCIAL_ACK_DATASET, doc, record_key(r.raw_payload)
+                        FINANCIAL_ACK_DATASET, doc, source_key
                     )
                 written += 1
             except Exception as exc:
                 if apply:
-                    self.store.pending_failed('CLOUD_FINANCIAL_PENDING', record_key(r.raw_payload))
+                    self.store.pending_failed('CLOUD_FINANCIAL_PENDING', source_key)
                 errors.append(
                     {
                         "symbol": r.symbol,

@@ -8,6 +8,7 @@ on:
       - packages/data_layer/classification_identity.py
       - packages/data_layer/reviewed_classification_identities.json
       - packages/data_layer/dated_identity_repair.py
+      - packages/data_layer/nse_financial_render.py
       - packages/pms/paper_data_repair.py
       - scripts/repair_paper_inputs.py
       - .github/workflows/pms-paper-input-repair.yml
@@ -79,7 +80,7 @@ jobs:
     needs: repair
     if: always()
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    timeout-minutes: 240
     env:
       DATABASE_URL: ${{ secrets.NEON_PMS_DATABASE_URL }}
       PMS_NEON_ARCHIVE_JSON: ${{ secrets.PMS_NEON_ARCHIVE_JSON }}
@@ -95,7 +96,7 @@ jobs:
           cache: pip
       - run: pip install -r requirements.txt
       - name: Verify corrected collector against a completed exchange session
-        run: python scripts/repair_paper_inputs.py collector --output collector-verification.json
+        run: python scripts/repair_paper_inputs.py collector-drain --output collector-verification.json
       - name: Measure readiness and read-only preflight without activation
         if: always()
         run: python scripts/repair_paper_inputs.py readiness --output readiness-verification.json

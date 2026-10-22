@@ -37,7 +37,7 @@ class EarningsAnchoredSetup2:
             r
             for r in history
             if str(r.get("filing_kind") or "quarter").lower()
-            not in {"annual", "year", "yearly"}
+            in {"quarter", "quarterly"}
         ]
         latest_signal = None
         for filing in sorted(quarterly, key=lambda r: as_ist(r["filed_at"])):

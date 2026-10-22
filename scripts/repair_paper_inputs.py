@@ -15,7 +15,7 @@ from scripts.copy_pms_to_neon import connection_url
 
 def main(argv=None):
     p=argparse.ArgumentParser(description=__doc__)
-    p.add_argument('mode',choices=['financials','sectors','collector','identities','readiness'])
+    p.add_argument('mode',choices=['financials','sectors','collector','collector-drain','identities','readiness'])
     p.add_argument('--output',type=Path,required=True)
     a=p.parse_args(argv)
     if a.output.exists():p.error('Preserve existing report; choose a new path')
@@ -33,7 +33,7 @@ def main(argv=None):
         http=OfficialHTTP(archive=archive,seconds=10000)
         service=PaperDataRepair(engine,http,archive)
         service.locked()
-        if a.mode in {'collector','readiness'}:
+        if a.mode in {'collector','collector-drain','readiness'}:
             from packages.pms.cloud_collection import run_collection
             from packages.pms.market_calendar import MarketCalendar
             from datetime import timedelta
@@ -44,9 +44,17 @@ def main(argv=None):
                 if calendar.forward(day,1)==[day]:break
                 day-=timedelta(days=1)
             else:raise ValueError('No verified completed exchange session')
-            if a.mode=='collector':
-                result=run_collection(engine,now=now,max_filings=500,http=http,require_archive=True,
-                                      catch_up_date=day if day<now.date() else None)
+            if a.mode in {'collector','collector-drain'}:
+                def once():
+                    stamp=datetime.now(IST)
+                    return run_collection(engine,now=stamp,max_filings=200 if a.mode=='collector-drain' else 500,
+                        http=OfficialHTTP(archive=archive,seconds=1800 if a.mode=='collector-drain' else 10000),require_archive=True,
+                        catch_up_date=day if day<stamp.date() else None)
+                if a.mode=='collector-drain':
+                    from packages.pms.collection_repair import drain_collection
+                    result=drain_collection(once,service.locked,on_progress=lambda r:(
+                        save({'progress':r}),print(json.dumps(r,default=str),flush=True)))
+                else:result=once()
             else:
                 from packages.pms.campaign_readiness import readiness_query,assess_readiness
                 from packages.pms.config import load_strategy_config

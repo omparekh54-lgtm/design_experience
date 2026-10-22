@@ -85,8 +85,11 @@ class OfficialHTTP:
         self.downloaded_bytes = 0
         self.archive = archive
 
-    def fetch(self, url):
+    def fetch(self, url, *, financial_render=False):
         allowed_url(url)
+        if financial_render and not (urllib.parse.urlsplit(url).hostname=='nsearchives.nseindia.com'
+                and re.fullmatch(r'/corporate/ixbrl/INTEGRATED_FILING_INDAS_[0-9]+_[0-9]+_iXBRL_WEB\.html',urllib.parse.urlsplit(url).path)):
+            raise SourceError('financial_render_url_not_allowed')
         for attempt in range(3):
             remaining = self.deadline - time.monotonic()
             if remaining <= 0:
@@ -107,9 +110,9 @@ class OfficialHTTP:
                     body = response.read(MAX_BYTES + 1)
                     if len(body) > MAX_BYTES:
                         raise SourceError("source_too_large")
-                if not body or body.lstrip().lower().startswith(
+                if not body or (not financial_render and body.lstrip().lower().startswith(
                     (b"<!doctype html", b"<html")
-                ):
+                )):
                     raise SourceError("empty_or_html_source")
                 self.downloaded_bytes += len(body)
                 if self.downloaded_bytes > 256 * 1024 * 1024:
