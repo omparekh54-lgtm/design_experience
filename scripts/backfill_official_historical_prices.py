@@ -150,6 +150,31 @@ def _checkpoint(output: Path,start: date,end: date) -> dict | None:
     return data
 
 
+def _db_completed_dates(engine, start: date, end: date) -> set[str]:
+    """Database truth for resumability; local JSON is advisory only.
+
+    A date is complete only when an official receipt exists and at least one
+    official NSE price row for that date is still present. This prevents a stale
+    local checkpoint from skipping work after a Neon restore/reset.
+    """
+    with engine.connect() as c:
+        rows=c.execute(text("""
+          select distinct (s.metadata->>'trade_date')::date trade_date
+          from pms.provider_snapshots s
+          where s.dataset='HISTORICAL_NSE_PRICES'
+            and s.metadata->>'complete'='true'
+            and (s.metadata->>'trade_date')::date between :start and :end
+            and s.content_sha256 ~ '^[0-9a-fA-F]{64}$'
+            and s.source_uri is not null and btrim(s.source_uri)<>''
+            and exists (
+              select 1 from pms.daily_prices p
+              where p.trade_date=(s.metadata->>'trade_date')::date
+                and lower(p.source) like 'nse%'
+            )
+        """),{'start':start,'end':end}).scalars().all()
+    return {str(d) for d in rows}
+
+
 def ingest(start:date,end:date,output:Path):
     load_dotenv(ROOT/'.env')
     raw=os.environ.get('DATABASE_URL') or os.environ.get('PMS_DATABASE_URL')
@@ -171,24 +196,28 @@ def ingest(start:date,end:date,output:Path):
       values('NSE','HISTORICAL_NSE_PRICES',:sha,:uri,cast(:metadata as jsonb))
     """)
     old=_checkpoint(output,start,end)
-    completed_dates=set((old or {}).get('completed_dates') or [])
+    local_dates=set((old or {}).get('completed_dates') or [])
+    db_dates=_db_completed_dates(engine,start,end)
+    completed_dates={str(d) for d in days if str(d) in db_dates}
+    stale_local=sorted(local_dates-completed_dates)
+    if stale_local:
+        print(json.dumps({'checkpoint_reconciled':'DATABASE_WINS','stale_local_dates':len(stale_local),'sample':stale_local[:10]}),flush=True)
     report={'start':str(start),'end':str(end),'sessions':len(days),'completed':len(completed_dates),
-            'completed_dates':sorted(completed_dates),'written':int((old or {}).get('written') or 0),
-            'unmatched':int((old or {}).get('unmatched') or 0),'ambiguous_samples':(old or {}).get('ambiguous_samples',[])[:50],
-            'failures':[],'private_archive':bool(archive),'resumed':bool(old)}
+            'completed_dates':sorted(completed_dates),'written':0,
+            'unmatched':0,'ambiguous_samples':[],
+            'failures':[],'private_archive':bool(archive),'resumed':bool(completed_dates),
+            'checkpoint_authority':'DATABASE_RECEIPT_PLUS_PRICE_ROW'}
     _write(output,report)
     try:
         for n,day in enumerate(days,1):
             key=str(day)
             if key in completed_dates:
-                print(json.dumps({'session':n,'of':len(days),'date':key,'status':'checkpoint-complete'}),flush=True)
+                print(json.dumps({'session':n,'of':len(days),'date':key,'status':'database-complete'}),flush=True)
                 continue
             last_exc=None
             success=False
             for attempt in range(1,4):
                 try:
-                    # Fresh HTTP client per attempt prevents a timed-out socket/session
-                    # from poisoning subsequent historical dates.
                     http=OfficialHTTP(seconds=1200,archive=archive)
                     doc,rows,fmt=fetch_day(http,day); by_symbol,by_isin=candidates(master,day)
                     payload=[]; unmatched=[]
