@@ -168,14 +168,14 @@ jobs:
         run: |
           mkdir -p artifacts/phase10
           set +e
-          python scripts/run_backtest_matrix.py --check --quick --start 2025-01-01 --end 2026-10-21 > artifacts/phase10/matrix-check.json 2> artifacts/phase10/matrix-check.err
+          python scripts/run_backtest_matrix.py --check --quick --start 2023-01-01 --end 2024-12-31 > artifacts/phase10/matrix-check.json 2> artifacts/phase10/matrix-check.err
           rc=$?
           cat artifacts/phase10/matrix-check.json || true
           cat artifacts/phase10/matrix-check.err >&2 || true
           exit $rc
       - name: Run bounded isolated replay cells
         run: |
-          python scripts/run_backtest_matrix.py --run --quick --start 2025-01-01 --end 2026-10-21 \
+          python scripts/run_backtest_matrix.py --run --quick --start 2023-01-01 --end 2024-12-31 \
             --max-cells 2 --no-persist --report artifacts/phase10/matrix.json
       - uses: actions/upload-artifact@v4
         if: always()
