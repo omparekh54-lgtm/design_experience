@@ -16,7 +16,7 @@ import json
 import os
 import sys
 from collections import defaultdict
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, timedelta
 from pathlib import Path
 
 import requests
@@ -100,8 +100,6 @@ def resolve_symbol_map(conn) -> dict[str, int]:
 
 
 def build_intervals(rows: list[dict], start: date, end: date) -> tuple[list[dict], dict]:
-    # Each candidate interval retains its actual source URL. We then sweep every
-    # change boundary to choose one deterministic, non-overlapping sector proxy.
     by_symbol: dict[str, list[dict]] = defaultdict(list)
     accepted_source_kinds = {"press_release", "circular", "merger", "snapshot_floor", "snapshot", "inferred-exclude"}
     for row in rows:
@@ -178,21 +176,17 @@ def main() -> int:
                 if iid is None:
                     unmatched.add(item["symbol"])
                     continue
-                # Historical import ends no later than the declared research boundary,
-                # so it cannot overlap today's separately sourced classification row.
-                effective_to = item["end"]
-                source = "NSE_PIT_SECTOR_INDEX"
                 result = conn.execute(text("""
                     insert into pms.sector_history(instrument_id,sector,industry,effective_from,effective_to,source)
-                    values(:iid,:sector,null,:frm,:to,:source)
+                    values(:iid,:sector,null,:frm,:to,'NSE_PIT_SECTOR_INDEX')
                     on conflict(instrument_id,sector,effective_from,source) do update
                     set effective_to=excluded.effective_to
-                """), {"iid": iid, "sector": item["sector"], "frm": item["start"], "to": effective_to, "source": source})
+                """), {"iid": iid, "sector": item["sector"], "frm": item["start"], "to": item["end"]})
                 inserted += max(0, result.rowcount)
 
-            # Keep an immutable source receipt in the existing provider provenance table.
             meta = {
                 "version": "PIT_SECTOR_INDEX_v1",
+                "complete": True,
                 "start": args.start.isoformat(), "end": args.end.isoformat(),
                 "repo": SOURCE_REPO, "source_sha256": source_sha,
                 "sector_indices": sorted(SECTOR_INDICES),
@@ -200,8 +194,8 @@ def main() -> int:
                 **build_meta,
             }
             conn.execute(text("""
-                insert into pms.provider_snapshots(provider,dataset,source_uri,content_sha256,observed_at,complete,metadata)
-                values('NSE_INDICES_PIT','HISTORICAL_SECTOR_INTERVALS',:uri,:sha,now(),true,cast(:meta as jsonb))
+                insert into pms.provider_snapshots(provider,dataset,source_uri,content_sha256,observed_at,metadata)
+                values('NSE_INDICES_PIT','HISTORICAL_SECTOR_INTERVALS',:uri,:sha,now(),cast(:meta as jsonb))
             """), {"uri": SOURCE_URL, "sha": source_sha, "meta": json.dumps(meta, default=str)})
 
         with db.connect() as conn:
