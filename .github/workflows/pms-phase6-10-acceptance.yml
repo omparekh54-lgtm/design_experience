@@ -99,7 +99,7 @@ jobs:
           python-version: '3.12'
           cache: pip
       - run: pip install -r requirements.txt
-      - name: Assert PAPER lock and order consistency
+      - name: Assert PAPER lock and broker consistency
         run: |
           python - <<'PY'
           import json,os
@@ -110,9 +110,13 @@ jobs:
           with e.connect() as c:
               safety=dict(c.execute(text('select execution_mode,new_orders_enabled,emergency_stop,locked_reason from pms.safety_state where singleton=true')).mappings().one())
               counts=dict(c.execute(text("""select
-                (select count(*) from pms.paper_orders) orders,
-                (select count(*) from pms.paper_fills) fills,
-                (select count(*) from pms.paper_fills f left join pms.paper_orders o on o.id=f.order_id where o.id is null) orphan_fills
+                (select count(*) from pms.broker_orders where mode='PAPER') paper_orders,
+                (select count(*) from pms.broker_fills f join pms.broker_orders o on o.id=f.order_id where o.mode='PAPER') paper_fills,
+                (select count(*) from pms.broker_fills f left join pms.broker_orders o on o.id=f.order_id where o.id is null) orphan_fills,
+                (select count(*) from (select o.id,o.quantity,coalesce(sum(f.quantity),0) filled
+                  from pms.broker_orders o left join pms.broker_fills f on f.order_id=o.id
+                  where o.mode='PAPER' group by o.id,o.quantity
+                  having coalesce(sum(f.quantity),0)>o.quantity) x) overfilled_orders
               """)).mappings().one())
           out={'safety':safety,'paper':counts}
           print(json.dumps(out,default=str,indent=2))
@@ -120,6 +124,7 @@ jobs:
           assert safety['new_orders_enabled'] is False
           assert safety['emergency_stop'] is False
           assert counts['orphan_fills']==0
+          assert counts['overfilled_orders']==0
           e.dispose()
           PY
 
@@ -162,7 +167,12 @@ jobs:
       - name: Matrix isolated replay preflight with dataset fingerprint
         run: |
           mkdir -p artifacts/phase10
-          python scripts/run_backtest_matrix.py --check --quick --start 2025-01-01 --end 2026-10-21 > artifacts/phase10/matrix-check.json
+          set +e
+          python scripts/run_backtest_matrix.py --check --quick --start 2025-01-01 --end 2026-10-21 > artifacts/phase10/matrix-check.json 2> artifacts/phase10/matrix-check.err
+          rc=$?
+          cat artifacts/phase10/matrix-check.json || true
+          cat artifacts/phase10/matrix-check.err >&2 || true
+          exit $rc
       - name: Run bounded isolated replay cells
         run: |
           python scripts/run_backtest_matrix.py --run --quick --start 2025-01-01 --end 2026-10-21 \
