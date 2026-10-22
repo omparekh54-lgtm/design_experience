@@ -6,6 +6,8 @@ from sqlalchemy import text
 from packages.pms.module_a_context import as_ist
 
 # One row per instrument. Deduplicate market sources BEFORE the 63-session limit.
+# Historical matrix runs set :historical_research=true and therefore use only
+# official NSE rows. Production keeps its existing Angel-One-first behaviour.
 CONTEXT_SQL = """
 with calendar as (
  select distinct trade_date from module_e_benchmark_bars where benchmark_code='NIFTY50'
@@ -13,9 +15,11 @@ with calendar as (
 ), price_daily as (
  select distinct on (p.instrument_id,p.trade_date) p.instrument_id,p.trade_date,p.close,p.volume,p.turnover
  from daily_prices p join calendar c on c.trade_date=p.trade_date
- where (cast(:instrument_pk as bigint) is null or p.instrument_id=cast(:instrument_pk as bigint))
+ where (not cast(:historical_research as boolean) or lower(p.source) like 'nse%')
+ and (cast(:instrument_pk as bigint) is null or p.instrument_id=cast(:instrument_pk as bigint))
  order by p.instrument_id,p.trade_date desc,
- case when p.source='angel_one' then 0 when p.source like 'NSE%' then 1 else 2 end,p.source
+ case when cast(:historical_research as boolean) and lower(p.source) like 'nse%' then 0
+      when p.source='angel_one' then 0 when p.source like 'NSE%' then 1 else 2 end,p.source
 ), price_sessions as (
  select *,row_number() over(partition by instrument_id order by trade_date desc) session_rank from price_daily
 ), prices as (
@@ -70,9 +74,14 @@ order by i.nse_symbol
 def context_params(as_of: datetime, cfg: dict, instrument_pk=None):
     stamp = as_ist(as_of)
     market_date = stamp.date() if stamp.time() >= time(15, 30) else stamp.date()-timedelta(days=1)
+    historical_research = bool(
+        cfg.get('backtest', {}).get('matrix_research_only')
+        or cfg.get('backtest', {}).get('final_acceptance_scope')
+    )
     return {'as_of': stamp, 'market_date': market_date, 'reference_date': stamp.date(), 'instrument_pk': instrument_pk,
             'sessions': int(cfg['fundamental'].get('liquidity_sessions',63)),
-            'surveillance_since': stamp-timedelta(days=int(cfg['fundamental'].get('max_surveillance_age_days',7)))}
+            'surveillance_since': stamp-timedelta(days=int(cfg['fundamental'].get('max_surveillance_age_days',7)),
+            ), 'historical_research': historical_research}
 
 
 def normalize_context(row: dict, as_of: datetime, cfg: dict) -> dict:
