@@ -28,7 +28,7 @@ def universe(engine):
         rows=[dict(r) for r in c.execute(text("""
           select id,nse_symbol,isin,listed_from,delisted_on,active,metadata
           from pms.instruments where exchange='NSE' and nse_symbol is not null
-            and btrim(nse_symbol)<>'' order by id
+            and btrim(nse_symbol)<>'' and metadata->>'ingestion_duplicate_of' is null order by id
         """)).mappings().all()]
     counts={}
     for r in rows: counts[r['nse_symbol']]=counts.get(r['nse_symbol'],0)+1
@@ -66,6 +66,27 @@ def _load_checkpoint(output: Path, start: date, end: date, shard: int, shards: i
     return data
 
 
+def _db_completed_symbols(engine, start: date, end: date) -> set[str]:
+    """Return only symbols with surviving official historical filing receipts.
+
+    Local checkpoint JSON is never sufficient on its own: Neon may have been
+    restored or reset. Symbols with genuinely zero official records are cheap to
+    rediscover on a rerun and therefore are intentionally not treated as DB-complete.
+    """
+    with engine.connect() as c:
+        rows=c.execute(text("""
+          select distinct upper(metadata->>'symbol') symbol
+          from pms.provider_snapshots
+          where dataset='HISTORICAL_FINANCIAL_XBRL'
+            and metadata->>'complete'='true'
+            and metadata->>'symbol' is not null
+            and content_sha256 ~ '^[0-9a-fA-F]{64}$'
+            and source_uri is not null and btrim(source_uri)<>''
+            and coalesce((metadata->>'period_end')::date,:start) <= :end
+        """),{'start':start,'end':end}).scalars().all()
+    return {str(s).upper() for s in rows if s}
+
+
 def run(start:date,end:date,shard:int,shards:int,output:Path):
     if not 0<=shard<shards: raise ValueError('invalid shard')
     load_dotenv(ROOT / '.env')
@@ -76,6 +97,7 @@ def run(start:date,end:date,shard:int,shards:int,output:Path):
     require_financial_period_identity(engine)
     rows=universe(engine)
     selected=[r for n,r in enumerate(rows) if n%shards==shard]
+    selected_symbols={str(r['nse_symbol']).upper() for r in selected}
     archive=optional_private_archive()
     provider=NSEIntegratedFinancialsProvider(); store=CloudStore(engine)
     store._known={r['nse_symbol']:{'id':r['id'],'symbol':r['nse_symbol'],'canonical_symbol':r['nse_symbol'],
@@ -83,18 +105,22 @@ def run(start:date,end:date,shard:int,shards:int,output:Path):
                                   'metadata':r.get('metadata') or {}} for r in rows}
 
     old=_load_checkpoint(output,start,end,shard,shards)
-    completed_symbols=set((old or {}).get('completed_symbols') or [])
+    local_symbols={str(s).upper() for s in ((old or {}).get('completed_symbols') or [])}
+    db_symbols=_db_completed_symbols(engine,start,end) & selected_symbols
+    completed_symbols=set(db_symbols)
+    stale_local=sorted((local_symbols-selected_symbols) | (local_symbols-db_symbols))
+    if stale_local:
+        print(json.dumps({'checkpoint_reconciled':'DATABASE_WINS','stale_or_unverified_local_symbols':len(stale_local),'sample':stale_local[:10]}),flush=True)
     report={'start':str(start),'end':str(end),'shard':shard,'shards':shards,'symbols':len(selected),
-            'processed':len(completed_symbols),'discovered':int((old or {}).get('discovered') or 0),
-            'stored':int((old or {}).get('stored') or 0),'failures':[],
+            'processed':len(completed_symbols),'discovered':0,'stored':0,'failures':[],
             'completed_symbols':sorted(completed_symbols),'private_archive':bool(archive),
-            'resumed':bool(old)}
+            'resumed':bool(completed_symbols),'checkpoint_authority':'DATABASE_OFFICIAL_RECEIPTS'}
     _write_checkpoint(output,report)
     try:
         for n,r in enumerate(selected,1):
-            symbol=r['nse_symbol']
+            symbol=str(r['nse_symbol']).upper()
             if symbol in completed_symbols:
-                print(json.dumps({'symbol':symbol,'n':n,'of':len(selected),'status':'checkpoint-complete'}),flush=True)
+                print(json.dumps({'symbol':symbol,'n':n,'of':len(selected),'status':'database-complete'}),flush=True)
                 continue
             from_date=max(start,r['listed_from']) if r['listed_from'] else start
             to_date=min(end,r['delisted_on']) if r['delisted_on'] else end
@@ -141,6 +167,8 @@ def run(start:date,end:date,shard:int,shards:int,output:Path):
                 print(json.dumps({'symbol':symbol,'failure':code}),flush=True)
         _write_checkpoint(output,report)
         if report['failures']: raise SystemExit(2)
+        if report['processed'] != len(selected):
+            raise RuntimeError(f"historical financial shard incomplete: {report['processed']}/{len(selected)}")
         return report
     finally:
         engine.dispose()
