@@ -27,7 +27,7 @@ def test_only_exact_reviewed_corporate_actions_link_to_current_identity():
     actions, known = reviewed_actions()
     original = copy.deepcopy(actions)
     receipt = validate_action_identities(actions, known)
-    assert len(receipt) == len(actions) == 8 and actions == original
+    assert len(receipt) == len(actions) == 9 and actions == original
     assert all(r['previous_isin'] != r['current_isin'] for r in receipt)
 
 
@@ -96,3 +96,16 @@ def test_irfc_review_does_not_extend_to_changed_dividend():
     a['raw']['subject']='Interim Dividend - Rs 1.16 Per Share'
     with pytest.raises(SourceError,match='action_isin_mismatch'):
         validate_action_identities([a],known)
+
+
+def test_360one_review_preserves_terms_and_rejects_a_different_event():
+    actions, known = reviewed_actions()
+    action = next(a for a in actions if a['symbol'] == '360ONE')
+    parsed = module.parse_actions(document([action['raw']]), NOW)[0]
+    assert parsed['cash_amount'] == 7.5
+    assert parsed['ex_date'] == date(2026,10,23)
+    assert parsed['raw']['isin'] == 'INE466L01020'
+    assert validate_action_identities([parsed],known)[0]['current_isin'] == 'INE466L01038'
+    parsed['raw'] = {**parsed['raw'], 'subject': 'Interim Dividend - Rs 8 Per Share'}
+    with pytest.raises(SourceError, match='action_isin_mismatch'):
+        validate_action_identities([parsed],known)

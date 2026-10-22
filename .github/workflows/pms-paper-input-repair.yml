@@ -8,6 +8,7 @@ on:
       - packages/data_layer/classification_identity.py
       - packages/data_layer/reviewed_classification_identities.json
       - packages/data_layer/dated_identity_repair.py
+      - packages/data_layer/reviewed_action_identities.json
       - packages/data_layer/nse_financial_render.py
       - packages/pms/paper_data_repair.py
       - scripts/repair_paper_inputs.py

@@ -256,5 +256,37 @@
     "notice_url": "https://nsearchives.nseindia.com/content/circulars/CML77001.pdf",
     "notice_sha256": "eb9b435bdd25be1d4615be761ce5d58f0a87438d2d709629f5f922e46ff3b588",
     "scope": "Exact split record only; dated NSE notice binds new ISIN effective 2026-10-22. Raw source identifier and split terms retained."
+  },
+  {
+    "symbol": "360ONE",
+    "previous_isin": "INE466L01020",
+    "current_isin": "INE466L01038",
+    "ex_date": "2026-10-23",
+    "action_type": "DIVIDEND",
+    "company": "360 ONE WAM LIMITED",
+    "raw_record_sha256": "af70b99cb3477c78b971ffa9c77ae24192fe7a7449baeac11ee705224409448c",
+    "raw": {
+      "bcEndDate": "-",
+      "bcStartDate": "-",
+      "caBroadcastDate": null,
+      "comp": "360 ONE WAM LIMITED",
+      "exDate": "23-Oct-2026",
+      "faceVal": "1",
+      "ind": "-",
+      "isin": "INE466L01020",
+      "ndEndDate": "-",
+      "ndStartDate": "-",
+      "recDate": "23-Oct-2026",
+      "series": "EQ",
+      "subject": "Interim Dividend - Rs 7.50 Per Share",
+      "symbol": "360ONE"
+    },
+    "event_source_url": "https://www.nseindia.com/api/corporates-corporateActions?index=equities&from_date=15-10-2026&to_date=06-12-2026",
+    "event_source_sha256": "b7870dbe09baef7ed59f46937068dff8f35ab9c85f791d90db5d8adbd1118ec0",
+    "master_sha256": "342103bdea9b48109eb716128321d76d50d6f1d881aeb12af706802709fc6993",
+    "quote_url": "https://www.nseindia.com/api/NextApi/apiClient/GetQuoteApi?functionName=getSymbolData&marketType=N&series=EQ&symbol=360ONE",
+    "quote_sha256": "848b83332e05f8b6fbe7f716cad29108f22a41824f301e33efe0b6821fc2b5c4",
+    "reviewed_on": "2026-10-22",
+    "scope": "Exact dividend record only. NSE master and detailed quote agree on symbol, issuer, EQ series, face value 1 and current ISIN. Retain source identifier, amount and dates. No general alias or historical adjustment."
   }
 ]
