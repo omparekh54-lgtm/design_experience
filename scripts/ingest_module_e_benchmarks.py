@@ -162,7 +162,7 @@ def coverage_audit(engine, start: date, end: date) -> dict:
             select benchmark_code,trade_date from pms.module_e_benchmark_bars
             where benchmark_code in ('NIFTYMIDSMALLCAP400','INDIAVIX','NIFTY50','NIFTY500')
               and source in ('NSE_HISTORICAL_OR','NSE_DAILY_INDEX') and trade_date between :start and :end
-        """), {"start": start, "end": end}).all()
+        """), {"start": start, "end": end, "source": SOURCE}).all()
     expected = {r[1] for r in bars if r[0] == CALENDAR_CODE}
     dates = {code: {r[1] for r in bars if r[0] == code}
              for code in ("NIFTYMIDSMALLCAP400", "INDIAVIX", "NIFTY500")}
