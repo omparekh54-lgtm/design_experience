@@ -15,7 +15,7 @@ from scripts.copy_pms_to_neon import connection_url
 
 def main(argv=None):
     p=argparse.ArgumentParser(description=__doc__)
-    p.add_argument('mode',choices=['financials','sectors','collector'])
+    p.add_argument('mode',choices=['financials','sectors','collector','identities','readiness'])
     p.add_argument('--output',type=Path,required=True)
     a=p.parse_args(argv)
     if a.output.exists():p.error('Preserve existing report; choose a new path')
@@ -33,7 +33,7 @@ def main(argv=None):
         http=OfficialHTTP(archive=archive,seconds=10000)
         service=PaperDataRepair(engine,http,archive)
         service.locked()
-        if a.mode=='collector':
+        if a.mode in {'collector','readiness'}:
             from packages.pms.cloud_collection import run_collection
             from packages.pms.market_calendar import MarketCalendar
             from datetime import timedelta
@@ -44,10 +44,23 @@ def main(argv=None):
                 if calendar.forward(day,1)==[day]:break
                 day-=timedelta(days=1)
             else:raise ValueError('No verified completed exchange session')
-            result=run_collection(engine,now=now,max_filings=500,http=http,require_archive=True,
-                                  catch_up_date=day if day<now.date() else None)
+            if a.mode=='collector':
+                result=run_collection(engine,now=now,max_filings=500,http=http,require_archive=True,
+                                      catch_up_date=day if day<now.date() else None)
+            else:
+                from packages.pms.campaign_readiness import readiness_query,assess_readiness
+                from packages.pms.config import load_strategy_config
+                from packages.pms.matrix_data import code_fingerprint,consistent_inputs
+                from packages.pms.daily_orchestrator import DailyServices
+                cfg=load_strategy_config()
+                with consistent_inputs(engine) as snapshot:
+                    facts=snapshot.execute(readiness_query(day)).scalar_one()
+                    class ReadOnlyEngine:
+                        def connect(self):return snapshot
+                    result=assess_readiness(facts,cfg,day=day,code_version=code_fingerprint())
+                    result['read_only_rehearsal']=DailyServices(ReadOnlyEngine(),cfg).preflight(day,now)
         else:
-            method=service.financials if a.mode=='financials' else service.sectors
+            method=getattr(service,a.mode)
             result=method(on_progress=lambda r:(save({'progress':r}),print(json.dumps(r,default=str),flush=True)))
         report.update(result)
         service.locked()
@@ -64,7 +77,7 @@ def main(argv=None):
             except Exception as exc:
                 report.update(status='FAILED',journal_error=safe_error(exc));save({})
             finally:engine.dispose()
-    return 0 if report['status']=='SUCCESS' else 2
+    return 0 if report['status'] in {'SUCCESS','READY_FOR_ACTIVATION'} else 2
 
 
 if __name__=='__main__':raise SystemExit(main())

@@ -380,8 +380,9 @@ class CloudCollector:
                 if parse_stamp(r.get("broadcastDate")) > now:
                     raise SourceError("shareholding_filing_in_future")
                 doc = self.http.fetch(r["xbrl"])
+                from packages.data_layer.dated_identity_repair import shareholding_expected_isin
                 values = parse_shareholding(doc.body, r,
-                    expected_isin=known[r["symbol"]]["isin"] if apply else None)
+                    expected_isin=shareholding_expected_isin(known[r["symbol"]], r) if apply else None)
                 if apply:
                     self.store.shareholding(r["symbol"], values, r, doc)
                     self.store.ack("CLOUD_SHAREHOLDING_XML", doc, record_key(r))

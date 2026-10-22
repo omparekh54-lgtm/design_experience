@@ -27,7 +27,7 @@ def test_only_exact_reviewed_corporate_actions_link_to_current_identity():
     actions, known = reviewed_actions()
     original = copy.deepcopy(actions)
     receipt = validate_action_identities(actions, known)
-    assert len(receipt) == len(actions) == 7 and actions == original
+    assert len(receipt) == len(actions) == 8 and actions == original
     assert all(r['previous_isin'] != r['current_isin'] for r in receipt)
 
 

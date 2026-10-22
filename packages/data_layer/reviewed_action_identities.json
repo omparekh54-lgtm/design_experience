@@ -222,5 +222,39 @@
     "quote_sha256": "e83c88a016b26e07525162db5157606ffd0cb03a5df5847a3767e22c2e97b36f",
     "reviewed_on": "2026-10-22",
     "scope": "Exact source event identity review only. NSE event names IRFC EQ with face value 10 and a conflicting identifier; independent current master and detailed quote agree on symbol, issuer name, EQ series, current ISIN and face value. Original identifier retained; no historical alias, identifier rewrite or general event exemption."
+  },
+  {
+    "symbol": "JSWDULUX",
+    "previous_isin": "INE133A01011",
+    "current_isin": "INE133A01029",
+    "ex_date": "2026-10-22",
+    "action_type": "SPLIT",
+    "company": "JSW Dulux Limited",
+    "raw_record_sha256": "b95c34b23905ca07f97f1096ea67b25f07965201620d649cba15aaf037cc1254",
+    "raw": {
+      "bcEndDate": "-",
+      "bcStartDate": "-",
+      "caBroadcastDate": null,
+      "comp": "JSW Dulux Limited",
+      "exDate": "22-Oct-2026",
+      "faceVal": "1",
+      "ind": "-",
+      "isin": "INE133A01011",
+      "ndEndDate": "-",
+      "ndStartDate": "-",
+      "recDate": "22-Oct-2026",
+      "series": "EQ",
+      "subject": "Face Value Split (Sub-Division) - From Rs 10/- Per Share To Re 1/- Per Share",
+      "symbol": "JSWDULUX"
+    },
+    "event_source_url": "https://www.nseindia.com/api/corporates-corporateActions?index=equities&from_date=01-09-2026&to_date=05-12-2026&symbol=JSWDULUX",
+    "event_source_sha256": "55b97128493b23b873bfb9ec6e0d8d5426509ea5d8dc6da0856c220968b7f80b",
+    "master_sha256": "342103bdea9b48109eb716128321d76d50d6f1d881aeb12af706802709fc6993",
+    "quote_url": "https://www.nseindia.com/api/NextApi/apiClient/GetQuoteApi?functionName=getSymbolData&marketType=N&series=EQ&symbol=JSWDULUX",
+    "quote_sha256": "351ce58ccfb829f721b0790ff1630306fef72a888c0be589ffeb1be7f79ca841",
+    "reviewed_on": "2026-10-22",
+    "notice_url": "https://nsearchives.nseindia.com/content/circulars/CML77001.pdf",
+    "notice_sha256": "eb9b435bdd25be1d4615be761ce5d58f0a87438d2d709629f5f922e46ff3b588",
+    "scope": "Exact split record only; dated NSE notice binds new ISIN effective 2026-10-22. Raw source identifier and split terms retained."
   }
 ]
