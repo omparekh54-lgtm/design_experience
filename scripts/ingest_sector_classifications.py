@@ -3,6 +3,8 @@ from __future__ import annotations
 import os
 import time
 import json
+import subprocess
+import sys
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Callable
@@ -166,7 +168,27 @@ def ingest(progress: Callable[[int, int, str], None] | None = None, delay: float
     }
 
 
+def ingest_historical_sector_intervals() -> None:
+    """Run the separate PIT importer only for CLI use.
+
+    Imported current classifications remain dated today. Historical intervals
+    come from dated NSE sector-index membership; this function never backdates
+    the current classification table.
+    """
+    root = Path(__file__).resolve().parents[1]
+    result = subprocess.run([
+        sys.executable,
+        str(root / "scripts" / "backfill_historical_sector_intervals.py"),
+        "--start", "2017-01-01",
+        "--end", "2024-12-31",
+    ], cwd=root)
+    if result.returncode:
+        raise SystemExit(result.returncode)
+
+
 if __name__ == "__main__":
     result = ingest(lambda n, t, s: print(f"\rSectors {n}/{t} {s:16}", end="", flush=True))
     print()
     print(result)
+    print("Loading dated historical sector intervals from point-in-time NSE sector-index membership...")
+    ingest_historical_sector_intervals()
