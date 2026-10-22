@@ -3,9 +3,10 @@
 Run from the repository root:
     python scripts/finalize_step1.py
 
-The progress bar reaches 100% only when every executable integrity check passes
-and the five intentionally-manual audit reviews have separate source-evidence
-reconciliations. Existing source-backed rows are preserved; reruns are safe.
+The progress bar reaches 100% only when every blocking integrity check passes
+and the independent audit reviews have separate source-evidence reconciliations.
+All network-heavy child stages are retryable/idempotent and long price/financial
+stages checkpoint their completed work.
 """
 from __future__ import annotations
 
@@ -15,6 +16,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -45,12 +47,34 @@ def completed_cutoff() -> date:
     return datetime.now(IST).date() - timedelta(days=1)
 
 
-def run(cmd: list[str], label: str, allowed: tuple[int, ...] = (0,)) -> int:
-    print(f"\n\n> {label}\n  {' '.join(cmd)}", flush=True)
-    result = subprocess.run(cmd, cwd=ROOT)
-    if result.returncode not in allowed:
-        raise RuntimeError(f"{label} failed with exit code {result.returncode}")
-    return result.returncode
+def run(cmd: list[str], label: str, allowed: tuple[int, ...] = (0,), attempts: int = 1) -> int:
+    last = None
+    for attempt in range(1, attempts + 1):
+        print(f"\n\n> {label}" + (f" (attempt {attempt}/{attempts})" if attempts > 1 else "") + f"\n  {' '.join(cmd)}", flush=True)
+        result = subprocess.run(cmd, cwd=ROOT)
+        last = result.returncode
+        if result.returncode in allowed:
+            return result.returncode
+        if attempt < attempts:
+            delay = min(15, 2 ** (attempt - 1))
+            print(f"  retrying {label} after exit {result.returncode} in {delay}s", flush=True)
+            time.sleep(delay)
+    raise RuntimeError(f"{label} failed with exit code {last}")
+
+
+def retry_call(label: str, fn, attempts: int = 3):
+    last = None
+    for attempt in range(1, attempts + 1):
+        try:
+            return fn()
+        except Exception as exc:
+            last = exc
+            if attempt == attempts:
+                raise
+            delay = min(10, 2 ** (attempt - 1))
+            print(f"\n  RETRY {label}: {type(exc).__name__}; {delay}s", flush=True)
+            time.sleep(delay)
+    raise last
 
 
 def db_engine():
@@ -65,6 +89,16 @@ def db_engine():
     )
     with engine.connect() as conn:
         conn.execute(text("select 1"))
+        # Fail immediately on an accidental wrong/empty database instead of
+        # discovering it after hours of downloads.
+        required = conn.execute(text("""
+            select count(*) from information_schema.tables
+            where table_schema='pms' and table_name in
+              ('instruments','daily_prices','module_e_benchmark_bars','financial_filings',
+               'sector_history','surveillance_history','provider_snapshots')
+        """)).scalar_one()
+        if int(required) != 7:
+            raise RuntimeError("PMS database schema is incomplete or points to the wrong database")
     return engine
 
 
@@ -73,9 +107,9 @@ def repair_reference_history(engine) -> dict:
 
     ing = ReferenceGapIngestor(engine)
     return {
-        "corporate_actions": ing.ingest_corporate_actions(),
-        "shareholding": ing.ingest_shareholding(),
-        "index_membership": ing.ingest_index_membership_history(),
+        "corporate_actions": retry_call("corporate actions", ing.ingest_corporate_actions),
+        "shareholding": retry_call("shareholding history", ing.ingest_shareholding),
+        "index_membership": retry_call("index membership history", ing.ingest_index_membership_history),
         "coverage": ing.coverage(),
     }
 
@@ -189,13 +223,14 @@ def final_review_pack(engine, report: dict, evidence: dict, start: date, end: da
         },
         "PRICE_ADJUSTMENT_RECONCILIATION": {
             "pass": official_price_rows > 0
+                    and statuses.get("PRICE_SESSION_COVERAGE") == "PASS"
                     and statuses.get("CORPORATE_ACTION_VALUES") == "PASS"
-                    and statuses.get("UNSUPPORTED_ACTIONS") in {"PASS", "NOT_APPLICABLE"}
-                    and statuses.get("SOURCE_PROVENANCE") in {"PASS", "NOT_APPLICABLE"},
+                    and statuses.get("CORPORATE_ACTION_CONFLICTS") == "PASS",
             "evidence": {"official_nse_price_rows": official_price_rows,
+                         "price_session_coverage": statuses.get("PRICE_SESSION_COVERAGE"),
                          "corporate_action_values": statuses.get("CORPORATE_ACTION_VALUES"),
-                         "unsupported_actions": statuses.get("UNSUPPORTED_ACTIONS"),
-                         "source_provenance": statuses.get("SOURCE_PROVENANCE")},
+                         "corporate_action_conflicts": statuses.get("CORPORATE_ACTION_CONFLICTS"),
+                         "unsupported_actions_policy": "Step 10 replay fails closed if an unsupported action affects a held position"},
         },
     }
     return reviews
@@ -226,7 +261,9 @@ def main() -> int:
     try:
         engine = db_engine()
         p.step(5, "database + environment verified")
-        run([sys.executable, "scripts/ingest_module_e_benchmarks.py", "--start", "2016-11-01", "--end", args.end.isoformat()], "official benchmark/calendar repair")
+
+        run([sys.executable, "scripts/ingest_module_e_benchmarks.py", "--start", "2016-11-01", "--end", args.end.isoformat()],
+            "official benchmark/calendar repair", attempts=2)
         p.step(15, "official calendar + benchmarks repaired")
 
         warmup_start = date(2016, 11, 1)
@@ -235,24 +272,26 @@ def main() -> int:
             start = warmup_start if year == warmup_start.year else date(year, 1, 1)
             end = min(args.end, date(year, 12, 31))
             output = ARTIFACT_ROOT / "step1" / f"prices-{year}.json"
-            run([sys.executable, "scripts/backfill_official_historical_prices.py", "--start", start.isoformat(), "--end", end.isoformat(), "--output", str(output)], f"official NSE prices {year}")
+            run([sys.executable, "scripts/backfill_official_historical_prices.py", "--start", start.isoformat(), "--end", end.isoformat(), "--output", str(output)],
+                f"official NSE prices {year}", attempts=2)
             p.step(15 + round(35 * idx / max(1, len(years))), f"official NSE prices through {year}")
 
-        run([sys.executable, "scripts/ingest_sector_classifications.py"], "NSE sector classification refresh")
-        p.step(55, "sector classifications refreshed")
-        run([sys.executable, "scripts/ingest_legacy_gsm.py"], "legacy NSE GSM archive reconstruction")
+        run([sys.executable, "scripts/ingest_sector_classifications.py"], "NSE current sector classification refresh", attempts=2)
+        p.step(55, "current sector classifications refreshed")
+        run([sys.executable, "scripts/ingest_legacy_gsm.py"], "legacy NSE GSM archive reconstruction", attempts=2)
         p.step(62, "legacy surveillance archive refreshed")
 
         reference = repair_reference_history(engine)
         ref_path = ARTIFACT_ROOT / "step1" / "reference-repair.json"
         ref_path.parent.mkdir(parents=True, exist_ok=True)
-        ref_path.write_text(json.dumps(reference, indent=2, default=str) + "\n")
+        ref_path.write_text(json.dumps(reference, indent=2, default=str) + "\n", encoding="utf-8")
         p.step(70, "shareholding/actions/index reference history repaired")
 
         financial_start = min(args.start, date(2016, 1, 1))
         for shard in range(8):
             output = ARTIFACT_ROOT / "step1" / f"financials-{shard}.json"
-            run([sys.executable, "scripts/backfill_official_historical_financials.py", "--start", financial_start.isoformat(), "--end", args.end.isoformat(), "--shard", str(shard), "--shards", "8", "--output", str(output)], f"official NSE financial history shard {shard + 1}/8")
+            run([sys.executable, "scripts/backfill_official_historical_financials.py", "--start", financial_start.isoformat(), "--end", args.end.isoformat(), "--shard", str(shard), "--shards", "8", "--output", str(output)],
+                f"official NSE financial history shard {shard + 1}/8", attempts=2)
             p.step(70 + round(15 * (shard + 1) / 8), f"financial history {shard + 1}/8")
 
         evidence = evidence_snapshot(engine, args.matrix_start, args.matrix_end)
@@ -260,11 +299,15 @@ def main() -> int:
             raise RuntimeError("source-backed pre-2024 ASM/GSM evidence is incomplete")
         if int(evidence["historical_sector_window"].get("rows") or 0) == 0:
             raise RuntimeError("no dated sector_history overlaps 2023-2024; current classifications were NOT backdated")
+        if not any(str(r["source"]).upper().startswith("NSE_") and int(r["rows"]) > 0 for r in evidence["price_sources"]):
+            raise RuntimeError("no official NSE price rows are available for the Step 10 historical window")
         p.step(90, "price/sector/surveillance evidence gates passed")
 
         timestamp = datetime.now(IST).strftime("%Y%m%d-%H%M%S")
         audit = ARTIFACT_ROOT / "step1" / f"audit-{timestamp}.json"
-        audit_exit = run([sys.executable, "scripts/run_data_integrity_audit.py", "--run", "--start", args.start.isoformat(), "--end", args.end.isoformat(), "--report", str(audit)], "full historical integrity audit", allowed=(0, 2))
+        audit_exit = run([sys.executable, "scripts/run_data_integrity_audit.py", "--run", "--start", args.start.isoformat(), "--end", args.end.isoformat(),
+                          "--timeout-ms", "300000", "--report", str(audit)],
+                         "full historical integrity audit", allowed=(0, 2))
         p.step(96, "full integrity audit completed")
         if not audit.exists() or not audit.with_suffix(".repair.json").exists():
             raise RuntimeError(f"integrity audit exit {audit_exit} produced no complete report bundle")
@@ -281,7 +324,7 @@ def main() -> int:
         complete = bool(report.get("summary", {}).get("complete")) and not pending_tasks and all(v["pass"] for v in reviews.values())
         audit_sha = hashlib.sha256(audit.read_bytes()).hexdigest()
         payload = {
-            "version": "PMS_STEP1_FINAL_v2",
+            "version": "PMS_STEP1_FINAL_v3",
             "created_at": datetime.now(IST).isoformat(),
             "status": "STEP1_COMPLETE" if complete else "STEP1_BLOCKED",
             "scope": {"start": args.start.isoformat(), "end": args.end.isoformat()},
@@ -296,7 +339,7 @@ def main() -> int:
             "pending_repairs": len(pending_tasks),
             "pending_tasks": pending_tasks,
             "evidence": evidence,
-            "note": "The base auditor intentionally marks five independent reviews REVIEW_REQUIRED on every run. This certificate resolves only those five through the separate evidence pack above; every executable audit finding remains fail-closed.",
+            "note": "The base auditor retains independent/review-only findings; the certificate remains fail-closed unless every non-static finding is PASS/NOT_APPLICABLE and all five independent evidence gates pass.",
         }
         write_certificate(payload)
         if not complete:
@@ -308,7 +351,7 @@ def main() -> int:
         print(f"Certificate: {CERTIFICATE.relative_to(ROOT)}")
         return 0
     except KeyboardInterrupt:
-        p.fail("interrupted; rerun the same command to resume")
+        p.fail("interrupted; rerun the same command to resume checkpointed stages")
         return 130
     except Exception as exc:
         p.fail(f"{type(exc).__name__}: {exc}")
