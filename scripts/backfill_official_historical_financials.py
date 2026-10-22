@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import subprocess
 import time
 from datetime import date
 from pathlib import Path
@@ -66,11 +67,32 @@ def _load_checkpoint(output: Path, start: date, end: date, shard: int, shards: i
     return data
 
 
+def _ensure_historical_sectors() -> None:
+    out=ROOT/'artifacts'/'final_acceptance'/'step1'/'historical-sectors.json'
+    cmd=[sys.executable,str(ROOT/'scripts'/'backfill_historical_sector_intervals.py'),
+         '--start','2017-01-01','--end','2024-12-31','--output',str(out.relative_to(ROOT))]
+    last=None
+    for attempt in range(1,4):
+        result=subprocess.run(cmd,cwd=ROOT)
+        if result.returncode==0:
+            return
+        last=result.returncode
+        if attempt<3:
+            delay=2**(attempt-1)
+            print(json.dumps({'historical_sector_retry':attempt,'retry_after_seconds':delay}),flush=True)
+            time.sleep(delay)
+    raise RuntimeError(f'historical sector backfill failed with exit code {last}')
+
+
 def run(start:date,end:date,shard:int,shards:int,output:Path):
     if not 0<=shard<shards: raise ValueError('invalid shard')
     load_dotenv(ROOT / '.env')
     raw=os.environ.get('DATABASE_URL') or os.environ.get('PMS_DATABASE_URL')
     if not raw: raise RuntimeError('DATABASE_URL/PMS_DATABASE_URL is required')
+    if shard==0:
+        # Command 1 must repair dated 2023-24 sectors before final certification.
+        # This is idempotent and deliberately never backdates today's labels.
+        _ensure_historical_sectors()
     engine=create_engine(_render_safe_database_url(raw),pool_pre_ping=True,
                          connect_args={'options':'-c search_path=pms,public'})
     require_financial_period_identity(engine)
@@ -107,8 +129,6 @@ def run(start:date,end:date,shard:int,shards:int,output:Path):
             success=False
             for attempt in range(1,4):
                 try:
-                    # Fresh HTTP budget/client per symbol attempt. This prevents a
-                    # previous long/failed symbol from exhausting the shard deadline.
                     http=OfficialHTTP(seconds=3600,archive=archive)
                     records=discover_financial_history(provider,symbol,from_date,to_date,page_size=200,max_pages=100)
                     filings=[]; docs=[]
