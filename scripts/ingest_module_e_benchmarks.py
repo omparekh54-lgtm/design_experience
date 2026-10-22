@@ -146,7 +146,6 @@ def fetch_window(nse, code: str, start: date, end: date) -> tuple[list[dict], di
         rows = _normalise_vix(raw)
     else:
         raise ValueError(f"Unknown benchmark {code}")
-    # An ignored date filter must not count cached/out-of-window data as success.
     if any(not start <= row["trade_date"] <= end for row in rows):
         raise RuntimeError(f"{code}: source returned dates outside {start}..{end}")
     if len(rows) != len(raw):
@@ -157,22 +156,17 @@ def fetch_window(nse, code: str, start: date, end: date) -> tuple[list[dict], di
 
 
 def coverage_audit(engine, start: date, end: date) -> dict:
-    """Compare actual dates with independent official Nifty 50 sessions.
-
-    Equity feeds can contain stale holiday candles. Do not infer NSE sessions
-    from those feeds, or measure completeness using the endpoints of a range.
-    """
+    """Compare benchmark dates with independent official Nifty 50 sessions."""
     with engine.connect() as conn:
         bars = conn.execute(text("""
             select benchmark_code,trade_date from pms.module_e_benchmark_bars
-            where benchmark_code in ('NIFTYMIDSMALLCAP400','INDIAVIX','NIFTY50')
+            where benchmark_code in ('NIFTYMIDSMALLCAP400','INDIAVIX','NIFTY50','NIFTY500')
               and source in ('NSE_HISTORICAL_OR','NSE_DAILY_INDEX') and trade_date between :start and :end
-        """), {"start": start, "end": end, "source": SOURCE}).all()
+        """), {"start": start, "end": end}).all()
     expected = {r[1] for r in bars if r[0] == CALENDAR_CODE}
     dates = {code: {r[1] for r in bars if r[0] == code}
-             for code in ("NIFTYMIDSMALLCAP400", "INDIAVIX")}
+             for code in ("NIFTYMIDSMALLCAP400", "INDIAVIX", "NIFTY500")}
     calendar_complete = bool(expected) and (end-max(expected)).days <= 5
-    # Require every requested month to be represented in the calendar feed.
     for first, last in month_windows(start, end):
         if (last-first).days >= 7 and not any(first <= d <= last for d in expected):
             calendar_complete = False
@@ -195,20 +189,20 @@ def coverage_audit(engine, start: date, end: date) -> dict:
 
 def ingest(start: date | None = None, end: date | None = None) -> dict[str, Any]:
     engine = _engine()
-    start = start or date(2018, 1, 1)
+    start = start or date(2016, 11, 1)
     end = end or date.today()
     cache = ROOT / ".cache_nse"
     cache.mkdir(exist_ok=True)
-    counts = {"index": 0, "vix": 0, "calendar": 0}
+    counts = {"index": 0, "vix": 0, "calendar": 0, "nifty500": 0}
     diagnostics = []
     failures = []
     windows = list(month_windows(start, end))
     with NSE(download_folder=cache) as nse:
         for n, (first, last) in enumerate(windows, 1):
-            for code, label in (("NIFTY50", "calendar"), ("NIFTYMIDSMALLCAP400", "index"), ("INDIAVIX", "vix")):
+            for code, label in (("NIFTY50", "calendar"), ("NIFTY500", "nifty500"),
+                                ("NIFTYMIDSMALLCAP400", "index"), ("INDIAVIX", "vix")):
                 try:
                     rows, detail = fetch_window(nse, code, first, last)
-                    # Commit each window so one failed request never loses previous work.
                     counts[label] += upsert_rows(engine, rows)
                     diagnostics.append(detail)
                     print(f"  [{n}/{len(windows)}] {code} {first}..{last}: {len(rows)} dates", flush=True)
