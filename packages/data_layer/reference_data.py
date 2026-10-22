@@ -62,7 +62,12 @@ class ReferenceDataQueries:
     def _instrument_pk(self, conn, instrument_id: str) -> int:
         exchange, trading_symbol = self._parts(instrument_id)
         value = conn.execute(
-            text("select id from instruments where exchange=:e and trading_symbol=:s order by id desc limit 1"),
+            text("""
+                select id from instruments
+                where exchange=:e and trading_symbol=:s
+                  and metadata->>'ingestion_duplicate_of' is null
+                order by id desc limit 1
+            """),
             {"e": exchange, "s": trading_symbol},
         ).scalar_one_or_none()
         if value is None:
@@ -73,16 +78,14 @@ class ReferenceDataQueries:
         with self.engine.connect() as conn:
             pk = self._instrument_pk(conn, instrument_id)
             row = conn.execute(
-                text(
-                    """
+                text("""
                     select period_end, filed_at, promoter_holding_pct, promoter_pledge_pct,
                            total_shares, source, revision_number
                     from shareholding_history
                     where instrument_id=:id and filed_at<=:as_of
                     order by period_end desc, filed_at desc, revision_number desc
                     limit 1
-                    """
-                ),
+                """),
                 {"id": pk, "as_of": as_of},
             ).mappings().first()
             return dict(row) if row else None
@@ -91,8 +94,7 @@ class ReferenceDataQueries:
         with self.engine.connect() as conn:
             pk = self._instrument_pk(conn, instrument_id)
             value = conn.execute(
-                text(
-                    """
+                text("""
                     select shares_outstanding
                     from shares_outstanding_history
                     where instrument_id=:id
@@ -101,8 +103,7 @@ class ReferenceDataQueries:
                       and knowable_at<=:as_of
                     order by effective_from desc, knowable_at desc
                     limit 1
-                    """
-                ),
+                """),
                 {"id": pk, "as_of": as_of},
             ).scalar_one_or_none()
             return float(value) if value is not None else None
@@ -117,14 +118,12 @@ class ReferenceDataQueries:
         with self.engine.connect() as conn:
             pk = self._instrument_pk(conn, instrument_id)
             close = conn.execute(
-                text(
-                    """
+                text("""
                     select close from daily_prices
                     where instrument_id=:id and trade_date<=cast(:as_of as date)
                       and source=:source
                     order by trade_date desc limit 1
-                    """
-                ),
+                """),
                 {"id": pk, "as_of": as_of, "source": preferred_source},
             ).scalar_one_or_none()
             if close is None:
@@ -138,13 +137,11 @@ class ReferenceDataQueries:
         with self.engine.connect() as conn:
             pk = self._instrument_pk(conn, instrument_id)
             rows = conn.execute(
-                text(
-                    """
+                text("""
                     select close, volume from daily_prices
                     where instrument_id=:id and trade_date<=cast(:as_of as date)
                     order by trade_date desc limit :n
-                    """
-                ),
+                """),
                 {"id": pk, "as_of": as_of, "n": sessions},
             ).mappings().all()
             if not rows:
@@ -155,14 +152,12 @@ class ReferenceDataQueries:
         with self.engine.connect() as conn:
             pk = self._instrument_pk(conn, instrument_id)
             value = conn.execute(
-                text(
-                    """
+                text("""
                     select 1 from index_constituents_history
                     where instrument_id=:id and index_code=:idx
                       and effective_from<=:d and (effective_to is null or effective_to>:d)
                     limit 1
-                    """
-                ),
+                """),
                 {"id": pk, "idx": index_code, "d": on_date},
             ).scalar_one_or_none()
             return value is not None
@@ -170,16 +165,15 @@ class ReferenceDataQueries:
     def universe_as_of(self, on_date: date, exchange: str = "NSE") -> list[str]:
         with self.engine.connect() as conn:
             rows = conn.execute(
-                text(
-                    """
+                text("""
                     select exchange, coalesce(nse_symbol, replace(trading_symbol, '-EQ', '')) as symbol
                     from instruments
                     where exchange=:e and active=true
+                      and metadata->>'ingestion_duplicate_of' is null
                       and (listed_from is null or listed_from<=:d)
                       and (delisted_on is null or delisted_on>:d)
                     order by symbol
-                    """
-                ),
+                """),
                 {"e": exchange, "d": on_date},
             ).mappings().all()
             return [f"{r['exchange']}:{r['symbol']}" for r in rows]
@@ -192,45 +186,57 @@ class ReferenceDataQueries:
         *,
         as_of: datetime | None = None,
     ) -> bool:
-        """Return True only for result dates that were already announced by `as_of`.
+        """Return True when the entry must be earnings-blackout blocked.
 
-        This prevents historical backtests from learning a future board-meeting/result
-        date before the exchange actually disseminated that date.
+        A known announced event inside the window blocks as before. In addition,
+        absent or malformed historical earnings evidence now fails closed: no
+        archive is never interpreted as proof that no earnings event exists.
         """
         target = set(calendar_dates)
         if not target:
-            return False
+            return True
         known_at = as_of or datetime.combine(on_date, time(23, 59, 59))
+        window_end = max(target)
         with self.engine.connect() as conn:
             pk = self._instrument_pk(conn, instrument_id)
-            rows = conn.execute(
-                text(
-                    """
-                    select event_date
+            archive_rows = conn.execute(
+                text("""
+                    select event_date,announced_at
                     from earnings_calendar
-                    where instrument_id=:id
-                      and event_date>=:d
-                      and announced_at<=:known_at
-                    order by event_date
-                    limit 10
-                    """
-                ),
-                {"id": pk, "d": on_date, "known_at": known_at},
-            ).scalars().all()
-            return any(on_date<=d<=max(target) for d in rows)
+                    where instrument_id=:id and event_date<=:window_end
+                    order by event_date desc
+                """),
+                {"id": pk, "window_end": window_end},
+            ).mappings().all()
+            if not archive_rows:
+                return True
+            # A malformed/retrospectively knowable event inside the entry window
+            # is uncertainty, therefore a blackout rather than a false negative.
+            for row in archive_rows:
+                event_date = row["event_date"]
+                announced_at = row["announced_at"]
+                if on_date <= event_date <= window_end and (
+                    announced_at is None
+                    or announced_at > datetime.combine(event_date, time(23, 59, 59), tzinfo=getattr(known_at, "tzinfo", None))
+                ):
+                    return True
+            return any(
+                on_date <= row["event_date"] <= window_end
+                and row["announced_at"] is not None
+                and row["announced_at"] <= known_at
+                for row in archive_rows
+            )
 
     def corporate_actions_between(self, instrument_id: str, start: date, end: date) -> list[CorporateAction]:
         with self.engine.connect() as conn:
             pk = self._instrument_pk(conn, instrument_id)
             rows = conn.execute(
-                text(
-                    """
+                text("""
                     select action_type, ex_date, ratio_from, ratio_to, cash_amount, announced_at, source
                     from corporate_actions
                     where instrument_id=:id and ex_date between :start and :end
                     order by ex_date
-                    """
-                ),
+                """),
                 {"id": pk, "start": start, "end": end},
             ).mappings().all()
             return [
