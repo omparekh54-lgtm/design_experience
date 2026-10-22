@@ -7,6 +7,10 @@ on:
         description: Past completed exchange session within seven days (YYYY-MM-DD)
         required: true
         type: string
+  push:
+    branches: [main]
+    paths:
+      - .audit-trigger/phase1-5-catchup.txt
 
 concurrency:
   group: pms-market-close-paper
@@ -22,7 +26,7 @@ jobs:
       DATABASE_URL: ${{ secrets.NEON_PMS_DATABASE_URL }}
       PMS_DATABASE_VERIFY_FULL: '1'
       SSL_CERT_FILE: /etc/ssl/certs/ca-certificates.crt
-      SESSION_DATE: ${{ inputs.session_date }}
+      SESSION_DATE: ${{ github.event_name == 'workflow_dispatch' && inputs.session_date || '2026-10-21' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -53,7 +57,7 @@ jobs:
       SSL_CERT_FILE: /etc/ssl/certs/ca-certificates.crt
       EXECUTION_MODE: PAPER
       LIVE_TRADING_ENABLED: 'false'
-      SESSION_DATE: ${{ inputs.session_date }}
+      SESSION_DATE: ${{ github.event_name == 'workflow_dispatch' && inputs.session_date || '2026-10-21' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
