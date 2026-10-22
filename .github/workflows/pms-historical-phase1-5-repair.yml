@@ -1,0 +1,111 @@
+name: PMS historical phases 1-5 repair
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .audit-trigger/phase1-5-historical.txt
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pms-historical-phase1-5-repair
+  cancel-in-progress: false
+
+jobs:
+  phase1-reference-benchmarks:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    env:
+      DATABASE_URL: ${{ secrets.NEON_PMS_DATABASE_URL }}
+      SSL_CERT_FILE: /etc/ssl/certs/ca-certificates.crt
+      EXECUTION_MODE: PAPER
+      LIVE_TRADING_ENABLED: 'false'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Backfill official sectors, Nifty sessions, MidSmallcap 400, India VIX and legacy GSM
+        run: python scripts/local_phase1_backfill.py
+      - name: Preserve Phase-1 audit snapshot
+        if: always()
+        run: python scripts/local_phase1_backfill.py --audit-only > phase1-audit.txt || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pms-phase1-historical-${{ github.run_id }}
+          path: phase1-audit.txt
+          retention-days: 30
+
+  phase3-5-reference-repair:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    env:
+      DATABASE_URL: ${{ secrets.NEON_PMS_DATABASE_URL }}
+      SSL_CERT_FILE: /etc/ssl/certs/ca-certificates.crt
+      EXECUTION_MODE: PAPER
+      LIVE_TRADING_ENABLED: 'false'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Repair corporate actions and shareholding from source-backed Finstack/NSE history
+        run: |
+          python - <<'PY'
+          import json, os
+          from sqlalchemy import create_engine
+          from apps.api.main import _render_safe_database_url
+          from packages.data_layer.reference_gap_ingestion import ReferenceGapIngestor
+          url=os.environ['DATABASE_URL']
+          engine=create_engine(_render_safe_database_url(url), pool_pre_ping=True,
+                               connect_args={'options':'-c search_path=pms,public'})
+          ing=ReferenceGapIngestor(engine)
+          result={}
+          result['corporate_actions']=ing.ingest_corporate_actions()
+          result['shareholding']=ing.ingest_shareholding()
+          result['index_membership']=ing.ingest_index_membership_history()
+          result['coverage']=ing.coverage()
+          open('phase3-5-reference-repair.json','w').write(json.dumps(result,default=str,indent=2))
+          print(json.dumps(result,default=str,indent=2))
+          engine.dispose()
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pms-phase3-5-reference-${{ github.run_id }}
+          path: phase3-5-reference-repair.json
+          retention-days: 30
+
+  final-audit:
+    needs: [phase1-reference-benchmarks, phase3-5-reference-repair]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      DATABASE_URL: ${{ secrets.NEON_PMS_DATABASE_URL }}
+      SSL_CERT_FILE: /etc/ssl/certs/ca-certificates.crt
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Run full historical integrity audit after repairs
+        run: |
+          python scripts/run_data_integrity_audit.py --run --start 2018-01-01 --end 2026-10-21 --report artifacts/phase1-5/audit.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pms-phase1-5-post-repair-audit-${{ github.run_id }}
+          path: artifacts/phase1-5
+          if-no-files-found: warn
+          retention-days: 30
