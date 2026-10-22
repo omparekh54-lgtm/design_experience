@@ -121,10 +121,23 @@ def db_engine():
 def fail_fast_historical_prerequisites(engine) -> dict:
     from packages.pms.historical_dataset import require_financial_period_identity
     from packages.data_layer.cloud_storage import CloudStore
+    from packages.data_layer.cloud_sources import SourceError
     from packages.pms.data_integrity import SCHEMA_SQL, schema_findings
 
     require_financial_period_identity(engine)
-    CloudStore(engine).resolve_tables()
+    try:
+        CloudStore(engine).resolve_tables()
+    except SourceError as exc:
+        report = getattr(exc, "layout_report", None)
+        if report is None:
+            raise
+        details = "; ".join(f"pms.{r['logical']}: {r['problem']} (overlay pms.{r['overlay']})"
+                            for r in report["problems"])
+        raise RuntimeError(
+            f"historical write-target prerequisites failed: {details}. "
+            "Run python scripts/inspect_step1_prerequisites.py for the read-only layout report. "
+            "Migration 010 addresses the price overlay only; reference overlays require their own reviewed layout."
+        ) from exc
     with engine.connect() as conn:
         missing = schema_findings(conn.execute(text(SCHEMA_SQL)).mappings().all())
         if missing:

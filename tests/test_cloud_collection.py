@@ -1192,3 +1192,46 @@ def test_empty_quote_envelope_does_not_block_verified_non_eq_fallback():
     _, result = fetch_classification(HTTP(), 'TEST', 'INE000000001')
     assert result['series'] == 'BE'
     assert result['identity_basis'] == 'DETAILED_QUOTE'
+
+
+@pytest.mark.parametrize('logical', [
+    'daily_prices', 'financial_filings', 'financial_facts', 'earnings_calendar',
+    'shares_outstanding_history', 'index_constituents_history',
+])
+@pytest.mark.parametrize('broken', ['overlay_missing', 'view_not_integrated'])
+def test_layout_report_identifies_exact_blocker_without_weakening_guard(logical, broken):
+    from packages.data_layer.cloud_storage import WRITABLE_TARGETS
+    e = Engine()
+    e.layout = [dict(relname=name, relkind='r', definition=None) for name in WRITABLE_TARGETS]
+    target = WRITABLE_TARGETS[logical]
+    next(r for r in e.layout if r['relname'] == logical).update(
+        relkind='v', definition=f'select * from pms.{target}' if broken == 'overlay_missing'
+        else 'select * from public.unrelated_source')
+    if broken == 'view_not_integrated':
+        e.layout.append(dict(relname=target, relkind='r', definition=None))
+    store = CloudStore(e)
+    report = store.inspect_tables()
+    assert report['status'] == 'BLOCKED'
+    assert len(report['problems']) == 1
+    item = report['problems'][0]
+    assert item['logical'] == logical and item['overlay'] == target
+    assert item['problem'] == ('writable_overlay_missing_or_not_a_table' if broken == 'overlay_missing'
+                                else 'view_does_not_include_writable_overlay')
+    assert item['write_target'] is None
+    with pytest.raises(SourceError, match='migration_010') as err:
+        store.resolve_tables()
+    assert err.value.layout_report == report
+    assert not any(sql.lstrip().startswith(('insert', 'update', 'delete', 'alter', 'create')) for sql, _ in e.calls)
+
+
+def test_step1_explains_layout_failure_without_starting_repairs(monkeypatch):
+    from packages.pms import historical_dataset
+    from scripts import finalize_step1_core
+    from packages.data_layer.cloud_storage import WRITABLE_TARGETS
+    monkeypatch.setattr(historical_dataset, 'require_financial_period_identity', lambda *a: None)
+    e = Engine()
+    e.layout = [dict(relname=name, relkind='r', definition=None)
+                for name in WRITABLE_TARGETS if name != 'financial_facts']
+    with pytest.raises(RuntimeError, match=r'pms.financial_facts: logical_object_missing'):
+        finalize_step1_core.fail_fast_historical_prerequisites(e)
+    assert not any(sql.lstrip().startswith(('insert', 'update', 'delete', 'alter', 'create')) for sql, _ in e.calls)

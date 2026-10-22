@@ -80,29 +80,51 @@ class CloudStore:
         self._known = None
         self._tables = None
 
-    def resolve_tables(self):
-        if self._tables is not None:
-            return self._tables
+    def inspect_tables(self):
+        """Read the complete routing contract without writes or credentials."""
         with self.engine.connect() as c:
             catalog = {
                 r["relname"]: dict(r)
                 for r in c.execute(text(LAYOUT_SQL)).mappings().all()
             }
-        tables = {}
+        tables, objects, problems = {}, [], []
         for logical, local in WRITABLE_TARGETS.items():
             kind = catalog.get(logical, {}).get("relkind")
+            local_kind = catalog.get(local, {}).get("relkind")
+            integrated = kind == "v" and local in (catalog[logical].get("definition") or "")
+            problem = None
             if kind in {"r", "p"}:
                 tables[logical] = logical
             elif (
                 kind == "v"
-                and catalog.get(local, {}).get("relkind") in {"r", "p"}
-                and local in (catalog[logical]["definition"] or "")
+                and local_kind in {"r", "p"}
+                and integrated
             ):
                 tables[logical] = local
             else:
-                raise SourceError("writable_schema_requires_reviewed_migration_010")
-        self._tables = tables
-        return tables
+                problem = ("logical_object_missing" if kind is None else
+                           "unsupported_logical_object_kind" if kind != "v" else
+                           "writable_overlay_missing_or_not_a_table" if local_kind not in {"r", "p"} else
+                           "view_does_not_include_writable_overlay")
+            item = {"logical": logical, "logical_kind": kind, "overlay": local,
+                    "overlay_kind": local_kind, "view_includes_overlay": bool(integrated),
+                    "write_target": tables.get(logical), "problem": problem}
+            objects.append(item)
+            if problem:
+                problems.append(item)
+        return {"status": "BLOCKED" if problems else "PASS", "objects": objects,
+                "resolved": tables, "problems": problems}
+
+    def resolve_tables(self):
+        if self._tables is not None:
+            return self._tables
+        report = self.inspect_tables()
+        if report["problems"]:
+            error = SourceError("writable_schema_requires_reviewed_migration_010")
+            error.layout_report = report
+            raise error
+        self._tables = report["resolved"]
+        return self._tables
 
     def execute(self, conn, statement, params=None):
         sql = str(statement)
