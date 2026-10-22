@@ -22,7 +22,13 @@ class PointInTimeQueries:
     def _db_instrument_id(self, conn, instrument_id: str) -> int:
         exchange, trading_symbol = self._split_instrument_id(instrument_id)
         if self.historical:
-            rows=conn.execute(text("select id from instruments where exchange=:exchange and (trading_symbol=:trading_symbol or nse_symbol=:symbol) order by id"),{"exchange":exchange,"trading_symbol":trading_symbol,"symbol":instrument_id.split(":",1)[1]}).scalars().all()
+            rows=conn.execute(text("""
+                select id from instruments
+                where exchange=:exchange
+                  and metadata->>'ingestion_duplicate_of' is null
+                  and (trading_symbol=:trading_symbol or nse_symbol=:symbol)
+                order by id
+            """),{"exchange":exchange,"trading_symbol":trading_symbol,"symbol":instrument_id.split(":",1)[1]}).scalars().all()
             if len(rows)!=1:
                 raise ValueError("Historical instrument identity unavailable or ambiguous")
             return int(rows[0])
@@ -162,7 +168,9 @@ class PointInTimeQueries:
                        coalesce((select jsonb_object_agg(f.fact_name,f.value) from financial_facts f
                                  where f.filing_id=ff.id and f.value is not null),'{}'::jsonb) facts
                 from limited ff join instruments i on i.id=ff.instrument_id
-                where ff.period_rank<=:limit_periods and i.exchange='NSE' and (i.active or :historical)
+                where ff.period_rank<=:limit_periods and i.exchange='NSE'
+                  and i.metadata->>'ingestion_duplicate_of' is null
+                  and (i.active or :historical)
                 order by i.nse_symbol,ff.period_rank
             """),{'as_of':as_of,'limit_periods':limit_periods,'historical':self.historical}).mappings().all()
         result = {}
@@ -184,6 +192,11 @@ class PointInTimeQueries:
             if preferred_source:
                 source_clause = "and source=:source"
                 params["source"] = preferred_source
+            elif self.historical:
+                # Final historical research is certified against official NSE raw
+                # history. Do not silently execute with Angel/yfinance merely because
+                # those rows coexist for the same date.
+                source_clause = "and lower(source) like 'nse%'"
             rows = conn.execute(
                 text(
                     f"""
