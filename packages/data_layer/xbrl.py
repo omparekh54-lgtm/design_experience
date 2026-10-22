@@ -194,7 +194,7 @@ def parse_xbrl_facts(xml: bytes | str) -> list[XbrlFact]:
 
 EXTRACTION_VERSION = "FINANCIAL_XBRL_v2"
 INSTANT_FACTS = {"debt", "equity"}
-PERIOD_DAYS = {"quarter": (75, 105), "annual": (330, 380)}
+PERIOD_DAYS = {"quarter": (75, 105), "half_year": (150, 210), "nine_months": (240, 300), "annual": (330, 380)}
 
 
 def _scope_matches(fact: XbrlFact, statement_scope: str | None) -> bool:

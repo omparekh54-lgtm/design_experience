@@ -25,6 +25,13 @@ def q(period_end, sales, op, pat, eps, **extra):
     )
 
 
+def test_half_year_report_cannot_masquerade_as_a_quarter():
+    from dataclasses import replace
+    half=replace(q(date(2026,9,30),200,50,30,3),filing_kind='half_year')
+    with pytest.raises(ValueError,match='quarterly'):
+        calculate_financial_history([half])
+
+
 def test_calculates_eight_quarter_module_a_history():
     history = [
         q(date(2026, 9, 30), 200, 50, 30, 3.0, debt=100, equity=250, interest_expense=5),

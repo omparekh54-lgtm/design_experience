@@ -148,6 +148,8 @@ def calculate_financial_history(
     # A duplicate source/revision must never masquerade as another quarter.
     selected = {}
     for period in periods:
+        if period.filing_kind.lower() not in {'quarter','quarterly','annual','year','yearly'}:
+            continue
         kind = 'annual' if period.filing_kind.lower() in {'annual','year','yearly'} else 'quarter'
         key = (period.period_end, kind)
         old = selected.get(key)
@@ -156,7 +158,7 @@ def calculate_financial_history(
             selected[key] = period
     periods = list(selected.values())
     quarters = sorted(
-        [p for p in periods if p.filing_kind.lower() not in {"annual", "year", "yearly"}],
+        [p for p in periods if p.filing_kind.lower() in {"quarter", "quarterly"}],
         key=lambda p: p.period_end,
         reverse=True,
     )
