@@ -5,6 +5,7 @@ import csv
 import io
 import json
 import os
+import time
 import zipfile
 from datetime import date, datetime
 from pathlib import Path
@@ -12,12 +13,14 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from dotenv import load_dotenv
 from sqlalchemy import create_engine, text
 
 from apps.api.main import _render_safe_database_url
 from packages.data_layer.cloud_sources import OfficialHTTP, SourceError, bhavcopy_url, parse_bhavcopy, number
 from packages.data_layer.private_archive import PrivateArchive
 
+ROOT=Path(__file__).resolve().parents[1]
 SOURCE = "NSE_UDIFF"
 
 
@@ -88,6 +91,7 @@ def instruments(engine):
             select id,upper(coalesce(nse_symbol,replace(trading_symbol,'-EQ',''))) symbol,
                    upper(coalesce(isin,'')) isin,listed_from,delisted_on,active
             from pms.instruments where exchange='NSE'
+              and metadata->>'ingestion_duplicate_of' is null
         """)).mappings().all()]
 
 
@@ -120,11 +124,6 @@ def sessions(engine,start,end):
 
 
 def optional_private_archive():
-    """Use the private raw-source archive when configured, but do not require it locally.
-
-    Local acceptance still stores the official NSE URL and SHA-256 in
-    provider_snapshots, so source provenance remains independently auditable.
-    """
     raw=(os.environ.get('PMS_NEON_ARCHIVE_JSON') or '').strip()
     if not raw:
         print(json.dumps({'private_archive':'DISABLED','reason':'credentials_not_configured','provenance':'NSE_URL_PLUS_SHA256'}), flush=True)
@@ -136,13 +135,28 @@ def optional_private_archive():
         return None
 
 
+def _write(output: Path, report: dict) -> None:
+    output.parent.mkdir(parents=True,exist_ok=True)
+    tmp=output.with_suffix(output.suffix+'.tmp')
+    tmp.write_text(json.dumps(report,indent=2,default=str)+'\n',encoding='utf-8')
+    tmp.replace(output)
+
+
+def _checkpoint(output: Path,start: date,end: date) -> dict | None:
+    if not output.is_file(): return None
+    try: data=json.loads(output.read_text(encoding='utf-8'))
+    except Exception: return None
+    if data.get('start')!=str(start) or data.get('end')!=str(end): return None
+    return data
+
+
 def ingest(start:date,end:date,output:Path):
+    load_dotenv(ROOT/'.env')
     raw=os.environ.get('DATABASE_URL') or os.environ.get('PMS_DATABASE_URL')
     if not raw: raise RuntimeError('DATABASE_URL/PMS_DATABASE_URL is required')
     engine=create_engine(_render_safe_database_url(raw),pool_pre_ping=True,
                          connect_args={'options':'-c search_path=pms,public'})
     archive=optional_private_archive()
-    http=OfficialHTTP(seconds=20000,archive=archive)
     master=instruments(engine); days=sessions(engine,start,end)
     if not days: raise RuntimeError('official_nifty50_session_calendar_empty')
     insert=text("""
@@ -156,36 +170,66 @@ def ingest(start:date,end:date,output:Path):
       insert into pms.provider_snapshots(provider,dataset,content_sha256,source_uri,metadata)
       values('NSE','HISTORICAL_NSE_PRICES',:sha,:uri,cast(:metadata as jsonb))
     """)
-    report={'start':str(start),'end':str(end),'sessions':len(days),'completed':0,'written':0,
-            'unmatched':0,'ambiguous_samples':[],'failures':[],'private_archive':bool(archive)}
-    for n,day in enumerate(days,1):
-        try:
-            doc,rows,fmt=fetch_day(http,day); by_symbol,by_isin=candidates(master,day)
-            payload=[]; unmatched=[]
-            for r in rows:
-                inst=match(r,by_symbol,by_isin)
-                if not inst:
-                    unmatched.append({'symbol':r['symbol'],'isin':r['isin'],'series':r['series']}); continue
-                payload.append({'instrument_id':inst['id'],'trade_date':day,'open':r['open'],'high':r['high'],
-                                'low':r['low'],'close':r['close'],'volume':r['volume'],'turnover':r['turnover'],'source':SOURCE})
-            with engine.begin() as c:
-                for i in range(0,len(payload),1000): c.execute(insert,payload[i:i+1000])
-                c.execute(receipt,{'sha':doc.sha256,'uri':doc.url,'metadata':json.dumps({
-                    'trade_date':str(day),'format':fmt,'source_rows':len(rows),'written':len(payload),
-                    'unmatched':len(unmatched),'archive_key':doc.archive_key,'complete':True,
-                    'raw_source_preservation':'PRIVATE_ARCHIVE' if doc.archive_key else 'OFFICIAL_URL_PLUS_SHA256'})})
-            report['completed']+=1; report['written']+=len(payload); report['unmatched']+=len(unmatched)
-            if unmatched and len(report['ambiguous_samples'])<50:
-                report['ambiguous_samples'].extend(unmatched[:50-len(report['ambiguous_samples'])])
-            print(json.dumps({'session':n,'of':len(days),'date':str(day),'written':len(payload),'unmatched':len(unmatched),'format':fmt}),flush=True)
-        except Exception as exc:
-            code=str(exc) if isinstance(exc,SourceError) else type(exc).__name__
-            report['failures'].append({'date':str(day),'code':code})
-            print(json.dumps({'date':str(day),'failure':code}),flush=True)
-    output.parent.mkdir(parents=True,exist_ok=True); output.write_text(json.dumps(report,indent=2,default=str)+'\n')
-    engine.dispose()
-    if report['failures']: raise SystemExit(2)
-    return report
+    old=_checkpoint(output,start,end)
+    completed_dates=set((old or {}).get('completed_dates') or [])
+    report={'start':str(start),'end':str(end),'sessions':len(days),'completed':len(completed_dates),
+            'completed_dates':sorted(completed_dates),'written':int((old or {}).get('written') or 0),
+            'unmatched':int((old or {}).get('unmatched') or 0),'ambiguous_samples':(old or {}).get('ambiguous_samples',[])[:50],
+            'failures':[],'private_archive':bool(archive),'resumed':bool(old)}
+    _write(output,report)
+    try:
+        for n,day in enumerate(days,1):
+            key=str(day)
+            if key in completed_dates:
+                print(json.dumps({'session':n,'of':len(days),'date':key,'status':'checkpoint-complete'}),flush=True)
+                continue
+            last_exc=None
+            success=False
+            for attempt in range(1,4):
+                try:
+                    # Fresh HTTP client per attempt prevents a timed-out socket/session
+                    # from poisoning subsequent historical dates.
+                    http=OfficialHTTP(seconds=1200,archive=archive)
+                    doc,rows,fmt=fetch_day(http,day); by_symbol,by_isin=candidates(master,day)
+                    payload=[]; unmatched=[]
+                    for r in rows:
+                        inst=match(r,by_symbol,by_isin)
+                        if not inst:
+                            unmatched.append({'symbol':r['symbol'],'isin':r['isin'],'series':r['series']}); continue
+                        payload.append({'instrument_id':inst['id'],'trade_date':day,'open':r['open'],'high':r['high'],
+                                        'low':r['low'],'close':r['close'],'volume':r['volume'],'turnover':r['turnover'],'source':SOURCE})
+                    with engine.begin() as c:
+                        for i in range(0,len(payload),1000): c.execute(insert,payload[i:i+1000])
+                        c.execute(receipt,{'sha':doc.sha256,'uri':doc.url,'metadata':json.dumps({
+                            'trade_date':key,'format':fmt,'source_rows':len(rows),'written':len(payload),
+                            'unmatched':len(unmatched),'archive_key':doc.archive_key,'complete':True,
+                            'raw_source_preservation':'PRIVATE_ARCHIVE' if doc.archive_key else 'OFFICIAL_URL_PLUS_SHA256'})})
+                    report['completed']+=1; report['written']+=len(payload); report['unmatched']+=len(unmatched)
+                    completed_dates.add(key); report['completed_dates']=sorted(completed_dates)
+                    if unmatched and len(report['ambiguous_samples'])<50:
+                        report['ambiguous_samples'].extend(unmatched[:50-len(report['ambiguous_samples'])])
+                    _write(output,report)
+                    print(json.dumps({'session':n,'of':len(days),'date':key,'written':len(payload),'unmatched':len(unmatched),'format':fmt}),flush=True)
+                    success=True
+                    break
+                except Exception as exc:
+                    last_exc=exc
+                    if attempt<3:
+                        delay=min(10,2**(attempt-1))
+                        print(json.dumps({'date':key,'attempt':attempt,'retry_after_seconds':delay,'error_type':type(exc).__name__}),flush=True)
+                        time.sleep(delay)
+            if not success:
+                code=str(last_exc) if isinstance(last_exc,SourceError) else type(last_exc).__name__
+                report['failures'].append({'date':key,'code':code})
+                _write(output,report)
+                print(json.dumps({'date':key,'failure':code}),flush=True)
+        _write(output,report)
+        if report['failures']: raise SystemExit(2)
+        if report['completed'] != len(days):
+            raise RuntimeError(f"historical price checkpoint incomplete: {report['completed']}/{len(days)}")
+        return report
+    finally:
+        engine.dispose()
 
 
 def main():
