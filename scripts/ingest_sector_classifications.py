@@ -3,8 +3,6 @@ from __future__ import annotations
 import os
 import time
 import json
-import subprocess
-import sys
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Callable
@@ -70,13 +68,9 @@ def fetch_classification(nse, symbol: str, isin: str | None = None) -> dict:
     metadata_symbol = str(meta.get("symbol") or "").upper()
     if metadata_symbol and metadata_symbol != symbol.upper():
         raise RuntimeError("NSE metadata symbol mismatch")
-    # Classification remains useful for suspended instruments, without making
-    # them tradable. Keep suspension state in provenance for eligibility review.
     active = meta.get("activeSeries") or []
     suspended = meta.get("tempSuspendedSeries") or []
     series = list(dict.fromkeys(active + suspended))
-    # Some symbols have an empty getMetaData response while the quote exists.
-    # Only accept a fallback quote if BOTH its symbol and ISIN match the DB.
     if not series:
         series = ["EQ", "BE", "BZ", "SM", "ST"]
     market_type = str(meta.get("marketType") or "N")
@@ -93,8 +87,6 @@ def fetch_classification(nse, symbol: str, isin: str | None = None) -> dict:
             continue
         if str(quote_meta.get("symbol") or "").upper() != symbol.upper():
             raise RuntimeError("NSE quote symbol mismatch")
-        # getMetaData can retain an old pre-split ISIN. The detailed quote
-        # must match the stored current ISIN; never change identifiers here.
         if isin and str(quote_meta.get("isinCode") or "").upper() != isin.upper():
             raise RuntimeError("NSE quote ISIN mismatch")
         sector, industry = _classification(payload)
@@ -108,87 +100,73 @@ def fetch_classification(nse, symbol: str, isin: str | None = None) -> dict:
 
 def ingest(progress: Callable[[int, int, str], None] | None = None, delay: float = 0.05) -> dict:
     engine = _engine()
-    with engine.connect() as conn:
-        rows = conn.execute(text("""
-            select id,nse_symbol,isin
-            from pms.instruments
-            where active=true and exchange='NSE'
-              and nse_symbol is not null
-              and (sector is null or btrim(sector)='')
-            order by nse_symbol
-        """)).mappings().all()
+    try:
+        with engine.connect() as conn:
+            rows = conn.execute(text("""
+                select id,nse_symbol,isin
+                from pms.instruments
+                where active=true and exchange='NSE'
+                  and nse_symbol is not null
+                  and (sector is null or btrim(sector)='')
+                order by nse_symbol
+            """)).mappings().all()
 
-    total = len(rows)
-    updated = 0
-    failed: list[str] = []
-    errors: list[str] = []
-    download_dir = Path(".cache_nse")
-    download_dir.mkdir(exist_ok=True)
+        total = len(rows)
+        updated = 0
+        failed: list[str] = []
+        errors: list[str] = []
+        download_dir = Path(".cache_nse")
+        download_dir.mkdir(exist_ok=True)
 
-    # The nse package handles cookies, current Next API routing, throttling and retries.
-    with NSE(download_folder=download_dir) as nse:
-        for done, row in enumerate(rows, start=1):
-            symbol = row["nse_symbol"]
-            try:
-                classification = fetch_classification(nse, symbol, row["isin"])
-                sector, industry = classification["sector"], classification["industry"]
-                with engine.begin() as conn:
-                    conn.execute(text("""
-                        update pms.instruments
-                        set sector=:sector, updated_at=now(),
-                            metadata=coalesce(metadata,'{}'::jsonb) || jsonb_build_object(
-                                'sector_classification',cast(:classification as jsonb))
-                        where id=:instrument_id
-                    """), {"sector": sector, "instrument_id": row["id"], "classification": json.dumps(classification)})
-                    conn.execute(text("""
-                        insert into pms.sector_history(instrument_id,sector,industry,effective_from,effective_to,source)
-                        values(:instrument_id,:sector,:industry,:effective_from,null,'NSE_NEXT_API')
-                        on conflict do nothing
-                    """), {
-                        "instrument_id": row["id"], "sector": sector, "industry": industry,
-                        "effective_from": date.today(),
-                    })
-                updated += 1
-            except Exception as exc:
-                failed.append(symbol)
-                if len(errors) < 10:
-                    errors.append(f"{symbol}: {type(exc).__name__}: {exc}")
-            finally:
-                if progress:
-                    progress(done, total, symbol)
-                if delay:
-                    time.sleep(delay)
+        # Current classifications only. Dated historical sector intervals are a
+        # separate Step-1 stage with an explicit audit cutoff.
+        with NSE(download_folder=download_dir) as nse:
+            for done, row in enumerate(rows, start=1):
+                symbol = row["nse_symbol"]
+                try:
+                    classification = fetch_classification(nse, symbol, row["isin"])
+                    sector, industry = classification["sector"], classification["industry"]
+                    with engine.begin() as conn:
+                        conn.execute(text("""
+                            update pms.instruments
+                            set sector=:sector, updated_at=now(),
+                                metadata=coalesce(metadata,'{}'::jsonb) || jsonb_build_object(
+                                    'sector_classification',cast(:classification as jsonb))
+                            where id=:instrument_id
+                        """), {"sector": sector, "instrument_id": row["id"], "classification": json.dumps(classification)})
+                        conn.execute(text("""
+                            insert into pms.sector_history(instrument_id,sector,industry,effective_from,effective_to,source)
+                            values(:instrument_id,:sector,:industry,:effective_from,null,'NSE_NEXT_API')
+                            on conflict do nothing
+                        """), {
+                            "instrument_id": row["id"], "sector": sector, "industry": industry,
+                            "effective_from": date.today(),
+                        })
+                    updated += 1
+                except Exception as exc:
+                    failed.append(symbol)
+                    if len(errors) < 10:
+                        errors.append(f"{symbol}: {type(exc).__name__}: {exc}")
+                finally:
+                    if progress:
+                        progress(done, total, symbol)
+                    if delay:
+                        time.sleep(delay)
 
-    return {
-        "requested": total,
-        "updated": updated,
-        "failed": len(failed),
-        "failed_symbols": failed,
-        "sample_errors": errors,
-    }
-
-
-def ingest_historical_sector_intervals() -> None:
-    """Run the separate PIT importer only for CLI use.
-
-    Imported current classifications remain dated today. Historical intervals
-    come from dated NSE sector-index membership; this function never backdates
-    the current classification table.
-    """
-    root = Path(__file__).resolve().parents[1]
-    result = subprocess.run([
-        sys.executable,
-        str(root / "scripts" / "backfill_historical_sector_intervals.py"),
-        "--start", "2017-01-01",
-        "--end", "2024-12-31",
-    ], cwd=root)
-    if result.returncode:
-        raise SystemExit(result.returncode)
+        return {
+            "requested": total,
+            "updated": updated,
+            "failed": len(failed),
+            "failed_symbols": failed,
+            "sample_errors": errors,
+        }
+    finally:
+        engine.dispose()
 
 
 if __name__ == "__main__":
     result = ingest(lambda n, t, s: print(f"\rSectors {n}/{t} {s:16}", end="", flush=True))
     print()
     print(result)
-    print("Loading dated historical sector intervals from point-in-time NSE sector-index membership...")
-    ingest_historical_sector_intervals()
+    if result["failed"]:
+        raise SystemExit(2)
