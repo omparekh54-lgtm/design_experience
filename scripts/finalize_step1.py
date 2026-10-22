@@ -100,15 +100,63 @@ def db_engine():
     return engine
 
 
+def fail_fast_historical_prerequisites(engine) -> dict:
+    """Reject non-reconstructable prerequisites before hours of network work."""
+    with engine.connect() as conn:
+        asm = conn.execute(text("""
+            select count(*)::int from pms.surveillance_history
+            where surveillance_type='ASM' and effective_from < timestamptz '2024-01-23 00:00:00+05:30'
+              and source like 'NSE_%'
+        """)).scalar_one()
+        duplicate_identities = conn.execute(text("""
+            select count(*)::int from (
+              select upper(coalesce(nse_symbol,replace(trading_symbol,'-EQ',''))) symbol,count(*)
+              from pms.instruments
+              where exchange='NSE' and metadata->>'ingestion_duplicate_of' is null
+              group by 1 having count(*)>1 or upper(coalesce(nse_symbol,replace(trading_symbol,'-EQ',''))) is null
+            ) q
+        """)).scalar_one()
+    if int(asm or 0) <= 0:
+        raise RuntimeError(
+            "source-backed pre-2024 ASM history is absent. This repo has no reviewed legacy-ASM reconstructor; "
+            "restore/import the verified ASM archive before running the expensive Step-1 backfills."
+        )
+    if int(duplicate_identities or 0):
+        raise RuntimeError("canonical NSE instrument identities are still ambiguous; repair master identity before Step 1")
+    return {"pre2024_asm_rows": int(asm), "ambiguous_master_identities": int(duplicate_identities)}
+
+
 def repair_reference_history(engine) -> dict:
     from packages.data_layer.reference_gap_ingestion import ReferenceGapIngestor
 
-    ing = ReferenceGapIngestor(engine)
+    class HistoricalReferenceGapIngestor(ReferenceGapIngestor):
+        def _instrument_maps(self):
+            with self.engine.connect() as conn:
+                rows = conn.execute(text("""
+                    select id, upper(coalesce(nse_symbol, replace(trading_symbol,'-EQ',''))) symbol,
+                           upper(coalesce(isin,'')) isin
+                    from pms.instruments
+                    where exchange='NSE' and metadata->>'ingestion_duplicate_of' is null
+                """)).mappings().all()
+            symbols: dict[str, list[int]] = {}
+            isins: dict[str, list[int]] = {}
+            for row in rows:
+                if row["symbol"]:
+                    symbols.setdefault(str(row["symbol"]), []).append(int(row["id"]))
+                if row["isin"]:
+                    isins.setdefault(str(row["isin"]), []).append(int(row["id"]))
+            return (
+                {k: v[0] for k, v in symbols.items() if len(v) == 1},
+                {k: v[0] for k, v in isins.items() if len(v) == 1},
+            )
+
+    ing = HistoricalReferenceGapIngestor(engine)
     return {
         "corporate_actions": retry_call("corporate actions", ing.ingest_corporate_actions),
         "shareholding": retry_call("shareholding history", ing.ingest_shareholding),
         "index_membership": retry_call("index membership history", ing.ingest_index_membership_history),
         "coverage": ing.coverage(),
+        "historical_identity_scope": "ACTIVE_AND_INACTIVE_NON_DUPLICATE_NSE",
     }
 
 
@@ -151,6 +199,17 @@ def evidence_snapshot(engine, matrix_start: date, matrix_end: date) -> dict:
         "price_sources": prices,
         "open_critical_dq_errors": int(open_errors),
     }
+
+
+def matrix_dataset_fingerprint(engine, start: date, end: date) -> str:
+    from packages.pms.backtest_matrix import Period, matrix_plan
+    from packages.pms.config import load_strategy_config
+    from packages.pms.matrix_data import consistent_inputs, input_manifest
+
+    cfg = load_strategy_config()
+    cells = matrix_plan(cfg, [Period("FINAL_ACCEPTANCE_SCOPE", start, end)])
+    with consistent_inputs(engine) as snapshot:
+        return str(input_manifest(snapshot, cells)["fingerprint"])
 
 
 def final_review_pack(engine, report: dict, evidence: dict, start: date, end: date) -> dict:
@@ -258,11 +317,16 @@ def main() -> int:
     engine = None
     try:
         engine = db_engine()
-        p.step(5, "database + environment verified")
+        prerequisites = fail_fast_historical_prerequisites(engine)
+        p.step(4, f"database + historical prerequisites verified (ASM rows {prerequisites['pre2024_asm_rows']})")
+
+        run([sys.executable, "scripts/ingest_official_trading_calendar.py", "--year", str(args.end.year)],
+            "official independent trading-calendar provenance", attempts=3)
+        p.step(6, "independent official calendar provenance refreshed")
 
         run([sys.executable, "scripts/ingest_module_e_benchmarks.py", "--start", "2016-11-01", "--end", args.end.isoformat()],
             "official benchmark/calendar repair", attempts=2)
-        p.step(15, "official calendar + benchmarks repaired")
+        p.step(15, "official benchmark series repaired")
 
         warmup_start = date(2016, 11, 1)
         years = list(range(warmup_start.year, args.end.year + 1))
@@ -288,7 +352,7 @@ def main() -> int:
         ref_path = ARTIFACT_ROOT / "step1" / "reference-repair.json"
         ref_path.parent.mkdir(parents=True, exist_ok=True)
         ref_path.write_text(json.dumps(reference, indent=2, default=str) + "\n", encoding="utf-8")
-        p.step(70, "shareholding/actions/index reference history repaired")
+        p.step(70, "historical shareholding/actions/index reference history repaired")
 
         financial_start = min(args.start, date(2016, 1, 1))
         for shard in range(8):
@@ -326,12 +390,14 @@ def main() -> int:
         ] + review_pending
         complete = bool(report.get("summary", {}).get("complete")) and not pending_tasks and all(v["pass"] for v in reviews.values())
         audit_sha = hashlib.sha256(audit.read_bytes()).hexdigest()
+        dataset_fp = matrix_dataset_fingerprint(engine, args.matrix_start, args.matrix_end)
         payload = {
-            "version": "PMS_STEP1_FINAL_v3",
+            "version": "PMS_STEP1_FINAL_v4",
             "created_at": datetime.now(IST).isoformat(),
             "status": "STEP1_COMPLETE" if complete else "STEP1_BLOCKED",
             "scope": {"start": args.start.isoformat(), "end": args.end.isoformat()},
             "matrix_scope": {"start": args.matrix_start.isoformat(), "end": args.matrix_end.isoformat()},
+            "matrix_dataset_fingerprint": dataset_fp,
             "audit_report": str(audit.relative_to(ROOT)),
             "audit_sha256": audit_sha,
             "audit_run_id": report.get("run_id"),
@@ -342,6 +408,7 @@ def main() -> int:
             "pending_repairs": len(pending_tasks),
             "pending_tasks": pending_tasks,
             "evidence": evidence,
+            "prerequisites": prerequisites,
             "note": "The base auditor retains independent/review-only findings; the certificate remains fail-closed unless every non-static finding is PASS/NOT_APPLICABLE and all five independent evidence gates pass.",
         }
         write_certificate(payload)
@@ -352,6 +419,7 @@ def main() -> int:
 
         p.step(100, "STEP 1 COMPLETE — no remaining historical acceptance blockers")
         print(f"Certificate: {CERTIFICATE.relative_to(ROOT)}")
+        print(f"Step-10 dataset fingerprint: {dataset_fp}")
         return 0
     except KeyboardInterrupt:
         p.fail("interrupted; rerun the same command to resume checkpointed stages")
