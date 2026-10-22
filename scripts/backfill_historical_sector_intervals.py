@@ -38,8 +38,6 @@ SOURCE_URL = "https://raw.githubusercontent.com/aditya-jha/nse-historical-member
 SOURCE_REPO = "https://github.com/aditya-jha/nse-historical-membership"
 SOURCE_FRESHNESS = date(2026, 5, 15)
 
-# More specific indices win when a stock legitimately belongs to two sector
-# indices (e.g. Bank + Financial Services, Pharma + Healthcare).
 SECTOR_INDICES = {
     "Nifty PSU Bank": (10, "PSU Bank"),
     "Nifty Private Bank": (11, "Private Bank"),
@@ -58,8 +56,6 @@ SECTOR_INDICES = {
     "Nifty Financial Services": (40, "Financial Services"),
 }
 
-# Official live constituent sources. Static archives are preferable because they
-# do not need a browser session; two sector indices are exposed through NSE API.
 CURRENT_SOURCES = {
     "Nifty Bank": "https://archives.nseindia.com/content/indices/ind_niftybanklist.csv",
     "Nifty IT": "https://archives.nseindia.com/content/indices/ind_niftyitlist.csv",
@@ -168,11 +164,6 @@ def review_boundary_after(freshness: date, end: date) -> date | None:
 
 
 def reconcile_current(rows: list[dict], end: date) -> tuple[list[dict], dict]:
-    """Bound stale open intervals and add official-current snapshot intervals.
-
-    This mirrors the source repository's documented `snapshot` / inferred-exclude
-    policy. It is deliberately explicit evidence, not a fabricated press release.
-    """
     if end <= SOURCE_FRESHNESS:
         return rows, {"current_reconciliation": "NOT_NEEDED", "source_freshness": SOURCE_FRESHNESS.isoformat()}
     boundary = review_boundary_after(SOURCE_FRESHNESS, end)
@@ -185,7 +176,6 @@ def reconcile_current(rows: list[dict], end: date) -> tuple[list[dict], dict]:
     for row in rows:
         item = dict(row)
         if (item.get("index_name") or "").strip() in SECTOR_INDICES and not (item.get("valid_to") or "").strip():
-            # An old open interval is evidence only until the next scheduled review.
             item["valid_to"] = boundary.isoformat()
             notes = (item.get("notes") or "").strip()
             item["notes"] = (notes + "; " if notes else "") + f"bounded at current-snapshot reconciliation {boundary}"
@@ -273,10 +263,14 @@ def build_intervals(rows: list[dict], start: date, end: date) -> tuple[list[dict
                 ambiguous.append({"symbol": symbol, "from": a.isoformat(), "to": b.isoformat(), "candidates": sorted({x["sector"] for x in active})})
                 continue
             segment = {**chosen, "symbol": symbol, "start": a, "end": b}
-            if segments and segments[-1]["sector"] == segment["sector"] and segments[-1]["end"] == segment["start"]:
+            if (
+                segments
+                and segments[-1]["sector"] == segment["sector"]
+                and segments[-1]["end"] == segment["start"]
+                and segments[-1]["source_kinds"] == {segment["source_kind"]}
+            ):
                 segments[-1]["end"] = segment["end"]
                 segments[-1]["source_urls"].update([u for u in [segment["source_url"]] if u])
-                segments[-1]["source_kinds"].add(segment["source_kind"])
             else:
                 segment["source_urls"] = set([segment["source_url"]]) if segment["source_url"] else set()
                 segment["source_kinds"] = {segment["source_kind"]}
@@ -313,7 +307,7 @@ def main() -> int:
                 if iid is None:
                     unmatched.add(item["symbol"])
                     continue
-                provenance = "NSE_PIT_SECTOR_INDEX_CURRENT_RECONCILED" if "snapshot" in item.get("source_kinds", set()) else "NSE_PIT_SECTOR_INDEX"
+                provenance = "NSE_PIT_SECTOR_INDEX_CURRENT_RECONCILED" if item.get("source_kinds") == {"snapshot"} else "NSE_PIT_SECTOR_INDEX"
                 result = conn.execute(text("""
                     insert into pms.sector_history(instrument_id,sector,industry,effective_from,effective_to,source)
                     values(:iid,:sector,null,:frm,:to,:source)
