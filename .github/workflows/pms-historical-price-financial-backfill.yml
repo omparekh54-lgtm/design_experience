@@ -1,0 +1,127 @@
+name: PMS historical price and financial backfill
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .audit-trigger/historical-price-financial.txt
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark-warmup:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    env:
+      DATABASE_URL: ${{ secrets.NEON_PMS_DATABASE_URL }}
+      SSL_CERT_FILE: /etc/ssl/certs/ca-certificates.crt
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Backfill full benchmark calendar including NIFTY500 and warmup
+        run: python scripts/ingest_module_e_benchmarks.py --start 2016-11-01 --end 2026-10-21
+
+  official-prices:
+    needs: benchmark-warmup
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix:
+        include:
+          - {label: '2016', start: '2016-11-01', end: '2016-12-31'}
+          - {label: '2017', start: '2017-01-01', end: '2017-12-31'}
+          - {label: '2018', start: '2018-01-01', end: '2018-12-31'}
+          - {label: '2019', start: '2019-01-01', end: '2019-12-31'}
+          - {label: '2020', start: '2020-01-01', end: '2020-12-31'}
+          - {label: '2021', start: '2021-01-01', end: '2021-12-31'}
+          - {label: '2022', start: '2022-01-01', end: '2022-12-31'}
+          - {label: '2023', start: '2023-01-01', end: '2023-12-31'}
+          - {label: '2024', start: '2024-01-01', end: '2024-12-31'}
+          - {label: '2025', start: '2025-01-01', end: '2025-12-31'}
+          - {label: '2026', start: '2026-01-01', end: '2026-10-21'}
+    env:
+      DATABASE_URL: ${{ secrets.NEON_PMS_DATABASE_URL }}
+      PMS_NEON_ARCHIVE_JSON: ${{ secrets.PMS_NEON_ARCHIVE_JSON }}
+      SSL_CERT_FILE: /etc/ssl/certs/ca-certificates.crt
+      EXECUTION_MODE: PAPER
+      LIVE_TRADING_ENABLED: 'false'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Backfill official NSE prices ${{ matrix.label }}
+        run: python scripts/backfill_official_historical_prices.py --start '${{ matrix.start }}' --end '${{ matrix.end }}' --output 'artifacts/prices-${{ matrix.label }}.json'
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pms-historical-prices-${{ matrix.label }}-${{ github.run_id }}
+          path: artifacts/prices-${{ matrix.label }}.json
+          if-no-files-found: warn
+          retention-days: 30
+
+  historical-financials:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        shard: [0,1,2,3,4,5,6,7]
+    env:
+      DATABASE_URL: ${{ secrets.NEON_PMS_DATABASE_URL }}
+      PMS_NEON_ARCHIVE_JSON: ${{ secrets.PMS_NEON_ARCHIVE_JSON }}
+      SSL_CERT_FILE: /etc/ssl/certs/ca-certificates.crt
+      EXECUTION_MODE: PAPER
+      LIVE_TRADING_ENABLED: 'false'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Discover and ingest historical NSE financial filings shard ${{ matrix.shard }}
+        run: python scripts/backfill_official_historical_financials.py --start 2016-01-01 --end 2026-10-21 --shard '${{ matrix.shard }}' --shards 8 --output 'artifacts/financials-${{ matrix.shard }}.json'
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pms-historical-financials-${{ matrix.shard }}-${{ github.run_id }}
+          path: artifacts/financials-${{ matrix.shard }}.json
+          if-no-files-found: warn
+          retention-days: 30
+
+  post-backfill-audit:
+    needs: [official-prices, historical-financials]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      DATABASE_URL: ${{ secrets.NEON_PMS_DATABASE_URL }}
+      SSL_CERT_FILE: /etc/ssl/certs/ca-certificates.crt
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Full historical audit after price/financial backfill
+        run: python scripts/run_data_integrity_audit.py --run --start 2018-01-01 --end 2026-10-21 --report artifacts/post-backfill/audit.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pms-post-price-financial-audit-${{ github.run_id }}
+          path: artifacts/post-backfill
+          if-no-files-found: warn
+          retention-days: 30
