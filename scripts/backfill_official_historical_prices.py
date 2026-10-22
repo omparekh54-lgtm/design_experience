@@ -119,12 +119,29 @@ def sessions(engine,start,end):
         """),{'s':start,'e':end}).scalars())
 
 
+def optional_private_archive():
+    """Use the private raw-source archive when configured, but do not require it locally.
+
+    Local acceptance still stores the official NSE URL and SHA-256 in
+    provider_snapshots, so source provenance remains independently auditable.
+    """
+    raw=(os.environ.get('PMS_NEON_ARCHIVE_JSON') or '').strip()
+    if not raw:
+        print(json.dumps({'private_archive':'DISABLED','reason':'credentials_not_configured','provenance':'NSE_URL_PLUS_SHA256'}), flush=True)
+        return None
+    try:
+        return PrivateArchive.from_env()
+    except SourceError as exc:
+        print(json.dumps({'private_archive':'DISABLED','reason':str(exc),'provenance':'NSE_URL_PLUS_SHA256'}), flush=True)
+        return None
+
+
 def ingest(start:date,end:date,output:Path):
     raw=os.environ.get('DATABASE_URL') or os.environ.get('PMS_DATABASE_URL')
     if not raw: raise RuntimeError('DATABASE_URL/PMS_DATABASE_URL is required')
     engine=create_engine(_render_safe_database_url(raw),pool_pre_ping=True,
                          connect_args={'options':'-c search_path=pms,public'})
-    archive=PrivateArchive.from_env()
+    archive=optional_private_archive()
     http=OfficialHTTP(seconds=20000,archive=archive)
     master=instruments(engine); days=sessions(engine,start,end)
     if not days: raise RuntimeError('official_nifty50_session_calendar_empty')
@@ -140,7 +157,7 @@ def ingest(start:date,end:date,output:Path):
       values('NSE','HISTORICAL_NSE_PRICES',:sha,:uri,cast(:metadata as jsonb))
     """)
     report={'start':str(start),'end':str(end),'sessions':len(days),'completed':0,'written':0,
-            'unmatched':0,'ambiguous_samples':[],'failures':[]}
+            'unmatched':0,'ambiguous_samples':[],'failures':[],'private_archive':bool(archive)}
     for n,day in enumerate(days,1):
         try:
             doc,rows,fmt=fetch_day(http,day); by_symbol,by_isin=candidates(master,day)
@@ -155,7 +172,8 @@ def ingest(start:date,end:date,output:Path):
                 for i in range(0,len(payload),1000): c.execute(insert,payload[i:i+1000])
                 c.execute(receipt,{'sha':doc.sha256,'uri':doc.url,'metadata':json.dumps({
                     'trade_date':str(day),'format':fmt,'source_rows':len(rows),'written':len(payload),
-                    'unmatched':len(unmatched),'archive_key':doc.archive_key,'complete':True})})
+                    'unmatched':len(unmatched),'archive_key':doc.archive_key,'complete':True,
+                    'raw_source_preservation':'PRIVATE_ARCHIVE' if doc.archive_key else 'OFFICIAL_URL_PLUS_SHA256'})})
             report['completed']+=1; report['written']+=len(payload); report['unmatched']+=len(unmatched)
             if unmatched and len(report['ambiguous_samples'])<50:
                 report['ambiguous_samples'].extend(unmatched[:50-len(report['ambiguous_samples'])])
