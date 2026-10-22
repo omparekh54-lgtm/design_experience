@@ -43,15 +43,13 @@ class ReadOnlySnapshot:
         return self
 
     def __exit__(self, *args):
-        return False  # Only the outer context owns this transaction.
+        return False
 
     def execute(self, statement, parameters=None):
         return self.connection.execute(statement, parameters or {})
 
     def begin(self):
-        raise RuntimeError(
-            "Strategy persistence is forbidden in a matrix input snapshot"
-        )
+        raise RuntimeError("Strategy persistence is forbidden in a matrix input snapshot")
 
 
 @contextmanager
@@ -75,10 +73,7 @@ def code_fingerprint():
         root / "scripts/run_data_integrity_audit.py",
     ]
     return fingerprint(
-        {
-            str(p.relative_to(root)): hashlib.sha256(p.read_bytes()).hexdigest()
-            for p in files
-        }
+        {str(p.relative_to(root)): hashlib.sha256(p.read_bytes()).hexdigest() for p in files}
     )
 
 
@@ -91,7 +86,6 @@ def input_manifest(snapshot, cells, symbols=None, *, allow_ambiguous=False):
         "calendar_end": end + timedelta(days=150),
     }
     tables = {}
-    # Fixed identifiers, bounded hash buckets: avoid one giant aggregate for millions of rows.
     for table, where in INPUTS.items():
         rows = (
             snapshot.execute(
@@ -110,9 +104,7 @@ def input_manifest(snapshot, cells, symbols=None, *, allow_ambiguous=False):
         }
     forward_calendar = (
         snapshot.execute(
-            text(
-                "select distinct trade_date from pms.module_e_benchmark_bars where benchmark_code='NIFTY50' and source in ('NSE_HISTORICAL_OR','NSE_DAILY_INDEX') and trade_date between :warmup and :calendar_end order by trade_date"
-            ),
+            text("select distinct trade_date from pms.module_e_benchmark_bars where benchmark_code='NIFTY50' and source in ('NSE_HISTORICAL_OR','NSE_DAILY_INDEX') and trade_date between :warmup and :calendar_end order by trade_date"),
             params,
         )
         .scalars()
@@ -127,7 +119,9 @@ def input_manifest(snapshot, cells, symbols=None, *, allow_ambiguous=False):
         for r in snapshot.execute(
             text("""select id,
         exchange||':'||coalesce(nse_symbol,replace(trading_symbol,'-EQ','')) instrument_id,listed_from,delisted_on
-        from pms.instruments where exchange='NSE' and (listed_from is null or listed_from<=:end)
+        from pms.instruments where exchange='NSE'
+        and metadata->>'ingestion_duplicate_of' is null
+        and (listed_from is null or listed_from<=:end)
         and (delisted_on is null or delisted_on>:start) order by id"""),
             {"start": start, "end": end},
         )
@@ -139,9 +133,7 @@ def input_manifest(snapshot, cells, symbols=None, *, allow_ambiguous=False):
         universe = [r for r in universe if r["instrument_id"] in requested]
         if {r["instrument_id"] for r in universe} != requested:
             raise ValueError("Unknown or out-of-period requested symbols")
-    if not allow_ambiguous and len({r["instrument_id"] for r in universe}) != len(
-        universe
-    ):
+    if not allow_ambiguous and len({r["instrument_id"] for r in universe}) != len(universe):
         raise ValueError("Canonical instrument identity is ambiguous")
     payload = dict(
         tables=tables,
@@ -192,21 +184,11 @@ class MatrixGates:
             reasons.append("unresolved_critical_data_quality_issues")
         if cell.case.variant.use_module_a:
             default = cfg["fundamental"].get("leverage_limits", {}).get("default", {})
-            if any(
-                default.get(k) is None
-                for k in ("max_debt_to_equity", "min_interest_coverage")
-            ):
+            if any(default.get(k) is None for k in ("max_debt_to_equity", "min_interest_coverage")):
                 reasons.append("module_a_default_leverage_policy_unconfigured")
-            if cell.period.start.isoformat() < "2024-01-23" and not cfg[
-                "fundamental"
-            ].get("legacy_surveillance_verified"):
+            if cell.period.start.isoformat() < "2024-01-23" and not cfg["fundamental"].get("legacy_surveillance_verified"):
                 reasons.append("historical_surveillance_not_verified")
-            for table in (
-                "financial_filings",
-                "financial_facts",
-                "shareholding_history",
-                "sector_history",
-            ):
+            for table in ("financial_filings", "financial_facts", "shareholding_history", "sector_history"):
                 if not self.manifest["tables"][table]["rows"]:
                     reasons.append(table + "_unavailable")
         if cell.period.name not in self.coverage:
@@ -218,66 +200,38 @@ class MatrixGates:
                         "start": cell.period.start,
                         "end": cell.period.end,
                         "ids": json.dumps([r["id"] for r in universe]),
-                        "adjusted": json.dumps(
-                            [
-                                str(s).lower()
-                                for s in cfg["technical"].get(
-                                    "adjusted_price_sources", []
-                                )
-                            ]
-                        ),
+                        "adjusted": json.dumps([str(s).lower() for s in cfg["technical"].get("adjusted_price_sources", [])]),
                     },
                 )
                 .mappings()
                 .all()
             ]
-            bad = [
-                r
-                for r in rows
-                if r["expected"] != r["observed"]
-                or r["invalid"]
-                or r["unverified_raw_source"]
-            ]
+            bad = [r for r in rows if r["expected"] != r["observed"] or r["invalid"] or r["unverified_raw_source"]]
             self.samples[cell.period.name] = bad[:25]
             self.coverage[cell.period.name] = []
             if bad:
-                self.coverage[cell.period.name].append(
-                    "historical_price_sessions_missing_invalid_or_adjustment_unverified"
-                )
+                self.coverage[cell.period.name].append("historical_price_sessions_missing_invalid_or_adjustment_unverified")
             params = {"s": cell.period.start, "e": cell.period.end}
             sessions = (
                 self.snapshot.execute(
-                    text(
-                        "select distinct trade_date from pms.module_e_benchmark_bars where benchmark_code='NIFTY50' and source in ('NSE_HISTORICAL_OR','NSE_DAILY_INDEX') and trade_date between :s and :e order by trade_date"
-                    ),
+                    text("select distinct trade_date from pms.module_e_benchmark_bars where benchmark_code='NIFTY50' and source in ('NSE_HISTORICAL_OR','NSE_DAILY_INDEX') and trade_date between :s and :e order by trade_date"),
                     params,
                 )
                 .scalars()
                 .all()
             )
-            if (
-                not sessions
-                or (cell.period.end - sessions[-1]).days > 7
-                or (sessions[0] - cell.period.start).days > 7
-            ):
-                self.coverage[cell.period.name].append(
-                    "official_calendar_window_missing_or_truncated"
-                )
+            if not sessions or (cell.period.end - sessions[-1]).days > 7 or (sessions[0] - cell.period.start).days > 7:
+                self.coverage[cell.period.name].append("official_calendar_window_missing_or_truncated")
             prior = self.snapshot.execute(
-                text(
-                    "select count(distinct trade_date) from pms.module_e_benchmark_bars where benchmark_code='NIFTY50' and source in ('NSE_HISTORICAL_OR','NSE_DAILY_INDEX') and trade_date<:s"
-                ),
+                text("select count(distinct trade_date) from pms.module_e_benchmark_bars where benchmark_code='NIFTY50' and source in ('NSE_HISTORICAL_OR','NSE_DAILY_INDEX') and trade_date<:s"),
                 params,
             ).scalar_one()
             if prior < 257:
-                self.coverage[cell.period.name].append(
-                    "official_warmup_calendar_fewer_than_257_sessions"
-                )
+                self.coverage[cell.period.name].append("official_warmup_calendar_fewer_than_257_sessions")
         return sorted(set(reasons + self.coverage[cell.period.name]))
 
 
 def persist_report(engine, report):
-    """One research-only record. No migrations or PAPER/live records are written."""
     from copy import deepcopy
 
     compact = deepcopy(report["cells"])
@@ -289,38 +243,16 @@ def persist_report(engine, report):
         "id": report["run_id"],
         "s": report["dataset"]["start"],
         "e": report["dataset"]["end"],
-        "cfg": json.dumps(
-            plain(
-                {
-                    "identity": report["identity"],
-                    "config": report["config"],
-                    "dataset": report["dataset"],
-                    "code_version": report["code_version"],
-                }
-            ),
-            allow_nan=False,
-        ),
-        "metrics": json.dumps(
-            plain(
-                {
-                    "summary": report["summary"],
-                    "cells": compact,
-                    "scope": report["scope"],
-                    "holdout": report["holdout"],
-                }
-            ),
-            allow_nan=False,
-        ),
+        "cfg": json.dumps(plain({"identity": report["identity"], "config": report["config"], "dataset": report["dataset"], "code_version": report["code_version"]}), allow_nan=False),
+        "metrics": json.dumps(plain({"summary": report["summary"], "cells": compact, "scope": report["scope"], "holdout": report["holdout"]}), allow_nan=False),
         "version": report["config"]["version"],
     }
     with engine.begin() as conn:
         changed = conn.execute(
-            text(
-                """insert into pms.research_runs(id,run_type,variant,start_date,end_date,config,metrics,strategy_version)
+            text("""insert into pms.research_runs(id,run_type,variant,start_date,end_date,config,metrics,strategy_version)
           values(:id,'BACKTEST_MATRIX','PREDECLARED_MATRIX',:s,:e,cast(:cfg as jsonb),cast(:metrics as jsonb),:version)
           on conflict(id) do update set metrics=excluded.metrics
-          where research_runs.run_type='BACKTEST_MATRIX' and research_runs.config->>'identity'=cast(:cfg as jsonb)->>'identity'"""
-            ),
+          where research_runs.run_type='BACKTEST_MATRIX' and research_runs.config->>'identity'=cast(:cfg as jsonb)->>'identity'"""),
             params,
         )
         if changed.rowcount != 1:
@@ -340,16 +272,12 @@ def report_lock(path):
         try:
             if os.name == "nt":
                 import msvcrt
-
                 msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
             else:
                 import fcntl
-
                 fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
         except OSError:
-            raise RuntimeError(
-                "Another matrix process owns this report checkpoint"
-            ) from None
+            raise RuntimeError("Another matrix process owns this report checkpoint") from None
         try:
             yield
         finally:
