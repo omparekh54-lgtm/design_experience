@@ -27,6 +27,9 @@ then attempts the actual completed-session collector and a read-only readiness
 assessment even when collection is blocked. Readiness does not enable entries,
 unlock safety, freeze activation or create a campaign. Missing current operational
 proofs remain blockers rather than being inferred from old receipts.
+The existing operations verification also runs after the repair workflow ends,
+with a current-main SHA guard, to obtain fresh deployment, scheduler, private
+archive, isolated restore and read-only rehearsal receipts. It never activates.
 
 VALIANTLAB is still subject to the normal classification gate. The official
 G/BE quote currently returns null security fields. Search snippets and a business

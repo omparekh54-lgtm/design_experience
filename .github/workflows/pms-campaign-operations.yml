@@ -7,6 +7,10 @@ on:
       - packages/pms/paper_campaign.py
       - .github/workflows/pms-campaign-operations.yml
   workflow_dispatch:
+  workflow_run:
+    workflows: ['PMS targeted PAPER input repair']
+    types: [completed]
+    branches: [main]
 permissions:
   contents: read
   actions: read
@@ -15,6 +19,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   backup-and-restore:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.head_sha == github.sha
     runs-on: ubuntu-24.04
     timeout-minutes: 65
     services:
