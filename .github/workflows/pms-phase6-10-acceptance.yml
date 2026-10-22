@@ -1,0 +1,176 @@
+name: PMS Phase 6-10 acceptance
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .audit-trigger/phase6-10-acceptance.txt
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pms-phase6-10-acceptance
+  cancel-in-progress: false
+
+jobs:
+  core-acceptance-tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Phase 6-10 focused regression suite
+        run: |
+          pytest -q \
+            tests/test_module_e_complete.py \
+            tests/test_daily_orchestrator.py \
+            tests/test_worker_reliability.py \
+            tests/test_formal_paper.py \
+            tests/test_formal_paper_service.py \
+            tests/test_paper_campaign.py \
+            tests/test_backtest_matrix.py \
+            tests/test_matrix_data_api.py \
+            tests/test_matrix_replay_integration.py \
+            tests/test_unified_research_replay.py \
+            tests/test_historical_execution_consistency.py \
+            tests/test_console_ui_api.py
+
+  module-e-live:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      DATABASE_URL: ${{ secrets.NEON_PMS_DATABASE_URL }}
+      EXECUTION_MODE: PAPER
+      LIVE_TRADING_ENABLED: 'false'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Verify repaired benchmark availability
+        run: |
+          python - <<'PY'
+          import json, os
+          from sqlalchemy import create_engine, text
+          from apps.api.main import _render_safe_database_url
+          e=create_engine(_render_safe_database_url(os.environ['DATABASE_URL']), pool_pre_ping=True,
+                          connect_args={'options':'-c search_path=pms,public'})
+          required={'NIFTY50','NIFTY500','NIFTYMIDSMALLCAP400','INDIAVIX'}
+          with e.connect() as c:
+              rows=c.execute(text("""select benchmark_code,count(*) rows,min(trade_date) min_date,max(trade_date) max_date
+              from pms.module_e_benchmark_bars where benchmark_code=any(:codes)
+              and source in ('NSE_HISTORICAL_OR','NSE_DAILY_INDEX') group by benchmark_code"""),{'codes':list(required)}).mappings().all()
+          data={r['benchmark_code']:dict(r) for r in rows}
+          print(json.dumps(data,default=str,indent=2))
+          missing=required-set(data)
+          if missing: raise SystemExit('missing benchmark codes: '+','.join(sorted(missing)))
+          if any(v['max_date'].isoformat()<'2026-10-21' for v in data.values()): raise SystemExit('stale benchmark series')
+          e.dispose()
+          PY
+      - name: Run Module E read-only live evaluation
+        run: python scripts/evaluate_module_e.py --as-of 2026-10-21 --details > module-e-live.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: phase6-module-e-${{ github.run_id }}
+          path: module-e-live.json
+          if-no-files-found: warn
+          retention-days: 30
+
+  orchestrator-paper-safety:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      DATABASE_URL: ${{ secrets.NEON_PMS_DATABASE_URL }}
+      EXECUTION_MODE: PAPER
+      LIVE_TRADING_ENABLED: 'false'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Assert PAPER lock and order consistency
+        run: |
+          python - <<'PY'
+          import json,os
+          from sqlalchemy import create_engine,text
+          from apps.api.main import _render_safe_database_url
+          e=create_engine(_render_safe_database_url(os.environ['DATABASE_URL']),pool_pre_ping=True,
+                          connect_args={'options':'-c search_path=pms,public'})
+          with e.connect() as c:
+              safety=dict(c.execute(text('select execution_mode,new_orders_enabled,emergency_stop,locked_reason from pms.safety_state where singleton=true')).mappings().one())
+              counts=dict(c.execute(text("""select
+                (select count(*) from pms.paper_orders) orders,
+                (select count(*) from pms.paper_fills) fills,
+                (select count(*) from pms.paper_fills f left join pms.paper_orders o on o.id=f.order_id where o.id is null) orphan_fills
+              """)).mappings().one())
+          out={'safety':safety,'paper':counts}
+          print(json.dumps(out,default=str,indent=2))
+          assert safety['execution_mode']=='PAPER'
+          assert safety['new_orders_enabled'] is False
+          assert safety['emergency_stop'] is False
+          assert counts['orphan_fills']==0
+          e.dispose()
+          PY
+
+  ui-acceptance:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - run: npm run typecheck
+      - run: npm run build
+      - name: Reject obvious demo/placeholder UI state
+        run: |
+          if grep -RniE "(lorem ipsum|demo data|mock data|placeholder data|coming soon)" app components 2>/dev/null; then
+            echo 'Found stale/demo UI copy'; exit 2
+          fi
+
+  matrix-acceptance:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      DATABASE_URL: ${{ secrets.NEON_PMS_DATABASE_URL }}
+      EXECUTION_MODE: PAPER
+      LIVE_TRADING_ENABLED: 'false'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Matrix isolated replay preflight with dataset fingerprint
+        run: |
+          mkdir -p artifacts/phase10
+          python scripts/run_backtest_matrix.py --check --quick --start 2025-01-01 --end 2026-10-21 > artifacts/phase10/matrix-check.json
+      - name: Run bounded isolated replay cells
+        run: |
+          python scripts/run_backtest_matrix.py --run --quick --start 2025-01-01 --end 2026-10-21 \
+            --max-cells 2 --no-persist --report artifacts/phase10/matrix.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: phase10-matrix-${{ github.run_id }}
+          path: artifacts/phase10
+          if-no-files-found: warn
+          retention-days: 30
