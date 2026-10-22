@@ -42,6 +42,14 @@ def encoded(value):
 
 def reviewed_price_isin_matches(instrument, isin, day):
     if instrument['isin'] == isin:
+        for review in (instrument.get('metadata') or {}).get('reviewed_isin_history', []):
+            if (isinstance(review, dict) and review.get('reviewed') is True
+                    and review.get('current_isin') == isin and 'current_effective_from' in review):
+                try:
+                    if day < date.fromisoformat(review['current_effective_from']):
+                        return False
+                except (ValueError, TypeError):
+                    return False
         return True
     # Only explicitly reviewed same-instrument history, bounded to already
     # completed archives. Unknown changes still fail the master identity gate.

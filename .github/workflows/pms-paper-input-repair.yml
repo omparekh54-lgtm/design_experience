@@ -7,6 +7,7 @@ on:
       - packages/data_layer/cloud_sources.py
       - packages/data_layer/classification_identity.py
       - packages/data_layer/reviewed_classification_identities.json
+      - packages/data_layer/dated_identity_repair.py
       - packages/pms/paper_data_repair.py
       - scripts/repair_paper_inputs.py
       - .github/workflows/pms-paper-input-repair.yml
@@ -17,7 +18,33 @@ concurrency:
   group: pms-market-close-paper
   cancel-in-progress: false
 jobs:
+  reconcile-identities:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      DATABASE_URL: ${{ secrets.NEON_PMS_DATABASE_URL }}
+      PMS_NEON_ARCHIVE_JSON: ${{ secrets.PMS_NEON_ARCHIVE_JSON }}
+      SSL_CERT_FILE: /etc/ssl/certs/ca-certificates.crt
+      PMS_DATABASE_VERIFY_FULL: '1'
+      EXECUTION_MODE: PAPER
+      LIVE_TRADING_ENABLED: 'false'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Archive and reconcile reviewed dated identity with entries disabled
+        run: python scripts/repair_paper_inputs.py identities --output repair-identities.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pms-identity-repair-${{ github.run_id }}
+          path: repair-identities.json
+          retention-days: 30
   repair:
+    needs: reconcile-identities
     runs-on: ubuntu-24.04
     timeout-minutes: 180
     strategy:
@@ -69,9 +96,14 @@ jobs:
       - run: pip install -r requirements.txt
       - name: Verify corrected collector against a completed exchange session
         run: python scripts/repair_paper_inputs.py collector --output collector-verification.json
+      - name: Measure readiness and read-only preflight without activation
+        if: always()
+        run: python scripts/repair_paper_inputs.py readiness --output readiness-verification.json
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: pms-collector-verification-${{ github.run_id }}
-          path: collector-verification.json
+          path: |
+            collector-verification.json
+            readiness-verification.json
           retention-days: 30

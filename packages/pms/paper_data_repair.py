@@ -129,6 +129,11 @@ class PaperDataRepair:
         return dict(status='SUCCESS' if after['financial_pending']==0 and not errors else 'PARTIAL',before=before,after=after,
                     attempted=len(attempted),written=written,errors=errors)
 
+    def identities(self, *, on_progress=None):
+        from packages.data_layer.dated_identity_repair import reconcile_dated_identity
+        self.locked()
+        return reconcile_dated_identity(self.store, self.http)
+
     def sectors(self,*,max_passes=16,on_progress=None):
         if not 1<=max_passes<=24:raise ValueError('max_passes must be 1..24')
         self.locked()
