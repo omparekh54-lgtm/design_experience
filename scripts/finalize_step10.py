@@ -78,6 +78,8 @@ def require_step1(start: date, end: date) -> dict:
     scope = cert.get("matrix_scope") or {}
     if scope.get("start") != start.isoformat() or scope.get("end") != end.isoformat():
         raise RuntimeError("Step 1 certificate matrix scope does not match this Step 10 run")
+    if not cert.get("matrix_dataset_fingerprint"):
+        raise RuntimeError("Step 1 certificate predates dataset binding; rerun Step 1 with the current finalizer")
     evidence = cert.get("evidence") or {}
     if not evidence.get("legacy_surveillance_source_backed"):
         raise RuntimeError("Step 1 certificate does not prove source-backed legacy ASM/GSM")
@@ -136,25 +138,35 @@ def _quarantine(path: Path, tag: str) -> None:
 def prepare_checkpoints(config: Path) -> dict:
     from packages.pms.matrix_data import code_fingerprint
 
+    code = code_fingerprint()
     identity = hashlib.sha256(json.dumps({
         "step1": sha256(STEP1_CERT),
         "config": sha256(config),
-        "code": code_fingerprint(),
+        "code": code,
     }, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
     old = None
+    state_invalid = False
     if STATE.is_file():
         try:
             old = json.loads(STATE.read_text(encoding="utf-8"))
         except Exception:
-            old = None
-    if old and old.get("identity") != identity:
+            state_invalid = True
+    reports_exist = any(p.exists() for p in (
+        RUN1, RUN2,
+        RUN1.parent / (RUN1.stem + "_cells"),
+        RUN2.parent / (RUN2.stem + "_cells"),
+    ))
+    stale = (old is not None and old.get("identity") != identity) or ((old is None or state_invalid) and reports_exist)
+    if stale:
         tag = datetime.now(IST).strftime("%Y%m%d-%H%M%S")
         for report in (RUN1, RUN2):
             _quarantine(report, tag)
             _quarantine(report.parent / (report.stem + "_cells"), tag)
+        if STATE.exists():
+            _quarantine(STATE, tag)
     payload = {"identity": identity, "created_at": datetime.now(IST).isoformat(),
                "step1_sha256": sha256(STEP1_CERT), "config_sha256": sha256(config),
-               "code_fingerprint": code_fingerprint()}
+               "code_fingerprint": code}
     write_json(STATE, payload)
     return payload
 
@@ -280,7 +292,12 @@ def main() -> int:
             raise RuntimeError("matrix preflight did not emit valid JSON") from exc
         if int(preflight_payload.get("ready_cells", 0)) != len(preflight_payload.get("cells", [])):
             raise RuntimeError("matrix preflight returned non-ready cells despite zero exit status")
-        p.step(25, "all matrix cells are data-ready")
+        live_fp = str(preflight_payload.get("dataset_fingerprint") or "")
+        if live_fp != str(step1.get("matrix_dataset_fingerprint") or ""):
+            raise RuntimeError(
+                "database inputs changed after Step 1 certification; rerun Step 1 before Step 10"
+            )
+        p.step(25, "all matrix cells data-ready and identical to Step-1-certified dataset")
 
         base = [
             sys.executable, "scripts/run_backtest_matrix.py", "--run",
@@ -306,19 +323,19 @@ def main() -> int:
         canon1 = canonical_result(first)
         canon2 = canonical_result(second)
         fp1, fp2 = digest(canon1), digest(canon2)
+        if canon1.get("dataset_fingerprint") != live_fp or canon2.get("dataset_fingerprint") != live_fp:
+            raise RuntimeError("matrix replay dataset fingerprint differs from certified preflight")
         if fp1 != fp2:
             mismatch = STEP10_DIR / "reproducibility-mismatch.json"
             write_json(mismatch, {"run1": canon1, "run2": canon2, "fingerprints": [fp1, fp2]})
             raise RuntimeError(f"reproducibility mismatch; inspect {mismatch.relative_to(ROOT)}")
-        if canon1.get("dataset_fingerprint") != canon2.get("dataset_fingerprint"):
-            raise RuntimeError("dataset changed between replay runs")
-        p.step(97, "reproducibility fingerprints match")
+        p.step(97, "reproducibility + certified dataset fingerprints match")
 
         bad = [c for c in first.get("cells", []) if c.get("status") not in {"COMPLETED", "NO_TRADES"}]
         if bad:
             raise RuntimeError(f"{len(bad)} matrix cells are not terminal-success states")
         certificate = {
-            "version": "PMS_STEP10_FINAL_v2",
+            "version": "PMS_STEP10_FINAL_v3",
             "created_at": datetime.now(IST).isoformat(),
             "status": "STEP10_COMPLETE",
             "scope": {"start": args.start.isoformat(), "end": args.end.isoformat()},
@@ -329,7 +346,7 @@ def main() -> int:
             "run1": str(RUN1.relative_to(ROOT)),
             "run2": str(RUN2.relative_to(ROOT)),
             "checkpoint_identity": checkpoint_state["identity"],
-            "dataset_fingerprint": canon1.get("dataset_fingerprint"),
+            "dataset_fingerprint": live_fp,
             "code_fingerprint": canon1.get("code_version"),
             "result_fingerprint": fp1,
             "reproducibility": "PASS",
