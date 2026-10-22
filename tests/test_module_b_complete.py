@@ -417,10 +417,10 @@ def test_known_weekend_earnings_and_announcement_time():
     with engine.begin() as c:
         c.execute(
             text(
-                "create table instruments(id integer,exchange text,trading_symbol text)"
+                "create table instruments(id integer,exchange text,trading_symbol text,metadata text)"
             )
         )
-        c.execute(text("insert into instruments values(1,'NSE','ABC-EQ')"))
+        c.execute(text("insert into instruments values(1,'NSE','ABC-EQ','{}')"))
         c.execute(
             text(
                 "create table earnings_calendar(instrument_id integer,event_date date,announced_at timestamp)"

@@ -25,6 +25,18 @@ ROOT = Path(__file__).resolve().parents[1]
 COMPLETION_DATASET = 'HISTORICAL_FINANCIAL_SYMBOL_COMPLETE'
 COMPLETION_URI = 'https://www.nseindia.com/companies-listing/corporate-filings-financial-results'
 
+# Stable source observations plus their facts; exclude only ingestion clock
+# metadata. A restored/deleted/changed fact must invalidate symbol completion.
+FINANCIAL_STATE_SQL = """select md5(coalesce(string_agg(
+    md5((to_jsonb(f)-'ingested_at')::text || coalesce((
+      select string_agg(to_jsonb(v)::text,'' order by v.fact_name)
+      from pms.financial_facts v where v.filing_id=f.id),'')),
+    '' order by f.id),''))
+    from pms.financial_filings f join pms.instruments i on i.id=f.instrument_id
+    where upper(i.nse_symbol)=upper(:symbol) and f.source='NSE'
+      and (f.filing_timestamp at time zone 'Asia/Kolkata')::date
+          between cast(:start as date) and cast(:end as date)"""
+
 
 def universe(engine):
     with engine.connect() as c:
@@ -64,7 +76,12 @@ def _load_checkpoint(output: Path, start: date, end: date, shard: int, shards: i
         data=json.loads(output.read_text(encoding='utf-8'))
     except Exception:
         return None
+    if not isinstance(data, dict):
+        return None
     if (data.get('start'),data.get('end'),data.get('shard'),data.get('shards')) != (str(start),str(end),shard,shards):
+        return None
+    if not isinstance(data.get('completed_symbols', []), list) or any(
+            not isinstance(s, str) for s in data.get('completed_symbols', [])):
         return None
     return data
 
@@ -72,19 +89,40 @@ def _load_checkpoint(output: Path, start: date, end: date, shard: int, shards: i
 def _db_completed_symbols(engine, start: date, end: date, shard: int, shards: int) -> set[str]:
     """Use only explicit full-discovery completion receipts as resume authority."""
     with engine.connect() as c:
+        state_sql = FINANCIAL_STATE_SQL.replace(':symbol', "s.metadata->>'symbol'")
         rows=c.execute(text("""
-          select distinct upper(metadata->>'symbol') symbol
-          from pms.provider_snapshots
+          select distinct upper(s.metadata->>'symbol') symbol
+          from pms.provider_snapshots s
           where dataset=:dataset
-            and metadata->>'complete'='true'
-            and metadata->>'start'=:start
-            and metadata->>'end'=:end
-            and (metadata->>'shard')::int=:shard
-            and (metadata->>'shards')::int=:shards
+            and s.metadata->>'complete'='true'
+            and s.metadata->>'start'=:start
+            and s.metadata->>'end'=:end
+            and s.metadata->>'shard'=:shard
+            and s.metadata->>'shards'=:shards
             and content_sha256 ~ '^[0-9a-fA-F]{64}$'
             and source_uri=:uri
+            and s.id=(select max(t.id) from pms.provider_snapshots t
+                where t.dataset=s.dataset and t.metadata->>'symbol'=s.metadata->>'symbol'
+                  and t.metadata->>'start'=s.metadata->>'start' and t.metadata->>'end'=s.metadata->>'end'
+                  and t.metadata->>'shard'=s.metadata->>'shard' and t.metadata->>'shards'=s.metadata->>'shards')
+            and (s.metadata->>'stored_db_digest' is null or s.metadata->>'stored_db_digest'=(
+        """ + state_sql + """))
+            and (
+              s.metadata->>'filings_stored'='0'
+              or (
+                case when s.metadata->>'filings_stored' ~ '^[0-9]+$'
+                     then (s.metadata->>'filings_stored')::bigint else -1 end > 0
+                and (select count(*) from pms.financial_filings f
+                     join pms.instruments i on i.id=f.instrument_id
+                     where upper(i.nse_symbol)=upper(s.metadata->>'symbol')
+                       and f.source='NSE'
+                       and (f.filing_timestamp at time zone 'Asia/Kolkata')::date between cast(:start as date) and cast(:end as date))
+                    >= case when s.metadata->>'filings_stored' ~ '^[0-9]+$'
+                            then (s.metadata->>'filings_stored')::bigint else -1 end
+              )
+            )
         """),{'dataset':COMPLETION_DATASET,'start':str(start),'end':str(end),
-               'shard':shard,'shards':shards,'uri':COMPLETION_URI}).scalars().all()
+               'shard':str(shard),'shards':str(shards),'uri':COMPLETION_URI}).scalars().all()
     return {str(s).upper() for s in rows if s}
 
 
@@ -92,6 +130,8 @@ def _record_symbol_complete(conn, symbol: str, start: date, end: date, shard: in
                             records: int, filings: int) -> None:
     metadata={'symbol':symbol,'start':str(start),'end':str(end),'shard':shard,'shards':shards,
               'records_discovered':records,'filings_stored':filings,'complete':True}
+    metadata['stored_db_digest'] = conn.execute(text(FINANCIAL_STATE_SQL),
+        {'symbol':symbol,'start':str(start),'end':str(end)}).scalar_one()
     digest=hashlib.sha256(json.dumps(metadata,sort_keys=True,separators=(',',':')).encode()).hexdigest()
     conn.execute(text("""
       insert into pms.provider_snapshots(provider,dataset,content_sha256,source_uri,metadata)
@@ -102,6 +142,7 @@ def _record_symbol_complete(conn, symbol: str, start: date, end: date, shard: in
 
 def run(start:date,end:date,shard:int,shards:int,output:Path):
     if not 0<=shard<shards: raise ValueError('invalid shard')
+    if end < start: raise ValueError('historical financial window is reversed')
     load_dotenv(ROOT / '.env')
     raw=os.environ.get('DATABASE_URL') or os.environ.get('PMS_DATABASE_URL')
     if not raw: raise RuntimeError('DATABASE_URL/PMS_DATABASE_URL is required')

@@ -120,9 +120,15 @@ def db_engine():
 
 def fail_fast_historical_prerequisites(engine) -> dict:
     from packages.pms.historical_dataset import require_financial_period_identity
+    from packages.data_layer.cloud_storage import CloudStore
+    from packages.pms.data_integrity import SCHEMA_SQL, schema_findings
 
     require_financial_period_identity(engine)
+    CloudStore(engine).resolve_tables()
     with engine.connect() as conn:
+        missing = schema_findings(conn.execute(text(SCHEMA_SQL)).mappings().all())
+        if missing:
+            raise RuntimeError(f"historical audit schema prerequisites are missing: {missing}")
         asm = conn.execute(text("""
             select count(*)::int from pms.surveillance_history
             where surveillance_type='ASM'
@@ -267,12 +273,12 @@ def evidence_snapshot(engine, matrix_start: date, matrix_end: date) -> dict:
 
 
 def matrix_dataset_fingerprint(engine, start: date, end: date) -> str:
-    from packages.pms.backtest_matrix import Period, matrix_plan
-    from packages.pms.config import load_strategy_config
+    from types import SimpleNamespace
     from packages.pms.matrix_data import consistent_inputs, input_manifest
 
-    cfg = load_strategy_config()
-    cells = matrix_plan(cfg, [Period("FINAL_ACCEPTANCE_SCOPE", start, end)])
+    # Input scope is independent of the strategy plan; full audit scope may
+    # extend past 2024 even though matrix acceptance never does.
+    cells = [SimpleNamespace(period=SimpleNamespace(start=start, end=end))]
     with consistent_inputs(engine) as snapshot:
         return str(input_manifest(snapshot, cells)["fingerprint"])
 
@@ -475,6 +481,28 @@ def write_certificate(payload: dict) -> None:
     temp.replace(CERTIFICATE)
 
 
+def unresolved_checks(report: dict, resolved_codes: set[str]) -> list[dict]:
+    # A policy can resolve an executed finding, never a SQL error, timeout,
+    # unexecuted check or unknown status.
+    return [row for row in report.get("checks", [])
+            if row.get("status") not in {"PASS", "NOT_APPLICABLE"}
+            and not (row.get("status") in {"FAIL", "REVIEW_REQUIRED"}
+                     and row.get("code") in resolved_codes)]
+
+
+def audit_contract(report: dict, start: date, end: date) -> None:
+    from packages.pms.integrity_checks import CHECKS, REVIEWS
+    expected = {"SCHEMA_CONTRACT", *(c.code for c in CHECKS), *(r[0] for r in REVIEWS)}
+    codes = [r.get("code") for r in report.get("checks", [])]
+    if len(codes) != len(set(codes)) or not expected.issubset(codes):
+        raise RuntimeError("integrity audit is missing required checks or has duplicate checks")
+    scope = report.get("requested_scope") or {}
+    if scope.get("start") != str(start) or scope.get("end") != str(end):
+        raise RuntimeError("integrity audit scope does not match the requested historical window")
+    if report.get("finished") is not True or (report.get("summary") or {}).get("complete") is not True:
+        raise RuntimeError("integrity audit is incomplete; no certificate can be issued")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Repair and certify PMS Step 1 locally")
     parser.add_argument("--start", type=date.fromisoformat, default=date(2018,1,1))
@@ -486,11 +514,24 @@ def main() -> int:
         parser.error("--end must be on or after --start")
     if args.matrix_end > date(2024,12,31):
         parser.error("Step 10 in-sample window must end by 2024-12-31")
+    if (args.matrix_start, args.matrix_end) != (date(2023,1,1), date(2024,12,31)):
+        parser.error("Final matrix certification requires exactly 2023-01-01 through 2024-12-31")
+    if args.start > args.matrix_start or args.end < args.matrix_end:
+        parser.error("Step 1 audit scope must contain the complete matrix scope")
+    if args.end > completed_cutoff():
+        parser.error("Step 1 requires a completed historical cutoff")
 
+    from scripts.finalize_state import run_finalizer
+    return run_finalizer(lambda: _finalize(args), CERTIFICATE, "STEP1", dependent=ARTIFACT_ROOT / "step10_certificate.json")
+
+
+def _finalize(args) -> int:
     p = Progress("STEP 1")
     p.show(0,"starting")
     engine = None
     try:
+        from packages.pms.matrix_data import code_fingerprint
+        acceptance_code = code_fingerprint()
         engine = db_engine()
         prerequisites = fail_fast_historical_prerequisites(engine)
         p.step(4,f"database + historical prerequisites verified (ASM rows {prerequisites['pre2024_asm_rows']})")
@@ -545,7 +586,11 @@ def main() -> int:
             raise RuntimeError("no official NSE price rows are available for Step 10")
         p.step(90,"price/sector/surveillance evidence gates passed")
 
-        timestamp=datetime.now(IST).strftime("%Y%m%d-%H%M%S")
+        # Bind the audit snapshot to the dataset being certified, including the
+        # broader Step-1 scope. Concurrent collectors must not mix two vintages.
+        audit_inputs_before = matrix_dataset_fingerprint(engine, args.start, args.end)
+        matrix_inputs_before = matrix_dataset_fingerprint(engine, args.matrix_start, args.matrix_end)
+        timestamp=datetime.now(IST).strftime("%Y%m%d-%H%M%S-%f")
         audit=ARTIFACT_ROOT/"step1"/f"audit-{timestamp}.json"
         audit_exit=run([sys.executable,"scripts/run_data_integrity_audit.py","--run","--start",args.start.isoformat(),
                         "--end",args.end.isoformat(),"--timeout-ms","300000","--report",str(audit)],
@@ -554,7 +599,14 @@ def main() -> int:
         if not audit.exists() or not audit.with_suffix(".repair.json").exists():
             raise RuntimeError(f"integrity audit exit {audit_exit} produced no complete report bundle")
 
-        report=json.loads(audit.read_text(encoding="utf-8"))
+        from packages.pms.data_integrity import read_report
+        from packages.pms.backtest_matrix import fingerprint
+        report=read_report(audit)
+        audit_contract(report, args.start, args.end)
+        audited_inputs = {k:v for k,v in report.get("dataset", {}).items()
+                          if k not in {"fingerprint", "audit_additional_inputs"}}
+        if fingerprint(audited_inputs) != audit_inputs_before:
+            raise RuntimeError("historical inputs changed before the audit snapshot; rerun Step 1")
         raw_repair=json.loads(audit.with_suffix(".repair.json").read_text(encoding="utf-8"))
         policy_reviews=review_resolution_pack(engine,report)
         static_reviews=final_review_pack(engine,report,evidence,policy_reviews,args.start,args.end)
@@ -567,9 +619,7 @@ def main() -> int:
             if item and item.get("pass"):
                 resolved_codes.add(code)
 
-        unresolved=[r for r in report.get("checks",[])
-                    if r.get("code") not in resolved_codes
-                    and r.get("status") not in {"PASS","NOT_APPLICABLE"}]
+        unresolved=unresolved_checks(report, resolved_codes)
         static_pending=[{"check":code,"status":"REVIEW_EVIDENCE_FAILED","evidence":item["evidence"]}
                         for code,item in static_reviews.items() if not item["pass"]]
         evidence_pending=[{"check":code,"status":"POLICY_OR_EVIDENCE_REVIEW_FAILED","evidence":item.get("evidence",item)}
@@ -587,8 +637,14 @@ def main() -> int:
         complete=report_finished and not pending_tasks and all(v["pass"] for v in static_reviews.values())
         audit_sha=hashlib.sha256(audit.read_bytes()).hexdigest()
         dataset_fp=matrix_dataset_fingerprint(engine,args.matrix_start,args.matrix_end)
+        if (dataset_fp != matrix_inputs_before
+                or matrix_dataset_fingerprint(engine,args.start,args.end) != audit_inputs_before):
+            raise RuntimeError("historical inputs changed during certification; rerun Step 1")
+        if code_fingerprint() != acceptance_code:
+            raise RuntimeError("research code changed during certification; rerun Step 1")
         payload={
-            "version":"PMS_STEP1_FINAL_v5",
+            "version":"PMS_STEP1_FINAL_v6",
+            "code_fingerprint":acceptance_code,
             "created_at":datetime.now(IST).isoformat(),
             "status":"STEP1_COMPLETE" if complete else "STEP1_BLOCKED",
             "scope":{"start":args.start.isoformat(),"end":args.end.isoformat()},

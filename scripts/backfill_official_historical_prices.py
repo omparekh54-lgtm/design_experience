@@ -19,9 +19,18 @@ from sqlalchemy import create_engine, text
 from apps.api.main import _render_safe_database_url
 from packages.data_layer.cloud_sources import OfficialHTTP, SourceError, bhavcopy_url, parse_bhavcopy, number
 from packages.data_layer.private_archive import PrivateArchive
+from packages.data_layer.cloud_storage import CloudStore
 
 ROOT=Path(__file__).resolve().parents[1]
 SOURCE = "NSE_UDIFF"
+
+
+def price_state_sql(table: str) -> str:
+    if table not in {'daily_prices', 'cloud_daily_prices'}:
+        raise ValueError('unsupported historical price write target')
+    return f"""select md5(coalesce(string_agg(md5((to_jsonb(p)-'ingested_at')::text),
+                 '' order by instrument_id),'')) from pms.{table} p
+                 where p.trade_date=cast(:day as date) and p.source=:source"""
 
 
 def legacy_url(day: date) -> str:
@@ -146,41 +155,55 @@ def _checkpoint(output: Path,start: date,end: date) -> dict | None:
     if not output.is_file(): return None
     try: data=json.loads(output.read_text(encoding='utf-8'))
     except Exception: return None
+    if not isinstance(data, dict): return None
     if data.get('start')!=str(start) or data.get('end')!=str(end): return None
+    if not isinstance(data.get('completed_dates', []), list) or any(
+            not isinstance(d, str) for d in data.get('completed_dates', [])): return None
     return data
 
 
-def _db_completed_dates(engine, start: date, end: date) -> set[str]:
+def _db_completed_dates(engine, start: date, end: date, *, price_table: str = 'daily_prices') -> set[str]:
     """Database truth for resumability; local JSON is advisory only.
 
-    A date is complete only when an official receipt exists and at least one
-    official NSE price row for that date is still present. This prevents a stale
-    local checkpoint from skipping work after a Neon restore/reset.
+    A date is complete only when its entire recorded NSE_UDIFF row count
+    remains present. One surviving row after a partial restore is insufficient.
     """
+    if price_table not in {'daily_prices', 'cloud_daily_prices'}:
+        raise ValueError('unsupported historical price write target')
     with engine.connect() as c:
-        rows=c.execute(text("""
+        state_sql = price_state_sql(price_table).replace(':day', "(s.metadata->>'trade_date')::date")
+        rows=c.execute(text(f"""
           select distinct (s.metadata->>'trade_date')::date trade_date
           from pms.provider_snapshots s
           where s.dataset='HISTORICAL_NSE_PRICES'
             and s.metadata->>'complete'='true'
             and (s.metadata->>'trade_date')::date between :start and :end
-            and s.content_sha256 ~ '^[0-9a-fA-F]{64}$'
-            and s.source_uri is not null and btrim(s.source_uri)<>''
-            and exists (
-              select 1 from pms.daily_prices p
-              where p.trade_date=(s.metadata->>'trade_date')::date
-                and lower(p.source) like 'nse%'
-            )
-        """),{'start':start,'end':end}).scalars().all()
+            and s.content_sha256 ~ '^[0-9a-fA-F]{{64}}$'
+            and s.source_uri ~ '^https://(archives|nsearchives)[.]nseindia[.]com/'
+            and s.id=(select max(t.id) from pms.provider_snapshots t
+                      where t.dataset=s.dataset and t.metadata->>'trade_date'=s.metadata->>'trade_date')
+            and (s.metadata->>'stored_db_digest' is null or s.metadata->>'stored_db_digest'=({state_sql}))
+            and case when s.metadata->>'written' ~ '^[0-9]+$'
+                     then (s.metadata->>'written')::bigint else 0 end > 0
+            and (select count(*) from pms.{price_table} p
+                 where p.trade_date=(s.metadata->>'trade_date')::date
+                   and p.source=:source)
+                = case when s.metadata->>'written' ~ '^[0-9]+$'
+                       then (s.metadata->>'written')::bigint else -1 end
+        """),{'start':start,'end':end,'source':SOURCE}).scalars().all()
     return {str(d) for d in rows}
 
 
 def ingest(start:date,end:date,output:Path):
+    if end < start:
+        raise ValueError('historical price window is reversed')
     load_dotenv(ROOT/'.env')
     raw=os.environ.get('DATABASE_URL') or os.environ.get('PMS_DATABASE_URL')
     if not raw: raise RuntimeError('DATABASE_URL/PMS_DATABASE_URL is required')
     engine=create_engine(_render_safe_database_url(raw),pool_pre_ping=True,
                          connect_args={'options':'-c search_path=pms,public'})
+    store = CloudStore(engine)
+    store.resolve_tables()  # Reject an unsupported view layout before fetching.
     archive=optional_private_archive()
     master=instruments(engine); days=sessions(engine,start,end)
     if not days: raise RuntimeError('official_nifty50_session_calendar_empty')
@@ -197,7 +220,7 @@ def ingest(start:date,end:date,output:Path):
     """)
     old=_checkpoint(output,start,end)
     local_dates=set((old or {}).get('completed_dates') or [])
-    db_dates=_db_completed_dates(engine,start,end)
+    db_dates=_db_completed_dates(engine,start,end,price_table=store.resolve_tables()['daily_prices'])
     completed_dates={str(d) for d in days if str(d) in db_dates}
     stale_local=sorted(local_dates-completed_dates)
     if stale_local:
@@ -227,11 +250,23 @@ def ingest(start:date,end:date,output:Path):
                             unmatched.append({'symbol':r['symbol'],'isin':r['isin'],'series':r['series']}); continue
                         payload.append({'instrument_id':inst['id'],'trade_date':day,'open':r['open'],'high':r['high'],
                                         'low':r['low'],'close':r['close'],'volume':r['volume'],'turnover':r['turnover'],'source':SOURCE})
+                    unique = {}
+                    for item in payload:
+                        key_id = item['instrument_id']
+                        if key_id in unique and unique[key_id] != item:
+                            raise SourceError('historical_price_multiple_series_identity_conflict')
+                        unique[key_id] = item
+                    payload = list(unique.values())
+                    if not payload:
+                        raise SourceError('historical_price_no_master_matches')
                     with engine.begin() as c:
-                        for i in range(0,len(payload),1000): c.execute(insert,payload[i:i+1000])
+                        for i in range(0,len(payload),1000): store.execute(c,insert,payload[i:i+1000])
+                        stored_digest = c.execute(text(price_state_sql(store.resolve_tables()['daily_prices'])),
+                            {'day':day,'source':SOURCE}).scalar_one()
                         c.execute(receipt,{'sha':doc.sha256,'uri':doc.url,'metadata':json.dumps({
                             'trade_date':key,'format':fmt,'source_rows':len(rows),'written':len(payload),
                             'unmatched':len(unmatched),'archive_key':doc.archive_key,'complete':True,
+                            'stored_db_digest':stored_digest,
                             'raw_source_preservation':'PRIVATE_ARCHIVE' if doc.archive_key else 'OFFICIAL_URL_PLUS_SHA256'})})
                     report['completed']+=1; report['written']+=len(payload); report['unmatched']+=len(unmatched)
                     completed_dates.add(key); report['completed_dates']=sorted(completed_dates)

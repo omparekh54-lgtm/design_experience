@@ -2,12 +2,9 @@
 
 Historical intervals come from the reviewed public reconstruction of NSE Indices
 press releases. That source currently has dated membership evidence through
-2026-05-15. For a later Step-1 cutoff we DO NOT silently stretch those open
-intervals. Instead we reconcile them against live official NSE constituent
-snapshots and apply the source project's documented semi-annual snapshot method:
-source-open intervals are carried only to the next review boundary, then the
-current official snapshot is used from that boundary onward. These inferred rows
-are labelled separately and are never confused with press-release-backed rows.
+2026-05-15. Later history remains unknown until dated evidence is available.
+Current constituent snapshots can establish membership only from observation,
+never from an inferred earlier review boundary.
 """
 from __future__ import annotations
 
@@ -163,41 +160,40 @@ def review_boundary_after(freshness: date, end: date) -> date | None:
     return max(candidates) if candidates else None
 
 
-def reconcile_current(rows: list[dict], end: date) -> tuple[list[dict], dict]:
+def reconcile_current(rows: list[dict], end: date, *, observed_on: date | None = None) -> tuple[list[dict], dict]:
+    """Bound stale history and never project today's membership into the past."""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
     if end <= SOURCE_FRESHNESS:
         return rows, {"current_reconciliation": "NOT_NEEDED", "source_freshness": SOURCE_FRESHNESS.isoformat()}
-    boundary = review_boundary_after(SOURCE_FRESHNESS, end)
-    if boundary is None:
-        raise RuntimeError(
-            f"sector source is fresh only through {SOURCE_FRESHNESS}; no review boundary exists to reconcile cutoff {end}"
-        )
-    current, current_evidence = fetch_current_memberships()
+    observed_on = observed_on or datetime.now(ZoneInfo("Asia/Kolkata")).date()
+    historical_stop = SOURCE_FRESHNESS + timedelta(days=1)
     adjusted = []
     for row in rows:
         item = dict(row)
-        if (item.get("index_name") or "").strip() in SECTOR_INDICES and not (item.get("valid_to") or "").strip():
-            item["valid_to"] = boundary.isoformat()
-            notes = (item.get("notes") or "").strip()
-            item["notes"] = (notes + "; " if notes else "") + f"bounded at current-snapshot reconciliation {boundary}"
+        if (item.get("index_name") or "").strip() in SECTOR_INDICES:
+            prior_end = parse_date(item.get("valid_to"))
+            item["valid_to"] = min(prior_end or historical_stop, historical_stop).isoformat()
         adjusted.append(item)
-    for name, symbols in current.items():
-        source_uri = current_evidence[name]["source_uri"]
-        for symbol in sorted(symbols):
-            adjusted.append({
-                "index_name": name,
-                "symbol": symbol,
-                "valid_from": boundary.isoformat(),
-                "valid_to": "",
-                "source": "snapshot",
-                "source_url": source_uri,
-                "notes": f"official current snapshot reconciled at inferred semi-annual boundary {boundary}",
-            })
+    evidence = {}
+    if observed_on <= end:
+        current, evidence = fetch_current_memberships()
+        for name, symbols in current.items():
+            for symbol in sorted(symbols):
+                adjusted.append({
+                    "index_name": name, "symbol": symbol,
+                    "valid_from": observed_on.isoformat(), "valid_to": "",
+                    "source": "snapshot", "source_url": evidence[name]["source_uri"],
+                    "notes": f"official current snapshot first observed {observed_on}",
+                })
     return adjusted, {
-        "current_reconciliation": "OFFICIAL_NSE_CURRENT_SNAPSHOT",
+        "current_reconciliation": "OBSERVATION_DATE_ONLY",
         "source_freshness": SOURCE_FRESHNESS.isoformat(),
-        "reconciliation_boundary": boundary.isoformat(),
-        "current_snapshot_evidence": current_evidence,
-        "policy": "Open historical rows are bounded at the next semi-annual review; current official constituent snapshots are applied from that boundary. This follows the source repository's documented snapshot/inferred-exclude model.",
+        "current_snapshot_observed_on": observed_on.isoformat(),
+        "current_snapshot_evidence": evidence,
+        "unknown_history_from": historical_stop.isoformat(),
+        "policy": "Historical intervals stop at source freshness. Current membership starts only on its observation date; the intervening history remains unknown and fails closed.",
     }
 
 
@@ -302,6 +298,10 @@ def main() -> int:
     try:
         with db.begin() as conn:
             symbols = resolve_symbol_map(conn)
+            # Replace only this script's derived current-snapshot projection.
+            # Raw source receipts remain untouched. Earlier versions backdated
+            # these rows to an inferred semiannual boundary without evidence.
+            conn.execute(text("delete from pms.sector_history where source='NSE_PIT_SECTOR_INDEX_CURRENT_RECONCILED'"))
             for item in intervals:
                 iid = symbols.get(item["symbol"])
                 if iid is None:
@@ -345,7 +345,7 @@ def main() -> int:
             "range": [args.start.isoformat(), args.end.isoformat()],
             "coverage": coverage, "inserted_or_updated": inserted,
             "unmatched_symbols": sorted(unmatched), **reconciliation, **build_meta,
-            "policy": "Dated sector-index history is used through source freshness. Later coverage is reconciled only from official current NSE constituent snapshots at the documented semi-annual review boundary; current company classifications are never backdated.",
+            "policy": "Dated sector history is bounded by source freshness. Current snapshots start at observation time; missing intervening history remains unknown.",
         }
         out = ROOT / args.output
         out.parent.mkdir(parents=True, exist_ok=True)

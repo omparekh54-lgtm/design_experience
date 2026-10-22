@@ -110,20 +110,23 @@ class AuditEngine:
     def __exit__(self, *args):
         pass
     def execute(self, statement, params):
-        assert params['source'] == SOURCE
-        return SimpleNamespace(all=lambda: self.rows)
+        assert "NSE_DAILY_INDEX" in str(statement)
+        dates = [d for code, d in self.rows if code == params['code'] and params['start'] <= d <= params['end']]
+        return SimpleNamespace(scalars=lambda: dates)
 
 
 def test_calendar_finds_shared_interior_hole_even_with_current_min_max():
     sessions = [date(2026, 10, d) for d in [12, 13, 14, 15, 16]]
-    rows = [('NIFTY50', d) for d in sessions]
+    rows = [(code, d) for code in ['NIFTY50', 'NIFTY500'] for d in sessions]
     for code in ['INDIAVIX', 'NIFTYMIDSMALLCAP400']:
         rows += [(code, d) for d in sessions if d.day != 14]
     audit = coverage_audit(AuditEngine(rows), date(2026, 10, 12), date(2026, 10, 18))
-    for item in audit.values():
+    for code in ['INDIAVIX', 'NIFTYMIDSMALLCAP400']:
+        item = audit[code]
         assert not item['stale']
         assert item['missing_dates'] == ['2026-10-14']
         assert date_coverage(item) == 80
+    assert audit['NIFTY50']['missing_sessions'] == audit['NIFTY500']['missing_sessions'] == 0
     failures = audit_failures({'sector': 2302, 'total': 2302, 'bench': audit, 'gsm': 1871, 'errors': 0})
     assert len(failures) == 2
     assert all('missing sessions' in f for f in failures)
@@ -131,7 +134,7 @@ def test_calendar_finds_shared_interior_hole_even_with_current_min_max():
 
 def test_closed_market_dates_are_not_gaps():
     sessions = [date(2026, 10, 1), date(2026, 10, 5)]  # Oct 2 + weekend closed
-    rows = [(code, d) for code in ['NIFTY50', 'INDIAVIX', 'NIFTYMIDSMALLCAP400'] for d in sessions]
+    rows = [(code, d) for code in ['NIFTY50', 'NIFTY500', 'INDIAVIX', 'NIFTYMIDSMALLCAP400'] for d in sessions]
     audit = coverage_audit(AuditEngine(rows), date(2026, 10, 1), date(2026, 10, 5))
     assert all(v['missing_sessions'] == 0 for v in audit.values())
 

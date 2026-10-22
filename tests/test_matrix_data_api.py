@@ -274,3 +274,16 @@ def test_report_lock_excludes_concurrent_writers_and_releases_after_exit(tmp_pat
                 pass
     with report_lock(path):
         pass
+
+
+def test_coverage_cache_does_not_hide_a_stricter_adjusted_source_policy():
+    good = dict(id=1, expected=260, observed=260, invalid=0, unverified_raw_source=0)
+    bad = {**good, 'unverified_raw_source': 1}
+    engine = Engine([[good], [DAY, DAY+timedelta(days=1)], 257,
+                     [bad], [DAY, DAY+timedelta(days=1)], 257])
+    gate = MatrixGates(engine, manifest())
+    cfg = deepcopy(CFG)
+    assert not gate(CELL, cfg)
+    cfg['technical']['adjusted_price_sources'] = ['NSE_UDIFF']
+    assert 'historical_price_sessions_missing_invalid_or_adjustment_unverified' in gate(CELL, cfg)
+    assert len(engine.calls) == 6

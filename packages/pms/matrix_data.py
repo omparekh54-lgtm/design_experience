@@ -66,11 +66,9 @@ def code_fingerprint():
     root = Path(__file__).resolve().parents[2]
     files = [
         *sorted((root / "packages").rglob("*.py")),
-        root / "scripts/run_backtest_matrix.py",
-        root / "scripts/run_backtest.py",
-        root / "scripts/run_research_lab.py",
-        root / "scripts/run_walk_forward.py",
-        root / "scripts/run_data_integrity_audit.py",
+        *sorted((root / "scripts").rglob("*.py")),
+        *sorted((root / "migrations").glob("*.sql")),
+        root / "config/strategy_v1.yaml",
     ]
     return fingerprint(
         {str(p.relative_to(root)): hashlib.sha256(p.read_bytes()).hexdigest() for p in files}
@@ -164,10 +162,12 @@ COVERAGE = """with calendar as (
   join calendar c using(trade_date) where p.instrument_id in(select value::bigint from jsonb_array_elements_text(cast(:ids as jsonb)))
   order by p.instrument_id,p.trade_date,case when lower(source) like 'nse%' then 0 when lower(source)='angel_one' then 1 else 2 end,lower(source)
 ) select i.id,count(c.trade_date) expected,count(p.trade_date) observed,
- count(p.trade_date) filter(where open<=0 or low<=0 or close<=0 or high<greatest(open,close)
- or low>least(open,close) or volume<0 or open::text in ('NaN','Infinity','-Infinity')
+ count(p.trade_date) filter(where open is null or high is null or low is null or close is null or volume is null
+ or open<=0 or low<=0 or close<=0 or high<greatest(open,close,low)
+ or low>least(open,close,high) or volume<0 or turnover<0 or open::text in ('NaN','Infinity','-Infinity')
  or high::text in ('NaN','Infinity','-Infinity') or low::text in ('NaN','Infinity','-Infinity')
- or close::text in ('NaN','Infinity','-Infinity') or volume::text in ('NaN','Infinity','-Infinity')) invalid,
+ or close::text in ('NaN','Infinity','-Infinity') or volume::text in ('NaN','Infinity','-Infinity')
+ or turnover::text in ('NaN','Infinity','-Infinity')) invalid,
  count(p.trade_date) filter(where lower(source) not like 'nse%' or lower(source) in(select jsonb_array_elements_text(cast(:adjusted as jsonb)))) unverified_raw_source
  from pms.instruments i join calendar c on c.trade_date>=i.listed_from and (i.delisted_on is null or c.trade_date<i.delisted_on)
  left join chosen p on p.instrument_id=i.id and p.trade_date=c.trade_date
@@ -197,7 +197,11 @@ class MatrixGates:
             for table in ("financial_filings", "financial_facts", "shareholding_history", "sector_history"):
                 if not self.manifest["tables"][table]["rows"]:
                     reasons.append(table + "_unavailable")
-        if cell.period.name not in self.coverage:
+        # Coverage depends on the dates AND the adjusted-source policy. A case
+        # with a stricter source policy must not inherit another case's pass.
+        coverage_key = (cell.period.start, cell.period.end,
+                        tuple(sorted(str(s).lower() for s in cfg["technical"].get("adjusted_price_sources", []))))
+        if coverage_key not in self.coverage:
             rows = [
                 dict(r)
                 for r in self.snapshot.execute(
@@ -214,9 +218,9 @@ class MatrixGates:
             ]
             bad = [r for r in rows if r["expected"] != r["observed"] or r["invalid"] or r["unverified_raw_source"]]
             self.samples[cell.period.name] = bad[:25]
-            self.coverage[cell.period.name] = []
+            self.coverage[coverage_key] = []
             if bad:
-                self.coverage[cell.period.name].append("historical_price_sessions_missing_invalid_or_adjustment_unverified")
+                self.coverage[coverage_key].append("historical_price_sessions_missing_invalid_or_adjustment_unverified")
             params = {"s": cell.period.start, "e": cell.period.end}
             sessions = (
                 self.snapshot.execute(
@@ -227,14 +231,14 @@ class MatrixGates:
                 .all()
             )
             if not sessions or (cell.period.end - sessions[-1]).days > 7 or (sessions[0] - cell.period.start).days > 7:
-                self.coverage[cell.period.name].append("official_calendar_window_missing_or_truncated")
+                self.coverage[coverage_key].append("official_calendar_window_missing_or_truncated")
             prior = self.snapshot.execute(
                 text("select count(distinct trade_date) from pms.module_e_benchmark_bars where benchmark_code='NIFTY50' and source in ('NSE_HISTORICAL_OR','NSE_DAILY_INDEX') and trade_date<:s"),
                 params,
             ).scalar_one()
             if prior < 257:
-                self.coverage[cell.period.name].append("official_warmup_calendar_fewer_than_257_sessions")
-        return sorted(set(reasons + self.coverage[cell.period.name]))
+                self.coverage[coverage_key].append("official_warmup_calendar_fewer_than_257_sessions")
+        return sorted(set(reasons + self.coverage[coverage_key]))
 
 
 def persist_report(engine, report):

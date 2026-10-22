@@ -152,7 +152,12 @@ def fetch_window(nse, code: str, start: date, end: date) -> tuple[list[dict], di
         raise RuntimeError(f"{code}: source returned dates outside {start}..{end}")
     if len(rows) != len(raw):
         raise RuntimeError(f"{code}: rejected {len(raw)-len(rows)} invalid rows in {start}..{end}")
-    unique = {row["trade_date"]: row for row in rows}
+    unique = {}
+    for row in rows:
+        previous = unique.get(row["trade_date"])
+        if previous is not None and any(previous[k] != row[k] for k in ("open", "high", "low", "close")):
+            raise RuntimeError(f"{code}: conflicting duplicate source date {row['trade_date']}")
+        unique[row["trade_date"]] = row
     return list(unique.values()), {"code": code, "start": str(start), "end": str(end),
                                    "raw_rows": len(raw), "unique_dates": len(unique)}
 
@@ -181,6 +186,7 @@ def _dates(engine, code: str, start: date, end: date) -> set[date]:
             where benchmark_code=:code
               and source in ('NSE_HISTORICAL_OR','NSE_DAILY_INDEX')
               and trade_date between :start and :end
+              and close>0 and close::text not in ('NaN','Infinity','-Infinity')
         """), {"code": code, "start": start, "end": end}).scalars())
 
 
@@ -198,7 +204,7 @@ def _existing_month_is_usable(rows: set[date], first: date, last: date) -> bool:
     # partial/obviously truncated months from being silently accepted while
     # still permitting short partial windows at the start/end of a requested range.
     span_days = (last - first).days + 1
-    minimum = 3 if span_days <= 10 else 10
+    minimum = min(3, span_days) if span_days <= 10 else 10
     if len(rows) < minimum:
         return False
     return (ordered[0] - first).days <= 7 and (last - ordered[-1]).days <= 7

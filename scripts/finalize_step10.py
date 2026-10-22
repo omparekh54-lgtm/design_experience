@@ -66,6 +66,7 @@ def db_engine():
     )
     with engine.connect() as conn:
         conn.execute(text("select 1"))
+        conn.execute(text("select id,run_type,variant,start_date,end_date,config,metrics,strategy_version from pms.research_runs limit 0"))
     return engine
 
 
@@ -75,6 +76,23 @@ def require_step1(start: date, end: date) -> dict:
     cert = json.loads(STEP1_CERT.read_text(encoding="utf-8"))
     if cert.get("status") != "STEP1_COMPLETE" or int(cert.get("pending_repairs", -1)) != 0:
         raise RuntimeError("Step 1 is not fully certified yet")
+    if cert.get("pending_tasks") != []:
+        raise RuntimeError("Step 1 certificate has missing or nonempty pending_tasks")
+    from packages.pms.matrix_data import code_fingerprint
+    if cert.get("code_fingerprint") != code_fingerprint():
+        raise RuntimeError("Step 1 certificate uses different or unbound code/config; rerun Step 1")
+    from scripts.finalize_step1_core import STATIC_REVIEWS, EVIDENCE_REVIEW_CODES
+    required_reviews = {
+        "final_review_pack": STATIC_REVIEWS,
+        "policy_review_pack": EVIDENCE_REVIEW_CODES | {
+            "FAIL_CLOSED_MISSING_REFERENCE_POLICY", "EARNINGS_ARCHIVE_PRESENCE",
+            "EARNINGS_KNOWABILITY", "CORPORATE_ACTION_VALUES", "CORPORATE_ACTION_CONFLICTS"},
+    }
+    for group, required in required_reviews.items():
+        reviews = cert.get(group)
+        if not isinstance(reviews, dict) or not required.issubset(reviews) or any(
+                not isinstance(v, dict) or v.get("pass") is not True for v in reviews.values()):
+            raise RuntimeError(f"Step 1 {group} is incomplete or failed")
     scope = cert.get("matrix_scope") or {}
     if scope.get("start") != start.isoformat() or scope.get("end") != end.isoformat():
         raise RuntimeError("Step 1 certificate matrix scope does not match this Step 10 run")
@@ -93,6 +111,13 @@ def require_step1(start: date, end: date) -> dict:
         raise RuntimeError("Step 1 audit report referenced by certificate is missing")
     if sha256(audit) != cert.get("audit_sha256"):
         raise RuntimeError("Step 1 audit report changed after certification")
+    from packages.pms.data_integrity import read_report
+    from scripts.finalize_step1_core import audit_contract
+    audit_report = read_report(audit)
+    scope = cert.get("scope") or {}
+    audit_contract(audit_report, date.fromisoformat(scope["start"]), date.fromisoformat(scope["end"]))
+    if audit_report.get("run_id") != cert.get("audit_run_id"):
+        raise RuntimeError("Step 1 audit run identity does not match certificate")
     return cert
 
 
@@ -136,6 +161,15 @@ def _quarantine(path: Path, tag: str) -> None:
 
 
 def prepare_checkpoints(config: Path) -> dict:
+    from contextlib import ExitStack
+    from packages.pms.matrix_data import report_lock
+    with ExitStack() as locks:
+        for report in (RUN1, RUN2):
+            locks.enter_context(report_lock(report))
+        return _prepare_checkpoints(config)
+
+
+def _prepare_checkpoints(config: Path) -> dict:
     from packages.pms.matrix_data import code_fingerprint
 
     code = code_fingerprint()
@@ -149,6 +183,9 @@ def prepare_checkpoints(config: Path) -> dict:
     if STATE.is_file():
         try:
             old = json.loads(STATE.read_text(encoding="utf-8"))
+            if not isinstance(old, dict):
+                old = None
+                state_invalid = True
         except Exception:
             state_invalid = True
     reports_exist = any(p.exists() for p in (
@@ -174,6 +211,20 @@ def prepare_checkpoints(config: Path) -> dict:
 def matrix_subprocess(cmd: list[str], report: Path, progress: Progress, low: int, high: int, label: str) -> None:
     print(f"\n\n> {label}\n  {' '.join(cmd)}", flush=True)
     proc = subprocess.Popen(cmd, cwd=ROOT)
+    try:
+        _monitor_matrix(proc, report, progress, low, high, label)
+    finally:
+        # Never release the finalizer lock while its replay still writes files.
+        if proc.poll() is None:
+            proc.terminate()
+            try:
+                proc.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait()
+
+
+def _monitor_matrix(proc, report: Path, progress: Progress, low: int, high: int, label: str) -> None:
     last = -1
     while proc.poll() is None:
         if report.is_file():
@@ -223,6 +274,52 @@ def digest(payload: dict) -> str:
     return hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()).hexdigest()
 
 
+def acceptance_plan(config: Path, start: date, end: date):
+    from packages.pms.backtest_matrix import Period, matrix_plan
+    from packages.pms.config import load_strategy_config
+    cfg = load_strategy_config(config)
+    return cfg, matrix_plan(cfg, [Period("CUSTOM", start, end)])
+
+
+def validate_preflight(payload: dict, cells) -> None:
+    expected = [c.key for c in cells]
+    rows = payload.get("cells") if isinstance(payload, dict) else None
+    if (not isinstance(rows, list) or not rows or any(not isinstance(r, dict) for r in rows)
+            or [r.get("key") for r in rows] != expected
+            or payload.get("mode") != "CHECK_ONLY"
+            or payload.get("scope") != "HISTORICAL_MASTER"
+            or payload.get("ready_cells") != len(expected)
+            or any(r.get("blockers") != [] for r in rows)):
+        raise RuntimeError("matrix preflight is incomplete, sampled, or contains non-ready cells")
+
+
+def validate_replay(path: Path, cfg: dict, cells, dataset_fp: str, code: str) -> dict:
+    from dataclasses import asdict
+    from packages.pms.backtest_matrix import MatrixRunner, fingerprint, plain, summarize
+    report = json.loads(path.read_text(encoding="utf-8"))
+    dataset = report.get("dataset") or {}
+    if (dataset.get("fingerprint") != dataset_fp
+            or dataset.get("scope") != "HISTORICAL_MASTER" or not dataset.get("universe")
+            or report.get("code_version") != code or report.get("config_hash") != fingerprint(cfg)
+            or report.get("config") != cfg or report.get("scope") != "RESEARCH_ONLY"):
+        raise RuntimeError("matrix replay code/config/dataset identity is invalid")
+    # Validate checkpoint identity, every completed row checksum and the actual
+    # journal bytes, even if the subprocess/report claims success.
+    MatrixRunner(cfg, cells, dataset, path, executor=None, gate=None, code_version=code)
+    for cell, row in zip(cells, report["cells"]):
+        diagnostics = row.get("diagnostics") or {}
+        if (row.get("period") != plain(asdict(cell.period))
+                or row.get("case") != plain(asdict(cell.case))
+                or row.get("status") not in {"COMPLETED", "NO_TRADES"}
+                or row.get("blockers") != [] or not isinstance(row.get("metrics"), dict)
+                or not diagnostics.get("evidence_file") or not diagnostics.get("evidence_sha256")):
+            raise RuntimeError("matrix replay has incomplete cells or missing trade journals")
+    if summarize(report["cells"])["status"] != "COMPLETED":
+        raise RuntimeError("matrix replay did not complete the declared plan")
+    digest(canonical_result(report))  # Reject NaN/Infinity before certification.
+    return report
+
+
 def survivorship_audit(engine, report: dict, start: date, end: date) -> dict:
     manifest_ids = {int(r["id"]) for r in (report.get("dataset") or {}).get("universe", [])}
     with engine.connect() as conn:
@@ -255,15 +352,24 @@ def main() -> int:
         parser.error("2025 onward is reserved for out-of-sample testing and cannot be used here")
     if args.end < args.start:
         parser.error("--end must be on or after --start")
+    if (args.start, args.end) != (date(2023,1,1), date(2024,12,31)):
+        parser.error("Final acceptance requires exactly 2023-01-01 through 2024-12-31")
 
+    from scripts.finalize_state import run_finalizer
+    return run_finalizer(lambda: _finalize(args), STEP10_CERT, "STEP10")
+
+
+def _finalize(args) -> int:
     p = Progress("STEP 10")
     p.show(0, "starting")
     engine = None
     try:
         step1 = require_step1(args.start, args.end)
+        step1_sha = sha256(STEP1_CERT)
         engine = db_engine()
         config = research_config()
         checkpoint_state = prepare_checkpoints(config)
+        cfg, cells = acceptance_plan(config, args.start, args.end)
         p.step(8, "Step 1 certificate + OOS boundary + checkpoint identity verified")
 
         tests = [
@@ -273,6 +379,7 @@ def main() -> int:
             "tests/test_unified_research_replay.py",
             "tests/test_historical_execution_consistency.py",
             "tests/test_historical_dataset.py",
+            "tests/test_finalizers.py",
         ]
         missing_tests = [t for t in tests if not (ROOT / t).is_file()]
         if missing_tests:
@@ -290,8 +397,7 @@ def main() -> int:
             preflight_payload = json.loads(preflight.read_text(encoding="utf-8"))
         except Exception as exc:
             raise RuntimeError("matrix preflight did not emit valid JSON") from exc
-        if int(preflight_payload.get("ready_cells", 0)) != len(preflight_payload.get("cells", [])):
-            raise RuntimeError("matrix preflight returned non-ready cells despite zero exit status")
+        validate_preflight(preflight_payload, cells)
         live_fp = str(preflight_payload.get("dataset_fingerprint") or "")
         if live_fp != str(step1.get("matrix_dataset_fingerprint") or ""):
             raise RuntimeError(
@@ -307,8 +413,8 @@ def main() -> int:
         matrix_subprocess(base + ["--report", str(RUN1)], RUN1, p, 25, 55, "matrix replay 1/2")
         matrix_subprocess(base + ["--report", str(RUN2), "--no-persist"], RUN2, p, 55, 85, "matrix replay 2/2")
 
-        first = json.loads(RUN1.read_text(encoding="utf-8"))
-        second = json.loads(RUN2.read_text(encoding="utf-8"))
+        first = validate_replay(RUN1, cfg, cells, live_fp, checkpoint_state["code_fingerprint"])
+        second = validate_replay(RUN2, cfg, cells, live_fp, checkpoint_state["code_fingerprint"])
         if (first.get("summary") or {}).get("status") != "COMPLETED":
             raise RuntimeError("first matrix replay did not complete every cell")
         if (second.get("summary") or {}).get("status") != "COMPLETED":
@@ -334,8 +440,14 @@ def main() -> int:
         bad = [c for c in first.get("cells", []) if c.get("status") not in {"COMPLETED", "NO_TRADES"}]
         if bad:
             raise RuntimeError(f"{len(bad)} matrix cells are not terminal-success states")
+        from packages.pms.matrix_data import code_fingerprint
+        from scripts.finalize_step1_core import matrix_dataset_fingerprint
+        if (sha256(STEP1_CERT) != step1_sha
+                or code_fingerprint() != checkpoint_state["code_fingerprint"]
+                or matrix_dataset_fingerprint(engine, args.start, args.end) != live_fp):
+            raise RuntimeError("certified inputs or code changed during matrix execution; recertify before acceptance")
         certificate = {
-            "version": "PMS_STEP10_FINAL_v3",
+            "version": "PMS_STEP10_FINAL_v4",
             "created_at": datetime.now(IST).isoformat(),
             "status": "STEP10_COMPLETE",
             "scope": {"start": args.start.isoformat(), "end": args.end.isoformat()},
@@ -345,6 +457,8 @@ def main() -> int:
             "config": str(config.relative_to(ROOT)),
             "run1": str(RUN1.relative_to(ROOT)),
             "run2": str(RUN2.relative_to(ROOT)),
+            "run1_sha256": sha256(RUN1),
+            "run2_sha256": sha256(RUN2),
             "checkpoint_identity": checkpoint_state["identity"],
             "dataset_fingerprint": live_fp,
             "code_fingerprint": canon1.get("code_version"),
