@@ -1,4 +1,5 @@
 Official historical backfill
 Prices: 2016-11-01 through 2026-10-21
-Financials: 2016-01-01 through 2026-10-21
+Financials: unchanged existing workflow sidecar
 Requested: 2026-10-22
+Targeted restart: official NSE historical price coverage
