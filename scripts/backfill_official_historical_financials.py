@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import time
@@ -21,6 +22,8 @@ from packages.data_layer.private_archive import PrivateArchive
 from packages.pms.historical_dataset import discover_financial_history, require_financial_period_identity
 
 ROOT = Path(__file__).resolve().parents[1]
+COMPLETION_DATASET = 'HISTORICAL_FINANCIAL_SYMBOL_COMPLETE'
+COMPLETION_URI = 'https://www.nseindia.com/companies-listing/corporate-filings-financial-results'
 
 
 def universe(engine):
@@ -66,25 +69,35 @@ def _load_checkpoint(output: Path, start: date, end: date, shard: int, shards: i
     return data
 
 
-def _db_completed_symbols(engine, start: date, end: date) -> set[str]:
-    """Return only symbols with surviving official historical filing receipts.
-
-    Local checkpoint JSON is never sufficient on its own: Neon may have been
-    restored or reset. Symbols with genuinely zero official records are cheap to
-    rediscover on a rerun and therefore are intentionally not treated as DB-complete.
-    """
+def _db_completed_symbols(engine, start: date, end: date, shard: int, shards: int) -> set[str]:
+    """Use only explicit full-discovery completion receipts as resume authority."""
     with engine.connect() as c:
         rows=c.execute(text("""
           select distinct upper(metadata->>'symbol') symbol
           from pms.provider_snapshots
-          where dataset='HISTORICAL_FINANCIAL_XBRL'
+          where dataset=:dataset
             and metadata->>'complete'='true'
-            and metadata->>'symbol' is not null
+            and metadata->>'start'=:start
+            and metadata->>'end'=:end
+            and (metadata->>'shard')::int=:shard
+            and (metadata->>'shards')::int=:shards
             and content_sha256 ~ '^[0-9a-fA-F]{64}$'
-            and source_uri is not null and btrim(source_uri)<>''
-            and coalesce((metadata->>'period_end')::date,:start) <= :end
-        """),{'start':start,'end':end}).scalars().all()
+            and source_uri=:uri
+        """),{'dataset':COMPLETION_DATASET,'start':str(start),'end':str(end),
+               'shard':shard,'shards':shards,'uri':COMPLETION_URI}).scalars().all()
     return {str(s).upper() for s in rows if s}
+
+
+def _record_symbol_complete(conn, symbol: str, start: date, end: date, shard: int, shards: int,
+                            records: int, filings: int) -> None:
+    metadata={'symbol':symbol,'start':str(start),'end':str(end),'shard':shard,'shards':shards,
+              'records_discovered':records,'filings_stored':filings,'complete':True}
+    digest=hashlib.sha256(json.dumps(metadata,sort_keys=True,separators=(',',':')).encode()).hexdigest()
+    conn.execute(text("""
+      insert into pms.provider_snapshots(provider,dataset,content_sha256,source_uri,metadata)
+      values('PMS',:dataset,:sha,:uri,cast(:metadata as jsonb))
+    """),{'dataset':COMPLETION_DATASET,'sha':digest,'uri':COMPLETION_URI,
+           'metadata':json.dumps(metadata,sort_keys=True)})
 
 
 def run(start:date,end:date,shard:int,shards:int,output:Path):
@@ -106,7 +119,7 @@ def run(start:date,end:date,shard:int,shards:int,output:Path):
 
     old=_load_checkpoint(output,start,end,shard,shards)
     local_symbols={str(s).upper() for s in ((old or {}).get('completed_symbols') or [])}
-    db_symbols=_db_completed_symbols(engine,start,end) & selected_symbols
+    db_symbols=_db_completed_symbols(engine,start,end,shard,shards) & selected_symbols
     completed_symbols=set(db_symbols)
     stale_local=sorted((local_symbols-selected_symbols) | (local_symbols-db_symbols))
     if stale_local:
@@ -114,7 +127,7 @@ def run(start:date,end:date,shard:int,shards:int,output:Path):
     report={'start':str(start),'end':str(end),'shard':shard,'shards':shards,'symbols':len(selected),
             'processed':len(completed_symbols),'discovered':0,'stored':0,'failures':[],
             'completed_symbols':sorted(completed_symbols),'private_archive':bool(archive),
-            'resumed':bool(completed_symbols),'checkpoint_authority':'DATABASE_OFFICIAL_RECEIPTS'}
+            'resumed':bool(completed_symbols),'checkpoint_authority':'DATABASE_SYMBOL_COMPLETION_RECEIPTS'}
     _write_checkpoint(output,report)
     try:
         for n,r in enumerate(selected,1):
@@ -125,6 +138,8 @@ def run(start:date,end:date,shard:int,shards:int,output:Path):
             from_date=max(start,r['listed_from']) if r['listed_from'] else start
             to_date=min(end,r['delisted_on']) if r['delisted_on'] else end
             if to_date < from_date:
+                with engine.begin() as c:
+                    _record_symbol_complete(c,symbol,start,end,shard,shards,0,0)
                 completed_symbols.add(symbol); report['processed']+=1
                 report['completed_symbols']=sorted(completed_symbols); _write_checkpoint(output,report)
                 continue
@@ -148,6 +163,7 @@ def run(start:date,end:date,shard:int,shards:int,output:Path):
                                 'symbol':symbol,'period_end':str(rec.period_end),'filed_at':str(rec.filed_at),
                                 'complete':True,
                                 'raw_source_preservation':'PRIVATE_ARCHIVE' if doc.archive_key else 'OFFICIAL_URL_PLUS_SHA256'})
+                        _record_symbol_complete(c,symbol,start,end,shard,shards,len(records),len(filings))
                     report['processed']+=1; report['discovered']+=len(records); report['stored']+=len(filings)
                     completed_symbols.add(symbol); report['completed_symbols']=sorted(completed_symbols)
                     _write_checkpoint(output,report)
