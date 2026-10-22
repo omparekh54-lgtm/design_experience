@@ -39,11 +39,12 @@ def completed_cutoff() -> date:
     return datetime.now(IST).date() - timedelta(days=1)
 
 
-def run(cmd: list[str], label: str) -> None:
+def run(cmd: list[str], label: str, allowed: tuple[int, ...] = (0,)) -> int:
     print(f"\n\n> {label}\n  {' '.join(cmd)}", flush=True)
     result = subprocess.run(cmd, cwd=ROOT)
-    if result.returncode:
+    if result.returncode not in allowed:
         raise RuntimeError(f"{label} failed with exit code {result.returncode}")
+    return result.returncode
 
 
 def db_engine():
@@ -177,12 +178,14 @@ def main() -> int:
         ref_path.write_text(json.dumps(reference, indent=2, default=str) + "\n")
         p.step(70, "shareholding/actions/index reference history repaired")
 
-        # Financial discovery is sharded for source pacing but runs sequentially locally.
+        # Start in 2016 so the 2018 audit has enough prior fundamental history for
+        # YoY/annual comparisons. Shards run sequentially locally to respect source pacing.
+        financial_start = min(args.start, date(2016, 1, 1))
         for shard in range(8):
             output = ARTIFACT_ROOT / "step1" / f"financials-{shard}.json"
             run([
                 sys.executable, "scripts/backfill_official_historical_financials.py",
-                "--start", args.start.isoformat(), "--end", args.end.isoformat(),
+                "--start", financial_start.isoformat(), "--end", args.end.isoformat(),
                 "--shard", str(shard), "--shards", "8", "--output", str(output),
             ], f"official NSE financial history shard {shard + 1}/8")
             p.step(70 + round(15 * (shard + 1) / 8), f"financial history {shard + 1}/8")
@@ -198,19 +201,21 @@ def main() -> int:
 
         timestamp = datetime.now(IST).strftime("%Y%m%d-%H%M%S")
         audit = ARTIFACT_ROOT / "step1" / f"audit-{timestamp}.json"
-        run([
+        audit_exit = run([
             sys.executable, "scripts/run_data_integrity_audit.py", "--run",
             "--start", args.start.isoformat(), "--end", args.end.isoformat(),
             "--report", str(audit),
-        ], "full historical integrity audit")
+        ], "full historical integrity audit", allowed=(0, 2))
         p.step(97, "full integrity audit completed")
 
+        if not audit.exists() or not audit.with_suffix(".repair.json").exists():
+            raise RuntimeError(f"integrity audit exit {audit_exit} produced no complete report bundle")
         report = json.loads(audit.read_text(encoding="utf-8"))
         repair_path = audit.with_suffix(".repair.json")
         repair = json.loads(repair_path.read_text(encoding="utf-8"))
         pending = int(repair.get("pending_tasks", -1))
         audit_sha = hashlib.sha256(audit.read_bytes()).hexdigest()
-        complete = repair.get("status") == "READY_FOR_REPLAY" and pending == 0
+        complete = audit_exit == 0 and repair.get("status") == "READY_FOR_REPLAY" and pending == 0
         payload = {
             "version": "PMS_STEP1_FINAL_v1",
             "created_at": datetime.now(IST).isoformat(),
