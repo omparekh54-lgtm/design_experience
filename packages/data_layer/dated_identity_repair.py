@@ -1,5 +1,6 @@
 """One reviewed, dated exchange transition; never infer a general ISIN alias."""
 from datetime import date, timedelta
+import hashlib
 import json
 
 from sqlalchemy import text
@@ -12,6 +13,7 @@ NEW = 'INE133A01029'
 EFFECTIVE = date(2026, 10, 22)
 NOTICE_URL = 'https://nsearchives.nseindia.com/content/circulars/CML77001.pdf'
 NOTICE_SHA = 'eb9b435bdd25be1d4615be761ce5d58f0a87438d2d709629f5f922e46ff3b588'
+ACTION_SHA = 'b95c34b23905ca07f97f1096ea67b25f07965201620d649cba15aaf037cc1254'
 
 
 def transition_evidence(http):
@@ -19,16 +21,22 @@ def transition_evidence(http):
     master = http.fetch('https://nsearchives.nseindia.com/content/equities/EQUITY_L.csv')
     quote = http.api('NextApi/apiClient/GetQuoteApi', functionName='getSymbolData',
                      marketType='N', series='EQ', symbol=SYMBOL)
+    actions = http.api('corporates-corporateActions', index='equities',
+        from_date='01-09-2026', to_date='05-12-2026', symbol=SYMBOL)
+    raw_actions = json.loads(actions.body)
+    action_matches = [r for r in raw_actions if isinstance(r, dict)
+        and hashlib.sha256(json.dumps(r, sort_keys=True, default=str).encode()).hexdigest()==ACTION_SHA]
     current = parse_master(master.body).get(SYMBOL, {})
     rows = json.loads(quote.body).get('equityResponse') or []
     q = (rows[0].get('metaData') or {}) if len(rows) == 1 else {}
     if (notice.sha256 != NOTICE_SHA or notice.observed_at.date() < EFFECTIVE
+            or len(action_matches) != 1
             or current.get('isin') != NEW or current.get('name') != 'JSW Dulux Limited'
             or current.get('series') != 'EQ'
             or any(q.get(k) != v for k, v in dict(symbol=SYMBOL, isinCode=NEW,
                 companyName='JSW Dulux Limited', series='EQ', marketType='N').items())):
         raise SourceError('dated_identity_evidence_mismatch')
-    docs = [notice, master, quote]
+    docs = [notice, master, quote, actions]
     if any(not d.archive_key for d in docs):
         raise SourceError('dated_identity_archive_required')
     return docs, dict(previous_isin=OLD, current_isin=NEW, reviewed=True,

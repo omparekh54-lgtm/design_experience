@@ -21,6 +21,9 @@ def document(body):
 def sources(monkeypatch, change=None):
     notice = document(b'reviewed notice')
     monkeypatch.setattr(repair, 'NOTICE_SHA', notice.sha256)
+    action=dict(symbol=repair.SYMBOL,isin=repair.OLD,exDate='22-Oct-2026',subject='Split 10 to 1')
+    monkeypatch.setattr(repair, 'ACTION_SHA', hashlib.sha256(json.dumps(action,sort_keys=True,default=str).encode()).hexdigest())
+    if change=='action':action['isin']='INE000000000'
     master = dict(symbol=repair.SYMBOL, isin=repair.NEW, name='JSW Dulux Limited', series='EQ')
     quote = dict(symbol=repair.SYMBOL, isinCode=repair.NEW, companyName=master['name'], series='EQ', marketType='N')
     if change == 'master': master['isin'] = repair.OLD
@@ -31,16 +34,16 @@ def sources(monkeypatch, change=None):
     if change == 'future': notice = Document(notice.url,notice.body,notice.sha256,
         datetime(2026,10,21,10,tzinfo=IST),notice.size,notice.archive_key)
     monkeypatch.setattr(repair, 'parse_master', lambda body:{repair.SYMBOL:master})
-    docs = [notice, document(b'master'), document({'equityResponse':[{'metaData':quote}]})]
+    docs = [notice, document(b'master'), document({'equityResponse':[{'metaData':quote}]}), document([action])]
     if change == 'unarchived':
         d = docs[1]; docs[1] = Document(d.url,d.body,d.sha256,d.observed_at,d.size)
     class HTTP:
         def fetch(self, url):return docs[0] if url==repair.NOTICE_URL else docs[1]
-        def api(self, *args, **kwargs):return docs[2]
+        def api(self, path, **kwargs):return docs[3] if path=='corporates-corporateActions' else docs[2]
     return HTTP()
 
 
-@pytest.mark.parametrize('change',['master','quote','series','company','notice','future','unarchived'])
+@pytest.mark.parametrize('change',['master','quote','series','company','notice','future','unarchived','action'])
 def test_exact_dated_archived_proofs_are_required(monkeypatch,change):
     with pytest.raises(SourceError):repair.transition_evidence(sources(monkeypatch,change))
 

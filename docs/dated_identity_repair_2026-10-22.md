@@ -9,7 +9,7 @@ to JSW Dulux Limited, EQ, normal market. CDSL DP2026-728 also lists the new
 Rs1 equity identifier; this corroborating probe is not a collector receipt.
 
 The targeted identities mode archives and verifies the exact NSE circular,
-fresh master and fresh quote before a transaction can update this one active
+fresh master, fresh quote and exact original-ISIN split action before a transaction can update this one active
 instrument. It requires PAPER entries disabled, retains the instrument ID and
 external mapping, and appends a reviewed old/new identity history. Unknown
 identifiers, conflicting history, changed circular bytes, unarchived sources,
