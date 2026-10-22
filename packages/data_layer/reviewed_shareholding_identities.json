@@ -168,5 +168,21 @@
     "master_sha256": "64bc3997cc8e6d67f77fec2d04e4f74c45d7f7cb712ffd55c0885fb5a56722d8",
     "quote_sha256": "d1103f1a4c522d63243065cc8a9c67f341184e3e170c317a97a5c9c2ebe3b878",
     "reviewed_on": "2026-10-20"
+  },
+  {
+    "symbol": "COUNCODOS",
+    "current_isin": "INE695B01025",
+    "summary_isin": "INE695B01025",
+    "xml_symbol": "COUNCODOS",
+    "xml_isin": "INE695B01027",
+    "source_url": "https://nsearchives.nseindia.com/corporate/xbrl/SHP_1742905_21102026035014_WEB.xml",
+    "period": "30-SEP-2026",
+    "xml_sha256": "8083b3b8c39e960feed32efbb4e10448a0c4d3adeb3f25e293b77e64eca95f2e",
+    "reason": "REVIEWED_XML_ISIN_CHECK_DIGIT_TYPO",
+    "master_sha256": "342103bdea9b48109eb716128321d76d50d6f1d881aeb12af706802709fc6993",
+    "quote_sha256": "540683734f1b784ae8e2dda7ce40a3c6d1d315d11031c7783f6914d54b5679e9",
+    "quote_url": "https://www.nseindia.com/api/NextApi/apiClient/GetQuoteApi?functionName=getSymbolData&marketType=N&series=BE&symbol=COUNCODOS",
+    "reviewed_on": "2026-10-22",
+    "scope": "Exact document, summary identity and September period only. Independent official master and BE quote agree on current ISIN; XML symbol/company/BSE code/period agree but its ISIN check digit is invalid. Preserve original XML and summary; no alias or identifier overwrite."
   }
 ]
