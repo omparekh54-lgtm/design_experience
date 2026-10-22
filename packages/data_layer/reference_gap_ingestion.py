@@ -209,7 +209,7 @@ class ReferenceGapIngestor:
                              "effective_from": start, "effective_to": None if pd.isna(end) else end,
                              "source": "NSE_INDEX_RELEASE_HISTORY"})
         sql = text("""
-            insert into index_constituents_history_local(index_code,instrument_id,effective_from,effective_to,source)
+            insert into index_constituents_history(index_code,instrument_id,effective_from,effective_to,source)
             values (:index_code,:instrument_id,:effective_from,:effective_to,:source)
             on conflict (index_code,instrument_id,effective_from,source)
             do update set effective_to=excluded.effective_to
@@ -290,19 +290,12 @@ class ReferenceGapIngestor:
                 conn.execute(sql, payloads[start:start + 1000])
         return {"source_rows": len(records), "matched": len(payloads), "unmatched": unmatched, "written": len(payloads)}
 
-    def coverage(self) -> dict[str, Any]:
+    def coverage(self) -> dict[str, int]:
         with self.engine.connect() as conn:
             row = conn.execute(text("""
                 select
-                  (select count(*) from instruments where exchange='NSE' and active=true) active_instruments,
-                  (select count(*) from shareholding_history) shareholding_rows,
-                  (select count(distinct instrument_id) from shareholding_history) shareholding_instruments,
-                  (select count(*) from shareholding_history where promoter_pledge_pct is not null) pledge_rows,
-                  (select count(*) from surveillance_history) surveillance_rows,
-                  (select count(*) from surveillance_history where effective_to is null) current_surveillance_rows,
-                  (select count(*) from index_constituents_history_local) index_history_rows,
-                  (select count(*) from corporate_actions) corporate_action_rows,
-                  (select count(*) from earnings_calendar) earnings_rows,
-                  (select count(*) from shares_outstanding_history) shares_rows
+                  (select count(*) from shareholding_history) shareholding,
+                  (select count(*) from index_constituents_history) index_membership,
+                  (select count(*) from corporate_actions) corporate_actions
             """)).mappings().one()
-        return dict(row)
+        return {k: int(v) for k, v in row.items()}
