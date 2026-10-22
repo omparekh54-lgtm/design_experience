@@ -89,8 +89,6 @@ def db_engine():
     )
     with engine.connect() as conn:
         conn.execute(text("select 1"))
-        # Fail immediately on an accidental wrong/empty database instead of
-        # discovering it after hours of downloads.
         required = conn.execute(text("""
             select count(*) from information_schema.tables
             where table_schema='pms' and table_name in
@@ -277,7 +275,12 @@ def main() -> int:
             p.step(15 + round(35 * idx / max(1, len(years))), f"official NSE prices through {year}")
 
         run([sys.executable, "scripts/ingest_sector_classifications.py"], "NSE current sector classification refresh", attempts=2)
-        p.step(55, "current sector classifications refreshed")
+        p.step(53, "current sector classifications refreshed")
+        sector_output = ARTIFACT_ROOT / "step1" / "historical-sectors.json"
+        run([sys.executable, "scripts/backfill_historical_sector_intervals.py",
+             "--start", "2017-01-01", "--end", args.end.isoformat(), "--output", str(sector_output.relative_to(ROOT))],
+            "dated historical sector reconstruction", attempts=3)
+        p.step(57, "dated historical sector intervals refreshed")
         run([sys.executable, "scripts/ingest_legacy_gsm.py"], "legacy NSE GSM archive reconstruction", attempts=2)
         p.step(62, "legacy surveillance archive refreshed")
 
