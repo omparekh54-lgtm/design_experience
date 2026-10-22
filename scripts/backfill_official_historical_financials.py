@@ -67,10 +67,10 @@ def _load_checkpoint(output: Path, start: date, end: date, shard: int, shards: i
     return data
 
 
-def _ensure_historical_sectors() -> None:
+def _ensure_historical_sectors(end: date) -> None:
     out=ROOT/'artifacts'/'final_acceptance'/'step1'/'historical-sectors.json'
     cmd=[sys.executable,str(ROOT/'scripts'/'backfill_historical_sector_intervals.py'),
-         '--start','2017-01-01','--end','2024-12-31','--output',str(out.relative_to(ROOT))]
+         '--start','2017-01-01','--end',end.isoformat(),'--output',str(out.relative_to(ROOT))]
     last=None
     for attempt in range(1,4):
         result=subprocess.run(cmd,cwd=ROOT)
@@ -90,9 +90,9 @@ def run(start:date,end:date,shard:int,shards:int,output:Path):
     raw=os.environ.get('DATABASE_URL') or os.environ.get('PMS_DATABASE_URL')
     if not raw: raise RuntimeError('DATABASE_URL/PMS_DATABASE_URL is required')
     if shard==0:
-        # Command 1 must repair dated 2023-24 sectors before final certification.
-        # This is idempotent and deliberately never backdates today's labels.
-        _ensure_historical_sectors()
+        # Repair dated sector intervals across the same historical cutoff that
+        # Step 1 will audit. This is idempotent and never backdates today's labels.
+        _ensure_historical_sectors(end)
     engine=create_engine(_render_safe_database_url(raw),pool_pre_ping=True,
                          connect_args={'options':'-c search_path=pms,public'})
     require_financial_period_identity(engine)
