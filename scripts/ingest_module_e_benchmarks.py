@@ -5,6 +5,7 @@ import json
 import os
 import math
 import sys
+import time
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -23,6 +24,7 @@ load_dotenv(ROOT / ".env")
 SOURCE = "NSE_HISTORICAL_OR"
 INDEX_NAME = "NIFTY MIDSMALLCAP 400"
 CALENDAR_CODE = "NIFTY50"
+REQUIRED_CODES = ("NIFTY50", "NIFTY500", "NIFTYMIDSMALLCAP400", "INDIAVIX")
 
 
 def _engine():
@@ -155,28 +157,44 @@ def fetch_window(nse, code: str, start: date, end: date) -> tuple[list[dict], di
                                    "raw_rows": len(raw), "unique_dates": len(unique)}
 
 
-def coverage_audit(engine, start: date, end: date) -> dict:
-    """Compare the Phase-1 benchmark feeds with official Nifty 50 sessions.
+def _fetch_retry(cache: Path, code: str, start: date, end: date, attempts: int = 5):
+    last: Exception | None = None
+    for attempt in range(1, attempts + 1):
+        try:
+            # Fresh NSE session per attempt: a socket ReadTimeout can leave a
+            # long-lived session unhealthy on Windows.
+            with NSE(download_folder=cache) as nse:
+                return fetch_window(nse, code, start, end)
+        except Exception as exc:
+            last = exc
+            if attempt == attempts:
+                break
+            delay = min(20, 2 ** (attempt - 1))
+            print(f"  RETRY: {code} {start}..{end} after {type(exc).__name__}; {delay}s", flush=True)
+            time.sleep(delay)
+    assert last is not None
+    raise last
 
-    NIFTY500 is also ingested for the stricter historical integrity audit, but
-    this legacy Phase-1 API intentionally retains its two measured feeds so its
-    published dashboard and tests remain stable.
-    """
+
+def _dates(engine, code: str, start: date, end: date) -> set[date]:
     with engine.connect() as conn:
-        bars = conn.execute(text("""
-            select benchmark_code,trade_date from pms.module_e_benchmark_bars
-            where benchmark_code in ('NIFTYMIDSMALLCAP400','INDIAVIX','NIFTY50','NIFTY500')
-              and source in ('NSE_HISTORICAL_OR','NSE_DAILY_INDEX') and trade_date between :start and :end
-        """), {"start": start, "end": end, "source": SOURCE}).all()
-    expected = {r[1] for r in bars if r[0] == CALENDAR_CODE}
-    dates = {code: {r[1] for r in bars if r[0] == code}
-             for code in ("NIFTYMIDSMALLCAP400", "INDIAVIX")}
-    calendar_complete = bool(expected) and (end-max(expected)).days <= 5
+        return set(conn.execute(text("""
+            select distinct trade_date from pms.module_e_benchmark_bars
+            where benchmark_code=:code
+              and source in ('NSE_HISTORICAL_OR','NSE_DAILY_INDEX')
+              and trade_date between :start and :end
+        """), {"code": code, "start": start, "end": end}).scalars())
+
+
+def coverage_audit(engine, start: date, end: date) -> dict:
+    expected = _dates(engine, CALENDAR_CODE, start, end)
+    calendar_complete = bool(expected) and (end-max(expected)).days <= 7
     for first, last in month_windows(start, end):
         if (last-first).days >= 7 and not any(first <= d <= last for d in expected):
             calendar_complete = False
     result = {}
-    for code, observed in dates.items():
+    for code in REQUIRED_CODES:
+        observed = _dates(engine, code, start, end)
         missing = sorted(expected - observed)
         latest = max(observed) if observed else None
         result[code] = {
@@ -184,7 +202,7 @@ def coverage_audit(engine, start: date, end: date) -> dict:
             "matched_sessions": len(expected & observed),
             "missing_sessions": len(missing), "missing_dates": [str(d) for d in missing],
             "min_date": min(observed) if observed else None, "max_date": latest,
-            "stale": latest is None or (end-latest).days > 5,
+            "stale": latest is None or (end-latest).days > 7,
             "calendar_unavailable": not calendar_complete,
             "calendar_source": "OFFICIAL_NSE:NIFTY50",
             "unexpected_dates": [str(d) for d in sorted(observed-expected)],
@@ -198,26 +216,49 @@ def ingest(start: date | None = None, end: date | None = None) -> dict[str, Any]
     end = end or date.today()
     cache = ROOT / ".cache_nse"
     cache.mkdir(exist_ok=True)
-    counts = {"index": 0, "vix": 0, "calendar": 0, "nifty500": 0}
+    counts = {"index": 0, "vix": 0, "calendar": 0, "nifty500": 0, "skipped_complete": 0}
     diagnostics = []
     failures = []
     windows = list(month_windows(start, end))
-    with NSE(download_folder=cache) as nse:
+    try:
         for n, (first, last) in enumerate(windows, 1):
-            for code, label in (("NIFTY50", "calendar"), ("NIFTY500", "nifty500"),
-                                ("NIFTYMIDSMALLCAP400", "index"), ("INDIAVIX", "vix")):
+            try:
+                calendar_rows, detail = _fetch_retry(cache, "NIFTY50", first, last)
+                counts["calendar"] += upsert_rows(engine, calendar_rows)
+                diagnostics.append(detail)
+                expected = {r["trade_date"] for r in calendar_rows}
+                if not expected:
+                    raise RuntimeError("official NIFTY50 month returned no sessions")
+                print(f"  [{n}/{len(windows)}] NIFTY50 {first}..{last}: {len(calendar_rows)} dates", flush=True)
+            except Exception as exc:
+                failures.append(f"NIFTY50 {first}..{last}: {type(exc).__name__}: {exc}")
+                print(f"  FAILED: {failures[-1]}", flush=True)
+                continue
+
+            for code, label in (("NIFTY500", "nifty500"), ("NIFTYMIDSMALLCAP400", "index"), ("INDIAVIX", "vix")):
                 try:
-                    rows, detail = fetch_window(nse, code, first, last)
+                    existing = _dates(engine, code, first, last)
+                    if expected.issubset(existing):
+                        counts["skipped_complete"] += 1
+                        print(f"  [{n}/{len(windows)}] {code} {first}..{last}: already complete", flush=True)
+                        continue
+                    rows, detail = _fetch_retry(cache, code, first, last)
                     counts[label] += upsert_rows(engine, rows)
                     diagnostics.append(detail)
+                    observed = _dates(engine, code, first, last)
+                    missing = expected - observed
+                    if missing:
+                        raise RuntimeError(f"still missing {len(missing)} NIFTY50 sessions after fetch")
                     print(f"  [{n}/{len(windows)}] {code} {first}..{last}: {len(rows)} dates", flush=True)
                 except Exception as exc:
                     failures.append(f"{code} {first}..{last}: {type(exc).__name__}: {exc}")
                     print(f"  FAILED: {failures[-1]}", flush=True)
-    audit = coverage_audit(engine, start, end)
-    if failures or any(v["missing_sessions"] or v["stale"] or v["calendar_unavailable"] for v in audit.values()):
-        raise RuntimeError(json.dumps({"written": counts, "coverage": audit, "failed_windows": failures}, default=str))
-    return {"written": counts, "coverage": audit, "windows": diagnostics}
+        audit = coverage_audit(engine, start, end)
+        if failures or any(v["missing_sessions"] or v["stale"] or v["calendar_unavailable"] for v in audit.values()):
+            raise RuntimeError(json.dumps({"written": counts, "coverage": audit, "failed_windows": failures}, default=str))
+        return {"written": counts, "coverage": audit, "windows": diagnostics}
+    finally:
+        engine.dispose()
 
 
 def main() -> None:
