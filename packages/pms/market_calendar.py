@@ -54,12 +54,21 @@ class MarketCalendar:
 
     @classmethod
     def from_database(cls, engine, as_of: datetime):
+        cutoff = as_ist(as_of)
         with engine.connect() as conn:
+            # Historical callers must never see observed sessions after their
+            # as-of date. Future OOS sessions can otherwise leak merely because
+            # they coexist in the same database.
             sessions = (
                 conn.execute(
                     text(
-                        "select distinct trade_date from module_e_benchmark_bars where benchmark_code='NIFTY50' and source in ('NSE_HISTORICAL_OR','NSE_DAILY_INDEX') order by trade_date"
-                    )
+                        """select distinct trade_date from module_e_benchmark_bars
+                        where benchmark_code='NIFTY50'
+                          and source in ('NSE_HISTORICAL_OR','NSE_DAILY_INDEX')
+                          and trade_date<=cast(:as_of as date)
+                        order by trade_date"""
+                    ),
+                    {"as_of": cutoff},
                 )
                 .scalars()
                 .all()
@@ -70,7 +79,7 @@ class MarketCalendar:
                         """select metadata from provider_snapshots where provider='NSE'
                 and dataset=:dataset and observed_at<=:as_of order by observed_at desc"""
                     ),
-                    {"dataset": DATASET, "as_of": as_ist(as_of)},
+                    {"dataset": DATASET, "as_of": cutoff},
                 )
                 .scalars()
                 .all()
