@@ -26,6 +26,8 @@ Thumbs.db
 secrets/
 artifacts/
 raw_data/
+local_data/
+DE_Data_Dump/
 
 # Browser test output
 apps/web/test-results/
